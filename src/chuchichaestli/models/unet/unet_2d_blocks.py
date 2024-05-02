@@ -22,7 +22,6 @@ class DownBlock2D(nn.Module):
         resnet_time_scale_shift (str, optional): The time scale shift method for the ResNet blocks. Defaults to "default".
         resnet_act_fn (str, optional): The activation function for the ResNet blocks. Defaults to "swish".
         resnet_groups (int, optional): The number of groups for group normalization in the ResNet blocks. Defaults to 32.
-        resnet_pre_norm (bool, optional): Whether to apply pre-normalization in the ResNet blocks. Defaults to True.
         output_scale_factor (float, optional): The scale factor for the output. Defaults to 1.0.
         add_downsample (bool, optional): Whether to add a downsampling layer. Defaults to True.
         downsample_padding (int, optional): The padding size for the downsampling layer. Defaults to 1.
@@ -39,7 +38,6 @@ class DownBlock2D(nn.Module):
         resnet_time_scale_shift: str = "default",
         resnet_act_fn: str = "swish",
         resnet_groups: int = 32,
-        resnet_pre_norm: bool = True,
         output_scale_factor: float = 1.0,
         add_downsample: bool = True,
         downsample_padding: int = 1,
@@ -61,7 +59,6 @@ class DownBlock2D(nn.Module):
                     time_embedding_norm=resnet_time_scale_shift,
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
-                    pre_norm=resnet_pre_norm,
                 )
             )
 
@@ -136,8 +133,6 @@ class MidBlock2D(nn.Module):
         resnet_groups (`int`, *optional*, defaults to 32):
             The number of groups to use in the group normalization layers of the resnet blocks.
         attn_groups (`Optional[int]`, *optional*, defaults to None): The number of groups for the attention blocks.
-        resnet_pre_norm (`bool`, *optional*, defaults to `True`):
-            Whether to use pre-normalization for the resnet blocks.
         add_attention (`bool`, *optional*, defaults to `True`): Whether to add attention blocks.
         attention_head_dim (`int`, *optional*, defaults to 1):
             Dimension of a single attention head. The number of attention heads is determined based on this value and
@@ -161,7 +156,6 @@ class MidBlock2D(nn.Module):
         resnet_act_fn: str = "swish",
         resnet_groups: int = 32,
         attn_groups: int = None,
-        resnet_pre_norm: bool = True,
         add_attention: bool = True,
         attention_head_dim: int = 1,
         output_scale_factor: float = 1.0,
@@ -190,7 +184,6 @@ class MidBlock2D(nn.Module):
                 time_embedding_norm=resnet_time_scale_shift,
                 non_linearity=resnet_act_fn,
                 output_scale_factor=output_scale_factor,
-                pre_norm=resnet_pre_norm,
             )
         ]
         attentions = []
@@ -213,7 +206,6 @@ class MidBlock2D(nn.Module):
                         residual_connection=True,
                         bias=True,
                         upcast_softmax=True,
-                        _from_deprecated_attn_block=True,
                     )
                 )
             else:
@@ -231,7 +223,6 @@ class MidBlock2D(nn.Module):
                     time_embedding_norm=resnet_time_scale_shift,
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
-                    pre_norm=resnet_pre_norm,
                 )
             )
 
@@ -260,14 +251,12 @@ class UpBlock2D(nn.Module):
         prev_output_channel: int,
         out_channels: int,
         temb_channels: int,
-        resolution_idx: int = None,
         dropout: float = 0.0,
         num_layers: int = 1,
         resnet_eps: float = 1e-6,
         resnet_time_scale_shift: str = "default",
         resnet_act_fn: str = "swish",
         resnet_groups: int = 32,
-        resnet_pre_norm: bool = True,
         output_scale_factor: float = 1.0,
         add_upsample: bool = True,
     ):
@@ -278,14 +267,12 @@ class UpBlock2D(nn.Module):
             prev_output_channel (int): Number of output channels from the previous block.
             out_channels (int): Number of output channels.
             temb_channels (int): Number of channels in the temporal embedding.
-            resolution_idx (int, optional): Index of the resolution. Defaults to None.
             dropout (float, optional): Dropout rate. Defaults to 0.0.
             num_layers (int, optional): Number of ResNet blocks in the block. Defaults to 1.
             resnet_eps (float, optional): Epsilon value for normalization layers in ResNet blocks. Defaults to 1e-6.
             resnet_time_scale_shift (str, optional): Time scale shift for the temporal embedding normalization. Defaults to "default".
             resnet_act_fn (str, optional): Activation function for the ResNet blocks. Defaults to "swish".
             resnet_groups (int, optional): Number of groups for group normalization in ResNet blocks. Defaults to 32.
-            resnet_pre_norm (bool, optional): Whether to apply normalization before the convolution in ResNet blocks. Defaults to True.
             output_scale_factor (float, optional): Scale factor for the output. Defaults to 1.0.
             add_upsample (bool, optional): Whether to add an upsampling layer. Defaults to True.
         """
@@ -295,7 +282,6 @@ class UpBlock2D(nn.Module):
         for i in range(num_layers):
             res_skip_channels = in_channels if (i == num_layers - 1) else out_channels
             resnet_in_channels = prev_output_channel if i == 0 else out_channels
-
             resnets.append(
                 ResnetBlock2D(
                     in_channels=resnet_in_channels + res_skip_channels,
@@ -307,7 +293,6 @@ class UpBlock2D(nn.Module):
                     time_embedding_norm=resnet_time_scale_shift,
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
-                    pre_norm=resnet_pre_norm,
                 )
             )
 
@@ -319,9 +304,6 @@ class UpBlock2D(nn.Module):
             )
         else:
             self.upsamplers = None
-
-        self.gradient_checkpointing = False
-        self.resolution_idx = resolution_idx
 
     def forward(
         self,
@@ -345,7 +327,6 @@ class UpBlock2D(nn.Module):
             # pop res hidden states
             res_hidden_states = res_hidden_states_tuple[-1]
             res_hidden_states_tuple = res_hidden_states_tuple[:-1]
-
             # Removed the free-U and gradient checkpointing code
             hidden_states = torch.cat([hidden_states, res_hidden_states], dim=1)
             hidden_states = resnet(hidden_states, temb)

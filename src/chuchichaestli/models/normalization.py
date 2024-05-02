@@ -4,6 +4,7 @@ import numbers
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class RMSNorm(nn.Module):
@@ -40,3 +41,39 @@ class RMSNorm(nn.Module):
             hidden_states = hidden_states.to(input_dtype)
 
         return hidden_states
+
+
+class SpatialNorm(nn.Module):
+    """Spatially conditioned normalization as defined in https://arxiv.org/abs/2209.09002.
+
+    Args:
+        f_channels (`int`):
+            The number of channels for input to group normalization layer, and output of the spatial norm layer.
+        zq_channels (`int`):
+            The number of channels for the quantized vector as described in the paper.
+    """
+
+    def __init__(
+        self,
+        f_channels: int,
+        zq_channels: int,
+    ):
+        """Initialize the SpatialNorm."""
+        super().__init__()
+        self.norm_layer = nn.GroupNorm(
+            num_channels=f_channels, num_groups=32, eps=1e-6, affine=True
+        )
+        self.conv_y = nn.Conv2d(
+            zq_channels, f_channels, kernel_size=1, stride=1, padding=0
+        )
+        self.conv_b = nn.Conv2d(
+            zq_channels, f_channels, kernel_size=1, stride=1, padding=0
+        )
+
+    def forward(self, f: torch.FloatTensor, zq: torch.FloatTensor) -> torch.FloatTensor:
+        """Forward pass of the SpatialNorm."""
+        f_size = f.shape[-2:]
+        zq = F.interpolate(zq, size=f_size, mode="nearest")
+        norm_f = self.norm_layer(f)
+        new_f = norm_f * self.conv_y(zq) + self.conv_b(zq)
+        return new_f

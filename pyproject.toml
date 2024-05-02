@@ -11,7 +11,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["torch==2.2.2"]
+dependencies = ["numpy==1.26.4", "torch==2.2.2"]
 [project.optional-dependencies]
 dev = ["ruff==0.4.1", "pre-commit==3.7.0", "pytest==8.1.1"]
 
@@ -22,6 +22,12 @@ Issues = "https://github.com/CAIIVS/chuchichaestli/issues"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.envs.test]
+dependencies = [
+  "pytest",
+  "pytest-cov"
+]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
