@@ -354,7 +354,7 @@ class ResnetBlock3D(nn.Module):
         if self.time_emb_proj is not None:
             if not self.skip_time_act:
                 temb = self.nonlinearity(temb)
-            temb = self.time_emb_proj(temb)[:, :, None, None]
+            temb = self.time_emb_proj(temb)[:, :, None, None, None]
 
         if self.time_embedding_norm == "default":
             if temb is not None:

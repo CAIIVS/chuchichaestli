@@ -45,8 +45,8 @@ def test_throws_error_on_mismatched_lengths_2():
     "dimensions,down_block_types,up_block_types,block_out_channels",
     [
         # (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
-        (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (224, 448)),
-        (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (224, 448)),
+        (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
+        (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
     ],
 )
 def test_forward_pass(dimensions, down_block_types, up_block_types, block_out_channels):
@@ -57,7 +57,7 @@ def test_forward_pass(dimensions, down_block_types, up_block_types, block_out_ch
         up_block_types=up_block_types,
         block_out_channels=block_out_channels,
     )
-    input_dims = (1, 1) + (224,) * dimensions
+    input_dims = (1, 1) + (64,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
 
     timestep = 0.5  # Example timestep

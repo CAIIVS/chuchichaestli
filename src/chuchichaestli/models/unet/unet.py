@@ -88,7 +88,7 @@ class UNet(nn.Module):
 
         # input layer
         self.conv_in = DIM_TO_CONV_MAP[dimensions](
-            in_channels, block_out_channels[0], kernel_size=3, padding=(1, 1)
+            in_channels, block_out_channels[0], kernel_size=3, padding=1
         )
 
         # Time embedding
