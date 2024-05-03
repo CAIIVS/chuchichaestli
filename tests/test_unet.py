@@ -44,7 +44,7 @@ def test_throws_error_on_mismatched_lengths_2():
 @pytest.mark.parametrize(
     "dimensions,down_block_types,up_block_types,block_out_channels",
     [
-        # (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
         (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
         (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
     ],
