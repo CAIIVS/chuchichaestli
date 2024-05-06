@@ -41,6 +41,7 @@ class DownBlock1D(nn.Module):
         output_scale_factor: float = 1.0,
         add_downsample: bool = True,
         downsample_padding: int = 1,
+        **kwargs,  # noqa
     ):
         """Initialize the down block."""
         super().__init__()
@@ -203,6 +204,7 @@ class UpBlock1D(nn.Module):
         resnet_groups: int = 32,
         output_scale_factor: float = 1.0,
         add_upsample: bool = True,
+        **kwargs,  # noqa
     ):
         """UpBlock2D is a module that represents an upsampling block in a U-Net architecture.
 
@@ -219,6 +221,7 @@ class UpBlock1D(nn.Module):
             resnet_groups (int, optional): Number of groups for group normalization in ResNet blocks. Defaults to 32.
             output_scale_factor (float, optional): Scale factor for the output. Defaults to 1.0.
             add_upsample (bool, optional): Whether to add an upsampling layer. Defaults to True.
+            kwargs: Additional keyword arguments.
         """
         super().__init__()
         resnets = []

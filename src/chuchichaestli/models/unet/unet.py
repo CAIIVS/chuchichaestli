@@ -140,6 +140,11 @@ class UNet(nn.Module):
                 resnet_act_fn=resnet_act_fn,
                 resnet_groups=resnet_groups,
                 add_downsample=not is_final_block,
+                attention_head_dim=(
+                    attention_head_dim
+                    if attention_head_dim is not None
+                    else out_channel
+                ),
             )
             self.down_blocks.append(block)
 
@@ -186,6 +191,11 @@ class UNet(nn.Module):
                 resnet_act_fn=resnet_act_fn,
                 resnet_groups=resnet_groups,
                 add_upsample=not is_final_block,
+                attention_head_dim=(
+                    attention_head_dim
+                    if attention_head_dim is not None
+                    else output_channel
+                ),
             )
             self.up_blocks.append(block)
 
