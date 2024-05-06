@@ -3,12 +3,10 @@
 import torch
 import torch.nn as nn
 
-from chuchichaestli.models.attention import Attention
+from chuchichaestli.models.attention import Attention, AttnDownBlock2D, AttnUpBlock2D
 from chuchichaestli.models.downsampling import Downsample2D
 from chuchichaestli.models.resnet import ResnetBlock2D
 from chuchichaestli.models.upsampling import Upsample2D
-
-from typing import Any
 
 
 class DownBlock2D(nn.Module):
@@ -110,126 +108,6 @@ class DownBlock2D(nn.Module):
                 hidden_states = downsampler(hidden_states)
 
             output_states = output_states + (hidden_states,)
-
-        return hidden_states, output_states
-
-
-class AttnDownBlock2D(nn.Module):
-    """A 2D down block with attention for the U-Net architecture."""
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        temb_channels: int,
-        dropout: float = 0.0,
-        num_layers: int = 1,
-        resnet_eps: float = 1e-6,
-        resnet_time_scale_shift: str = "default",
-        resnet_act_fn: str = "swish",
-        resnet_groups: int = 32,
-        attention_head_dim: int = 1,
-        output_scale_factor: float = 1.0,
-        add_downsample: bool = True,
-        downsample_padding: int = 1,
-    ):
-        """Initialize the AttnDownBlock2D.
-
-        Args:
-            in_channels (int): The number of input channels.
-            out_channels (int): The number of output channels.
-            temb_channels (int): The number of channels in the temporal embedding.
-            dropout (float, optional): The dropout rate. Defaults to 0.0.
-            num_layers (int, optional): The number of ResNet blocks in the down block. Defaults to 1.
-            resnet_eps (float, optional): The epsilon value for normalization in the ResNet blocks. Defaults to 1e-6.
-            resnet_time_scale_shift (str, optional): The time scale shift method for the ResNet blocks. Defaults to "default".
-            resnet_act_fn (str, optional): The activation function for the ResNet blocks. Defaults to "swish".
-            resnet_groups (int, optional): The number of groups for group normalization in the ResNet blocks. Defaults to 32.
-            attention_head_dim (int, optional): The dimension of a single attention head. Defaults to 1.
-            output_scale_factor (float, optional): The scale factor for the output. Defaults to 1.0.
-            add_downsample (bool, optional): Whether to add a downsampling layer. Defaults to True.
-            downsample_padding (int, optional): The padding size for the downsampling layer. Defaults to 1.
-        """
-        super().__init__()
-        resnets = []
-        attentions = []
-
-        if attention_head_dim is None:
-            attention_head_dim = out_channels
-
-        if attention_head_dim > out_channels:
-            raise ValueError(
-                f"Attention head dimension {attention_head_dim} must be less than or equal to the number of output "
-                f"channels {out_channels}."
-            )
-
-        for i in range(num_layers):
-            in_channels = in_channels if i == 0 else out_channels
-            resnets.append(
-                ResnetBlock2D(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    temb_channels=temb_channels,
-                    eps=resnet_eps,
-                    groups=resnet_groups,
-                    dropout=dropout,
-                    time_embedding_norm=resnet_time_scale_shift,
-                    non_linearity=resnet_act_fn,
-                    output_scale_factor=output_scale_factor,
-                )
-            )
-            self.resnets = nn.ModuleList(resnets)
-
-            attentions.append(
-                Attention(
-                    out_channels,
-                    heads=out_channels // attention_head_dim,
-                    dim_head=attention_head_dim,
-                    rescale_output_factor=output_scale_factor,
-                    eps=resnet_eps,
-                    norm_num_groups=resnet_groups,
-                    residual_connection=True,
-                    bias=True,
-                )
-            )
-            self.attentions = nn.ModuleList(attentions)
-
-        self.downsamplers = None
-        if add_downsample:
-            self.downsamplers = nn.ModuleList(
-                [
-                    Downsample2D(
-                        out_channels,
-                        use_conv=True,
-                        out_channels=out_channels,
-                        padding=downsample_padding,
-                    )
-                ]
-            )
-
-    def forward(
-        self,
-        hidden_states: torch.FloatTensor,
-        temb: torch.FloatTensor | None = None,
-        cross_attention_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[torch.FloatTensor, tuple[torch.FloatTensor, ...]]:
-        """Forward pass."""
-        cross_attention_kwargs = (
-            cross_attention_kwargs if cross_attention_kwargs is not None else {}
-        )
-
-        output_states = ()
-
-        for resnet, attn in zip(self.resnets, self.attentions):
-            hidden_states = resnet(hidden_states, temb)
-            hidden_states = attn(hidden_states, **cross_attention_kwargs)
-            output_states = output_states + (hidden_states,)
-
-        if self.downsamplers is not None:
-            for downsampler in self.downsamplers:
-                hidden_states = downsampler(hidden_states)
-
-            output_states += (hidden_states,)
 
         return hidden_states, output_states
 
@@ -453,104 +331,6 @@ class UpBlock2D(nn.Module):
         if self.upsamplers is not None:
             for upsampler in self.upsamplers:
                 hidden_states = upsampler(hidden_states, upsample_size)
-
-        return hidden_states
-
-
-class AttnUpBlock2D(nn.Module):
-    """A 2D up block with attention for the U-Net architecture."""
-
-    def __init__(
-        self,
-        in_channels: int,
-        prev_output_channel: int,
-        out_channels: int,
-        temb_channels: int,
-        resolution_idx: int = None,
-        dropout: float = 0.0,
-        num_layers: int = 1,
-        resnet_eps: float = 1e-6,
-        resnet_time_scale_shift: str = "default",
-        resnet_act_fn: str = "swish",
-        resnet_groups: int = 32,
-        attention_head_dim: int = 1,
-        output_scale_factor: float = 1.0,
-        add_upsample: bool = True,
-    ):
-        """Initialize the AttnUpBlock2D."""
-        super().__init__()
-        resnets = []
-        attentions = []
-
-        if attention_head_dim > out_channels:
-            raise ValueError(
-                f"Attention head dimension {attention_head_dim} must be less than or equal to the number of output "
-                f"channels {out_channels}."
-            )
-
-        for i in range(num_layers):
-            res_skip_channels = in_channels if (i == num_layers - 1) else out_channels
-            resnet_in_channels = prev_output_channel if i == 0 else out_channels
-
-            resnets.append(
-                ResnetBlock2D(
-                    in_channels=resnet_in_channels + res_skip_channels,
-                    out_channels=out_channels,
-                    temb_channels=temb_channels,
-                    eps=resnet_eps,
-                    groups=resnet_groups,
-                    dropout=dropout,
-                    time_embedding_norm=resnet_time_scale_shift,
-                    non_linearity=resnet_act_fn,
-                    output_scale_factor=output_scale_factor,
-                )
-            )
-            self.resnets = nn.ModuleList(resnets)
-
-            attentions.append(
-                Attention(
-                    out_channels,
-                    heads=out_channels // attention_head_dim,
-                    dim_head=attention_head_dim,
-                    rescale_output_factor=output_scale_factor,
-                    eps=resnet_eps,
-                    norm_num_groups=resnet_groups,
-                    residual_connection=True,
-                    bias=True,
-                )
-            )
-
-        self.attentions = nn.ModuleList(attentions)
-
-        if add_upsample:
-            self.upsamplers = nn.ModuleList(
-                [Upsample2D(out_channels, use_conv=True, out_channels=out_channels)]
-            )
-        else:
-            self.upsamplers = None
-
-    def forward(
-        self,
-        hidden_states: torch.FloatTensor,
-        res_hidden_states_tuple: tuple[torch.FloatTensor, ...],
-        temb: torch.FloatTensor | None = None,
-        upsample_size: int | None = None,
-        *args,
-        **kwargs,
-    ) -> torch.FloatTensor:
-        """Forward pass."""
-        for resnet, attn in zip(self.resnets, self.attentions):
-            # pop res hidden states
-            res_hidden_states = res_hidden_states_tuple[-1]
-            res_hidden_states_tuple = res_hidden_states_tuple[:-1]
-            hidden_states = torch.cat([hidden_states, res_hidden_states], dim=1)
-
-            hidden_states = resnet(hidden_states, temb)
-            hidden_states = attn(hidden_states)
-
-        if self.upsamplers is not None:
-            for upsampler in self.upsamplers:
-                hidden_states = upsampler(hidden_states)
 
         return hidden_states
 

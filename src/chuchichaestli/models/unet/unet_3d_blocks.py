@@ -1,9 +1,10 @@
 """3D U-Net building blocks."""
 
+
 import torch
 from torch import nn
 
-from chuchichaestli.models.attention import Attention
+from chuchichaestli.models.attention import Attention, AttnDownBlock3D, AttnUpBlock3D
 from chuchichaestli.models.downsampling import Downsample3D
 from chuchichaestli.models.resnet import ResnetBlock3D
 from chuchichaestli.models.upsampling import Upsample3D
@@ -111,12 +112,6 @@ class DownBlock3D(nn.Module):
             output_states = output_states + (hidden_states,)
 
         return hidden_states, output_states
-
-
-class AttnDownBlock3D(nn.Module):
-    """A 3D U-Net down block with attention."""
-
-    pass
 
 
 class MidBlock3D(nn.Module):
@@ -347,12 +342,6 @@ class UpBlock3D(nn.Module):
                 hidden_states = upsampler(hidden_states, upsample_size)
 
         return hidden_states
-
-
-class AttnUpBlock3D(nn.Module):
-    """A 3D U-Net up block with attention."""
-
-    pass
 
 
 BLOCK_MAP_3D = {

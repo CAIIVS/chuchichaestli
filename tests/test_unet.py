@@ -47,13 +47,19 @@ def test_throws_error_on_mismatched_lengths_2():
         (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
         (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
         (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
-        # Attention test cases
+        # Attention test cases in 2D
         (2, ("AttnDownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
         (2, ("DownBlock", "DownBlock"), ("AttnUpBlock", "UpBlock"), (32, 64)),
         (2, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
         (2, ("DownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (32, 64)),
         (2, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (32, 64)),
         (2, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (64, 128)),
+        # Attention test cases in 3D
+        (3, ("AttnDownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
+        (3, ("DownBlock", "DownBlock"), ("AttnUpBlock", "UpBlock"), (32, 64)),
+        (3, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
+        (3, ("DownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (32, 64)),
+        (3, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (16, 32)),
     ],
 )
 def test_forward_pass(dimensions, down_block_types, up_block_types, block_out_channels):
