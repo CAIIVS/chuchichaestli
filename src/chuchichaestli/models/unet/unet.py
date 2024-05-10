@@ -95,6 +95,7 @@ class UNet(nn.Module):
         # Removed option to learn time embeddings; c.f. HF repo.
         self.time_proj = None
         self.time_embedding = None
+        self.add_time_embedding = add_time_embedding
         time_embed_dim = None
         if add_time_embedding:
             if time_embedding_type == "fourier":
@@ -216,7 +217,7 @@ class UNet(nn.Module):
     def forward(
         self,
         sample: torch.FloatTensor,
-        timestep: torch.Tensor | float | int,
+        timestep: torch.Tensor | float | int = None
     ) -> torch.FloatTensor:
         """Forward pass of the UNet.
 
@@ -227,22 +228,25 @@ class UNet(nn.Module):
         # TODO: Think about whether we want to center the input here.
 
         # 1. Time embedding
-        timesteps = timestep
-        if not torch.is_tensor(timesteps):
-            timesteps = torch.tensor(
-                [timesteps], dtype=torch.long, device=sample.device
+        if self.add_time_embedding:
+            timesteps = timestep
+            if not torch.is_tensor(timesteps):
+                timesteps = torch.tensor(
+                    [timesteps], dtype=torch.long, device=sample.device
+                )
+            elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+                timesteps = timesteps[None].to(sample.device)
+            timesteps = timesteps * torch.ones(
+                sample.shape[0], dtype=timesteps.dtype, device=timesteps.device
             )
-        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
-            timesteps = timesteps[None].to(sample.device)
-        timesteps = timesteps * torch.ones(
-            sample.shape[0], dtype=timesteps.dtype, device=timesteps.device
-        )
 
-        if self.time_proj is not None:
-            t_emb = self.time_proj(timesteps)
+            if self.time_proj is not None:
+                t_emb = self.time_proj(timesteps)
 
-        if self.time_embedding is not None:
-            t_emb = self.time_embedding(t_emb)
+            if self.time_embedding is not None:
+                t_emb = self.time_embedding(t_emb)
+        else:
+            t_emb = None
 
         # 2. Down
         # TODO: Skip connections
