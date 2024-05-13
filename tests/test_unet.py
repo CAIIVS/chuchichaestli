@@ -69,6 +69,7 @@ def test_forward_pass(dimensions, down_block_types, up_block_types, block_out_ch
         down_block_types=down_block_types,
         up_block_types=up_block_types,
         block_out_channels=block_out_channels,
+        resnet_groups=16,
     )
     input_dims = (1, 1) + (64,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
@@ -76,3 +77,28 @@ def test_forward_pass(dimensions, down_block_types, up_block_types, block_out_ch
     timestep = 0.5  # Example timestep
     output = model(sample, timestep)
     assert output.shape == input_dims  # Check output shape
+
+
+@pytest.mark.parametrize(
+    "dimensions,down_block_types,up_block_types,block_out_channels",
+    [
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (8, 16)),
+        (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), (8, 16)),
+        (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), (8, 16)),
+    ],
+)
+def test_no_timestep(dimensions, down_block_types, up_block_types, block_out_channels):
+    """Test the forward pass of the UNet model without a timestep."""
+    model = UNet(
+        dimensions=dimensions,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        block_out_channels=block_out_channels,
+        add_time_embedding=False,
+        resnet_groups=8,
+    )
+    input_dims = (1, 1) + (64,) * dimensions
+    sample = torch.randn(*input_dims)  # Example input
+
+    output = model(sample)
+    assert output.shape == input_dims
