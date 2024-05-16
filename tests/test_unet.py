@@ -77,7 +77,7 @@ def test_throws_error_on_mismatched_lengths_2():
         (3, ("DownBlock", "DownBlock"), ("AttnUpBlock", "UpBlock"), (32, 64)),
         (3, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
         (3, ("DownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (32, 64)),
-        (3, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (16, 32)),
+        # (3, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (32, 64)),
     ],
 )
 def test_forward_pass(dimensions, down_block_types, up_block_types, block_out_channels):

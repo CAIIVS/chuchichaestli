@@ -23,7 +23,6 @@ redistribution and use. See the GPLv3 license at
 This file is part of Chuchichaestli and has been modified for use in this project.
 """
 
-
 import torch
 from torch import nn
 
