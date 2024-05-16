@@ -26,7 +26,12 @@ This file is part of Chuchichaestli and has been modified for use in this projec
 import torch
 import torch.nn as nn
 
-from chuchichaestli.models.attention import Attention, AttnDownBlock2D, AttnUpBlock2D
+from chuchichaestli.models.attention.attention import (
+    Attention,
+    AttnDownBlock2D,
+    AttnUpBlock2D,
+)
+from chuchichaestli.models.attention.attention_gate import AttnGateUpBlock2D
 from chuchichaestli.models.downsampling import Downsample2D
 from chuchichaestli.models.resnet import ResnetBlock2D
 from chuchichaestli.models.upsampling import Upsample2D
@@ -125,12 +130,14 @@ class DownBlock2D(nn.Module):
             # Removed the gradient checkpointing code
             hidden_states = resnet(hidden_states, temb)
             output_states = output_states + (hidden_states,)
+            print(f"down: {hidden_states.shape}")
 
         if self.downsamplers is not None:
             for downsampler in self.downsamplers:
                 hidden_states = downsampler(hidden_states)
 
             output_states = output_states + (hidden_states,)
+            print(f"downsampled: {hidden_states.shape}")
 
         return hidden_states, output_states
 
@@ -331,6 +338,7 @@ class UpBlock2D(nn.Module):
         res_hidden_states_tuple: tuple[torch.FloatTensor, ...],
         temb: torch.FloatTensor = None,
         upsample_size: int = None,
+        **kwargs,  # noqa
     ) -> torch.FloatTensor:
         """Forward pass.
 
@@ -339,6 +347,7 @@ class UpBlock2D(nn.Module):
             res_hidden_states_tuple (tuple[torch.FloatTensor, ...]): Tuple of residual hidden states.
             temb (torch.FloatTensor, optional): Temporal embedding. Defaults to None.
             upsample_size (int, optional): Size of the upsampling. Defaults to None.
+            kwargs: Additional keyword arguments.
 
         Returns:
             torch.FloatTensor: Output hidden states.
@@ -346,6 +355,7 @@ class UpBlock2D(nn.Module):
         for resnet in self.resnets:
             # pop res hidden states
             res_hidden_states = res_hidden_states_tuple[-1]
+
             res_hidden_states_tuple = res_hidden_states_tuple[:-1]
             # Removed the free-U and gradient checkpointing code
             hidden_states = torch.cat([hidden_states, res_hidden_states], dim=1)
@@ -364,4 +374,5 @@ BLOCK_MAP_2D = {
     "MidBlock": MidBlock2D,
     "UpBlock": UpBlock2D,
     "AttnUpBlock": AttnUpBlock2D,
+    "AttnGateUpBlock": AttnGateUpBlock2D,
 }

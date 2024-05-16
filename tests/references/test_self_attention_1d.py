@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import math
 
-from chuchichaestli.models.attention import (
+from chuchichaestli.models.attention.attention import (
     SelfAttention1D as SelfAttention1D_Chuchichaestli,
 )
 

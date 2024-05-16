@@ -23,11 +23,15 @@ redistribution and use. See the GPLv3 license at
 This file is part of Chuchichaestli and has been modified for use in this project.
 """
 
-
 import torch
 from torch import nn
 
-from chuchichaestli.models.attention import Attention, AttnDownBlock3D, AttnUpBlock3D
+from chuchichaestli.models.attention.attention import (
+    Attention,
+    AttnDownBlock3D,
+    AttnUpBlock3D,
+)
+from chuchichaestli.models.attention.attention_gate import AttnGateUpBlock3D
 from chuchichaestli.models.downsampling import Downsample3D
 from chuchichaestli.models.resnet import ResnetBlock3D
 from chuchichaestli.models.upsampling import Upsample3D
@@ -339,6 +343,7 @@ class UpBlock3D(nn.Module):
         res_hidden_states_tuple: tuple[torch.FloatTensor, ...],
         temb: torch.FloatTensor = None,
         upsample_size: int = None,
+        **kwargs,  # noqa
     ) -> torch.FloatTensor:
         """Forward pass.
 
@@ -347,6 +352,7 @@ class UpBlock3D(nn.Module):
             res_hidden_states_tuple (tuple[torch.FloatTensor, ...]): Tuple of residual hidden states.
             temb (torch.FloatTensor, optional): Temporal embedding. Defaults to None.
             upsample_size (int, optional): Size of the upsampling. Defaults to None.
+            kwargs: Additional keyword arguments.
 
         Returns:
             torch.FloatTensor: Output hidden states.
@@ -373,4 +379,5 @@ BLOCK_MAP_3D = {
     "MidBlock": MidBlock3D,
     "UpBlock": UpBlock3D,
     "AttnUpBlock": AttnUpBlock3D,
+    "AttnGateUpBlock": AttnGateUpBlock3D,
 }

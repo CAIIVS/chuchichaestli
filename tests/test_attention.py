@@ -19,7 +19,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 import torch
-from chuchichaestli.models.attention import Attention, SelfAttention1D
+from chuchichaestli.models.attention.attention import Attention, SelfAttention1D
 
 
 def test_self_attention_1d():

@@ -289,7 +289,11 @@ class UNet(nn.Module):
         for up_block in self.up_blocks:
             res_samples = down_block_res_samples[-len(up_block.resnets) :]
             down_block_res_samples = down_block_res_samples[: -len(up_block.resnets)]
-            sample = up_block(sample, res_samples, t_emb)
+            sample = up_block(sample, res_samples, t_emb, gate=sample)
+
+        # Unpack the sample if it is a tuple (e.g. for attention gate blocks)
+        if isinstance(sample, tuple):
+            sample = sample[0]
 
         # 5. Output
         sample = self.conv_norm_out(sample)
