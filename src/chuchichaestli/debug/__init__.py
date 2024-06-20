@@ -1,4 +1,4 @@
-"""Activation functions for neural networks.
+"""Debugging utilities package.
 
 This file is part of Chuchichaestli.
 
@@ -17,14 +17,3 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
-
-from torch import nn
-
-
-ACTIVATION_FUNCTIONS = {
-    "swish": nn.SiLU,
-    "silu": nn.SiLU,
-    "mish": nn.Mish,
-    "gelu": nn.GELU,
-    "relu": nn.ReLU,
-}

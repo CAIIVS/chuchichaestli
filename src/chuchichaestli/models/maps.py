@@ -1,4 +1,4 @@
-"""Activation functions for neural networks.
+"""Dim-to-Layer maps for different dimensions.
 
 This file is part of Chuchichaestli.
 
@@ -20,11 +20,14 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 
 from torch import nn
 
+DIM_TO_CONV_MAP = {
+    1: nn.Conv1d,
+    2: nn.Conv2d,
+    3: nn.Conv3d,
+}
 
-ACTIVATION_FUNCTIONS = {
-    "swish": nn.SiLU,
-    "silu": nn.SiLU,
-    "mish": nn.Mish,
-    "gelu": nn.GELU,
-    "relu": nn.ReLU,
+DIM_TO_CONVT_MAP = {
+    1: nn.ConvTranspose1d,
+    2: nn.ConvTranspose2d,
+    3: nn.ConvTranspose3d,
 }
