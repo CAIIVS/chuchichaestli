@@ -21,7 +21,9 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 from dataclasses import dataclass
 from enum import Enum
 
+from collections.abc import Callable
 from typing import Any
+
 
 from torch import nn
 
@@ -38,7 +40,7 @@ class HookDirection(Enum):
 class Hook:
     """Represents a hook (function to call and direction to attach the hook)."""
 
-    fn: callable[[nn.Module, ...], Any]
+    fn: Callable[[nn.Module, Any], Any]
     direction: HookDirection
 
 
@@ -64,19 +66,19 @@ class Visitor:
 
     def visit(self, visitee, depth: int = 0, caller: nn.Module | None = None):
         """Function called when visiting an object."""
-        if depth > self.max_depth:
+        if self.max_depth and depth > self.max_depth:
             return
-        for _, layer in visitee.modules():
+        for layer in visitee.modules():
             if caller is layer:
-                continue
+                return
             layer_type = type(layer)
             hook = self.hook_map.setdefault(layer_type, self.hook_default)
             match hook.direction:
                 case HookDirection.Forward:
-                    layer.register_forward_hook(hook.fn, layer, depth)
+                    layer.register_forward_hook(hook.fn)
                 case HookDirection.Backward:
-                    layer.register_backward_hook(hook.fn, layer, depth)
+                    layer.register_backward_hook(hook.fn)
                 case HookDirection.Both:
-                    layer.register_forward_hook(hook.fn, layer, depth)
-                    layer.register_backward_hook(hook.fn, layer, depth)
+                    layer.register_forward_hook(hook.fn)
+                    layer.register_backward_hook(hook.fn)
             self.visit(layer, depth=depth + 1, caller=layer)

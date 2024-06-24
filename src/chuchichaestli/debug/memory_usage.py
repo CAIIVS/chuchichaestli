@@ -23,20 +23,40 @@ from torch import nn
 from chuchichaestli.debug.visitor import Visitor, Hook, HookDirection
 
 
-class MemoryStatsVisitor(Visitor):
-    """Visitor that collects memory statistics."""
+class CudaMemoryStatsVisitor(Visitor):
+    """Visitor that collects memory statistics on CUDA GPUs."""
 
     def __init__(self):
         """Initialize the visitor."""
-        super().__init__()
+        super().__init__(hook_default=Hook(self._hook, HookDirection.Forward))
         self._memory_stats = []
-        self._hook_default = Hook(self._hook, HookDirection.Forward)
 
-    def _hook(self, module: nn.Module):
+    def _hook(self, module: nn.Module, _input: torch.Tensor, _output: torch.Tensor):
         """Hook that collects the memory statistics."""
         mem_dict = torch.cuda.memory_stats()
         mem_dict["module"] = module._get_name()
-        self._memory_stats.append(torch.cuda.memory_stats())
+        self._memory_stats.append(mem_dict)
+
+    @property
+    def memory_stats(self):
+        """Return the collected memory statistics."""
+        return self._memory_stats
+
+
+class MPSMemoryAllocationVisitor(Visitor):
+    """Visitor that collects memory statistics on Apple systems."""
+
+    def __init__(self):
+        """Initialize the visitor."""
+        super().__init__(hook_default=Hook(self._hook, HookDirection.Forward))
+        self._memory_stats = []
+
+    def _hook(self, module: nn.Module, _input: torch.Tensor, _output: torch.Tensor):
+        """Hook that collects the memory statistics."""
+        breakpoint()
+        allocated = torch.mps.current_allocated_memory()
+        mem_dict = {"allocated": allocated, "module": module._get_name()}
+        self._memory_stats.append(mem_dict)
 
     @property
     def memory_stats(self):

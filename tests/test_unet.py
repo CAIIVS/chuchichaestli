@@ -113,7 +113,6 @@ def test_forward_pass(
     )
     input_dims = (1, 1) + (64,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
-    breakpoint()
     timestep = 0.5  # Example timestep
     output = model(sample, timestep)
     assert output.shape == input_dims  # Check output shape
