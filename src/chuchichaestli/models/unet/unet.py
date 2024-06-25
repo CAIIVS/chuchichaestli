@@ -1,26 +1,21 @@
-"""UNet model implementation.
+"""UNet model.
 
-Copyright 2024 The HuggingFace Team
+This file is part of Chuchichaestli.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+Chuchichaestli is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-    http://www.apache.org/licenses/LICENSE-2.0
+Chuchichaestli is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+You should have received a copy of the GNU General Public License
+along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 
-Additional modifications made by the Intelligent Vision Systems Group at ZHAW under the
-GNU General Public License v3.0 which extends the conditions of the License for further
-redistribution and use. See the GPLv3 license at
-
-    http://www.gnu.org/licenses/gpl-3.0.html
-
-This file is part of Chuchichaestli and has been modified for use in this project.
+Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 import torch
@@ -36,6 +31,7 @@ from chuchichaestli.models.unet.blocks import (
     AttnDownBlock,
     AttnMidBlock,
     AttnUpBlock,
+    AttnGateUpBlock,
 )
 from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
@@ -49,6 +45,7 @@ BLOCK_MAP = {
     "AttnDownBlock": AttnDownBlock,
     "AttnMidBlock": AttnMidBlock,
     "AttnUpBlock": AttnUpBlock,
+    "AttnGateUpBlock": AttnGateUpBlock,
 }
 
 
@@ -83,6 +80,9 @@ class UNet(nn.Module):
         res_groups: int = 32,
         res_act_fn: str = "silu",
         res_dropout: float = 0.1,
+        attn_head_dim: int = 32,
+        attn_n_heads: int = 1,
+        attn_gate_inter_channels: int = 32,
     ):
         """UNet model implementation."""
         super().__init__()
@@ -106,6 +106,12 @@ class UNet(nn.Module):
             "res_groups": res_groups,
             "res_act_fn": res_act_fn,
             "res_dropout": res_dropout,
+        }
+
+        attn_args = {
+            "n_heads": attn_n_heads,
+            "head_dim": attn_head_dim,
+            "inter_channels": attn_gate_inter_channels,
         }
 
         self.conv_in = conv_cls(in_channels, n_channels, kernel_size=3, padding=1)
@@ -137,6 +143,7 @@ class UNet(nn.Module):
                     time_embedding=time_embedding,
                     time_channels=time_channels,
                     res_args=res_args,
+                    attn_args=attn_args,
                 )
                 self.down_blocks.append(down_block)
                 ins = outs
@@ -150,6 +157,7 @@ class UNet(nn.Module):
             time_embedding=time_embedding,
             time_channels=time_channels,
             res_args=res_args,
+            attn_args=attn_args,
         )
 
         for i in reversed(range(n_mults)):
@@ -162,6 +170,7 @@ class UNet(nn.Module):
                     time_embedding=time_embedding,
                     time_channels=time_channels,
                     res_args=res_args,
+                    attn_args=attn_args,
                 )
                 self.up_blocks.append(up_block)
 
@@ -173,6 +182,7 @@ class UNet(nn.Module):
                 time_embedding=time_embedding,
                 time_channels=time_channels,
                 res_args=res_args,
+                attn_args=attn_args,
             )
             self.up_blocks.append(up_block)
             ins = outs
@@ -208,7 +218,7 @@ class UNet(nn.Module):
                 x = up_block(x, t)
                 continue
             hs = hh.pop()
-            x = up_block(torch.cat([x, hs], dim=1), t)
+            x = up_block(x, hs, t)
 
         x = self.conv_out(self.act(self.norm(x)))
         return x

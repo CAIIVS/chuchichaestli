@@ -52,16 +52,16 @@ class DownBlock(nn.Module):
             **res_args,
         )
 
-        self.attn = (
-            ATTENTION_MAP[attention](out_channels, **attn_args)
-            if attention
-            else nn.Identity()
-        )
+        match ATTENTION_MAP.get(attention, None):
+            case "self_attention":
+                self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
+            case _:
+                self.attn = None
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Forward pass through the down block."""
+        x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
-        x = self.attn(x)
         return x
 
 
@@ -88,16 +88,16 @@ class MidBlock(nn.Module):
             time_channels,
             **res_args,
         )
-        self.attn = (
-            ATTENTION_MAP[attention](channels, **attn_args)
-            if attention
-            else nn.Identity()
-        )
+        match ATTENTION_MAP.get(attention, None):
+            case "self_attention":
+                self.attn = ATTENTION_MAP[attention](channels, **attn_args)
+            case _:
+                self.attn = None
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Forward pass through the mid block."""
+        x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
-        x = self.attn(x)
         return x
 
 
@@ -125,19 +125,28 @@ class UpBlock(nn.Module):
             time_channels,
             **res_args,
         )
-        self.attn = (
-            ATTENTION_MAP[attention](out_channels, **attn_args)
-            if attention
-            else nn.Identity()
-        )
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        match ATTENTION_MAP.get(attention, None):
+            case "self_attention":
+                self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
+            case "attention_gate":
+                self.attn = ATTENTION_MAP[attention](
+                    in_channels, out_channels, **attn_args
+                )
+            case _:
+                self.attn = None
+
+    def forward(
+        self, x: torch.Tensor, h: torch.Tensor, t: torch.Tensor
+    ) -> torch.Tensor:
         """Forward pass through the up block."""
-        x = self.res_block(x, t)
-        x = self.attn(x)
+        x = self.attn(x, h) if self.attn else x
+        xh = torch.cat([x, h], dim=1)
+        x = self.res_block(xh, t)
         return x
 
 
 AttnDownBlock = partial(DownBlock, attention="self_attention")
 AttnMidBlock = partial(MidBlock, attention="self_attention")
 AttnUpBlock = partial(UpBlock, attention="self_attention")
+AttnGateUpBlock = partial(UpBlock, attention="attention_gate")

@@ -101,13 +101,15 @@ def test_throws_error_on_mismatched_lengths_2():
             2,
             ("DownBlock", "DownBlock"),
             ("AttnGateUpBlock", "AttnGateUpBlock"),
-            (32, 64),
+            32,
+            (1, 2),
         ),
         (
             3,
             ("DownBlock", "DownBlock"),
             ("AttnGateUpBlock", "AttnGateUpBlock"),
-            (32, 64),
+            32,
+            (1, 2),
         ),
     ],
 )

@@ -1,26 +1,21 @@
-"""Attention layers.
+"""Self-attention module.
 
-Copyright 2024 The HuggingFace Team
+This file is part of Chuchichaestli.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+Chuchichaestli is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-    http://www.apache.org/licenses/LICENSE-2.0
+Chuchichaestli is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+You should have received a copy of the GNU General Public License
+along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 
-Additional modifications made by the Intelligent Vision Systems Group at ZHAW under the
-GNU General Public License v3.0 which extends the conditions of the License for further
-redistribution and use. See the GPLv3 license at
-
-    http://www.gnu.org/licenses/gpl-3.0.html
-
-This file is part of Chuchichaestli and has been modified for use in this project.
+Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 import torch
@@ -36,8 +31,8 @@ class SelfAttention(nn.Module):
         n_channels: int,
         n_heads: int = 1,
         head_dim: int = None,
-        n_groups: int = 32,
         dropout_p: float = 0.0,
+        **kwargs,
     ):
         """Attention block implementation."""
         super().__init__()
@@ -53,7 +48,7 @@ class SelfAttention(nn.Module):
         self.head_dim = head_dim
         self.dropout_p = dropout_p
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, _h: torch.Tensor) -> torch.Tensor:
         """Forward pass of the attention block."""
         in_shape = x.shape
         x = x.view(in_shape[0], in_shape[1], -1).permute(0, 2, 1)

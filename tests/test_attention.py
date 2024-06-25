@@ -38,7 +38,7 @@ def test_self_attention_1d(dimensions):
     x = torch.randn(shape)
 
     # Perform forward pass
-    output = attention(x)
+    output = attention(x, None)
 
     # Check output shape
     assert output.shape == x.shape
