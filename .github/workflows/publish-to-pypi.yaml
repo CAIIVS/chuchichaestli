@@ -4,7 +4,11 @@
 name: Upload Python Package to the PyPI repository
 
 
-on: push
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 
 jobs:
