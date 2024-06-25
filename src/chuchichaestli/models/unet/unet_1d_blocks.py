@@ -26,7 +26,7 @@ This file is part of Chuchichaestli and has been modified for use in this projec
 import torch
 from torch import nn
 
-from chuchichaestli.models.attention import SelfAttention1D
+from chuchichaestli.models.attention.attention import SelfAttention1D
 from chuchichaestli.models.downsampling import Downsample1D
 from chuchichaestli.models.resnet import ResnetBlock1D
 from chuchichaestli.models.upsampling import Upsample1D
@@ -273,6 +273,7 @@ class UpBlock1D(nn.Module):
         res_hidden_states_tuple: tuple[torch.FloatTensor, ...],
         temb: torch.FloatTensor = None,
         upsample_size: int = None,
+        **kwargs,  # noqa
     ) -> torch.FloatTensor:
         """Forward pass.
 
@@ -281,6 +282,7 @@ class UpBlock1D(nn.Module):
             res_hidden_states_tuple (tuple[torch.FloatTensor, ...]): Tuple of residual hidden states.
             temb (torch.FloatTensor, optional): Temporal embedding. Defaults to None.
             upsample_size (int, optional): Size of the upsampling. Defaults to None.
+            kwargs: Additional keyword arguments.
 
         Returns:
             torch.FloatTensor: Output hidden states.
