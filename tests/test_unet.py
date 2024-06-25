@@ -96,6 +96,19 @@ def test_throws_error_on_mismatched_lengths_2():
             16,
             (1, 2, 2, 4),
         ),
+        # AttentionGate test cases
+        (
+            2,
+            ("DownBlock", "DownBlock"),
+            ("AttnGateUpBlock", "AttnGateUpBlock"),
+            (32, 64),
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock"),
+            ("AttnGateUpBlock", "AttnGateUpBlock"),
+            (32, 64),
+        ),
     ],
 )
 def test_forward_pass(
