@@ -18,10 +18,13 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
+from functools import partial
+
 import torch
 from torch import nn
 
 from chuchichaestli.models.resnet import ResidualBlock
+from chuchichaestli.models.attention import ATTENTION_MAP
 
 
 class DownBlock(nn.Module):
@@ -34,27 +37,31 @@ class DownBlock(nn.Module):
         out_channels: int,
         time_embedding: bool = True,
         time_channels: int = 32,
-        n_res_blocks: int = 1,
         res_args: dict = {},
+        attention: str | None = None,
+        attn_args: dict = {},
     ):
         """Initialize the down block."""
         super().__init__()
-        self.res_blocks = nn.ModuleList(
-            ResidualBlock(
-                dimensions,
-                in_channels,
-                out_channels,
-                time_embedding,
-                time_channels,
-                **res_args,
-            )
-            for _ in range(n_res_blocks)
+        self.res_block = ResidualBlock(
+            dimensions,
+            in_channels,
+            out_channels,
+            time_embedding,
+            time_channels,
+            **res_args,
+        )
+
+        self.attn = (
+            ATTENTION_MAP[attention](out_channels, **attn_args)
+            if attention
+            else nn.Identity()
         )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Forward pass through the down block."""
-        for res_block in self.res_blocks:
-            x = res_block(x, t)
+        x = self.res_block(x, t)
+        x = self.attn(x)
         return x
 
 
@@ -67,27 +74,30 @@ class MidBlock(nn.Module):
         channels: int,
         time_embedding: bool = True,
         time_channels: int = 32,
-        n_res_blocks: int = 1,
         res_args: dict = {},
+        attention: str | None = None,
+        attn_args: dict = {},
     ):
         """Initialize the mid block."""
         super().__init__()
-        self.res_blocks = nn.ModuleList(
-            ResidualBlock(
-                dimensions,
-                channels,
-                channels,
-                time_embedding,
-                time_channels,
-                **res_args,
-            )
-            for _ in range(n_res_blocks)
+        self.res_block = ResidualBlock(
+            dimensions,
+            channels,
+            channels,
+            time_embedding,
+            time_channels,
+            **res_args,
+        )
+        self.attn = (
+            ATTENTION_MAP[attention](channels, **attn_args)
+            if attention
+            else nn.Identity()
         )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Forward pass through the mid block."""
-        for res_block in self.res_blocks:
-            x = res_block(x, t)
+        x = self.res_block(x, t)
+        x = self.attn(x)
         return x
 
 
@@ -101,25 +111,33 @@ class UpBlock(nn.Module):
         out_channels: int,
         time_embedding: bool = True,
         time_channels: int = 32,
-        n_res_blocks: int = 1,
         res_args: dict = {},
+        attention: str | None = None,
+        attn_args: dict = {},
     ):
         """Initialize the up block."""
         super().__init__()
-        self.res_blocks = nn.ModuleList(
-            ResidualBlock(
-                dimensions,
-                in_channels + out_channels if i == 0 else out_channels,
-                out_channels,
-                time_embedding,
-                time_channels,
-                **res_args,
-            )
-            for i in range(n_res_blocks)
+        self.res_block = ResidualBlock(
+            dimensions,
+            in_channels + out_channels,
+            out_channels,
+            time_embedding,
+            time_channels,
+            **res_args,
+        )
+        self.attn = (
+            ATTENTION_MAP[attention](out_channels, **attn_args)
+            if attention
+            else nn.Identity()
         )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Forward pass through the up block."""
-        for res_block in self.res_blocks:
-            x = res_block(x, t)
+        x = self.res_block(x, t)
+        x = self.attn(x)
         return x
+
+
+AttnDownBlock = partial(DownBlock, attention="self_attention")
+AttnMidBlock = partial(MidBlock, attention="self_attention")
+AttnUpBlock = partial(UpBlock, attention="self_attention")

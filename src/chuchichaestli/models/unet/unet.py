@@ -33,6 +33,9 @@ from chuchichaestli.models.unet.blocks import (
     DownBlock,
     MidBlock,
     UpBlock,
+    AttnDownBlock,
+    AttnMidBlock,
+    AttnUpBlock,
 )
 from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
@@ -43,8 +46,9 @@ BLOCK_MAP = {
     "DownBlock": DownBlock,
     "MidBlock": MidBlock,
     "UpBlock": UpBlock,
-    "AttnDownBlock": DownBlock,
-    "AttnUpBlock": UpBlock,
+    "AttnDownBlock": AttnDownBlock,
+    "AttnMidBlock": AttnMidBlock,
+    "AttnUpBlock": AttnUpBlock,
 }
 
 

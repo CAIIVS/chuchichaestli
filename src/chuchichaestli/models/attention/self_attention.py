@@ -28,7 +28,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class AttentionBlock(nn.Module):
+class SelfAttention(nn.Module):
     """Attention block implementation."""
 
     def __init__(
@@ -37,6 +37,7 @@ class AttentionBlock(nn.Module):
         n_heads: int = 1,
         head_dim: int = None,
         n_groups: int = 32,
+        dropout_p: float = 0.0,
     ):
         """Attention block implementation."""
         super().__init__()
@@ -44,30 +45,26 @@ class AttentionBlock(nn.Module):
         if head_dim is None:
             head_dim = n_channels // n_heads
 
-        self.norm = nn.GroupNorm(n_groups, n_channels)
-        self.proj = nn.Linear(n_channels, n_heads * head_dim * 3)  # q, k, v
-        self.output = nn.Linear(n_heads * head_dim, n_channels)
+        self.proj_in = nn.Linear(n_channels, n_heads * head_dim * 3)  # q, k, v
+        self.proj_out = nn.Linear(n_heads * head_dim, n_channels)
 
         self.scale = head_dim**-0.5
         self.n_heads = n_heads
         self.head_dim = head_dim
+        self.dropout_p = dropout_p
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass of the attention block."""
-        batch_size = x.size(0)
-        n_channels = x.size(1)
-        x = x.view(batch_size, n_channels, -1).moveaxis(1, -1)
+        in_shape = x.shape
+        x = x.view(in_shape[0], in_shape[1], -1).permute(0, 2, 1)
 
-        qkv = self.proj(x).view(batch_size, -1, self.n_heads, 3 * self.d_k)
+        qkv = self.proj_in(x).view(in_shape[0], -1, self.n_heads, 3 * self.head_dim)
         q, k, v = qkv.chunk(3, dim=-1)
 
-        attn = torch.einsum("bihd,bjhd->bijh", q, k) * self.scale
-        attn = F.softmax(attn, dim=2)
-
-        out = torch.einsum("bijh,bjhd->bihd", attn, v)
-        out = out.moveaxis(-1, 1).reshape(batch_size, n_channels, *x.shape[1:])
-        out = self.output(out)
-
-        out += x
+        out = F.scaled_dot_product_attention(
+            q, k, v, scale=self.scale, dropout_p=self.dropout_p
+        )
+        out = out.reshape(in_shape[0], -1, self.n_heads * self.head_dim)
+        out = self.proj_out(out).permute(0, 2, 1).reshape(in_shape)
 
         return out
