@@ -36,7 +36,7 @@ jobs:
         ruff check . --extend-select=D,UP --line-length=127 --output-format=github --exit-zero
     - name: Test with pytest
       run: |
-        pytest
+        pytest --junitxml=junit/test-results-${{ matrix.python-version }}.xml
     - name: Upload pytest test results
       uses: actions/upload-artifact@v4
       with:
