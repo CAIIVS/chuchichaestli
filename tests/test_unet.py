@@ -24,16 +24,6 @@ import pytest
 import torch
 
 
-@pytest.fixture
-def unet_conv_2d():
-    """Create an instance of the UNet model."""
-    return UNet(
-        dimensions=2,
-        down_block_types=("DownBlock", "DownBlock"),
-        up_block_types=("UpBlock", "UpBlock"),
-    )
-
-
 def test_throws_error_on_invalid_dimension():
     """Test that the UNet model throws an error when an invalid dimension is passed."""
     with pytest.raises(ValueError):
@@ -55,81 +45,155 @@ def test_throws_error_on_mismatched_lengths_2():
         UNet(
             down_block_types=("DownBlock", "AttnDownBlock"),
             up_block_types=("UpBlock", "AttnUpBlock"),
-            block_out_channels=(224, 448, 672),
+            block_out_channel_mults=(1, 2, 3),
         )
 
 
 @pytest.mark.parametrize(
-    "dimensions,down_block_types,up_block_types,block_out_channels",
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
     [
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
-        (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
-        (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
         # Attention test cases in 2D
-        (2, ("AttnDownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
-        (2, ("DownBlock", "DownBlock"), ("AttnUpBlock", "UpBlock"), (32, 64)),
-        (2, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
-        (2, ("DownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (32, 64)),
-        (2, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (32, 64)),
-        (2, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (64, 128)),
+        (2, ("AttnDownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (2, ("DownBlock", "DownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+        (2, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (2, ("DownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), 32, (1, 2)),
+        (2, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), 32, (1, 2)),
+        (2, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), 32, (1, 2)),
         # Attention test cases in 3D
-        (3, ("AttnDownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
-        (3, ("DownBlock", "DownBlock"), ("AttnUpBlock", "UpBlock"), (32, 64)),
-        (3, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), (32, 64)),
-        (3, ("DownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (32, 64)),
-        (3, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), (16, 32)),
+        (3, ("AttnDownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (3, ("DownBlock", "DownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+        (3, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (3, ("DownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), 32, (1, 2)),
+        (3, ("AttnDownBlock", "DownBlock"), ("UpBlock", "AttnUpBlock"), 32, (1, 2)),
+        (
+            2,
+            ("DownBlock", "DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock", "UpBlock"),
+            16,
+            (1, 2, 2),
+        ),
+        (
+            2,
+            ("DownBlock", "DownBlock", "DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock", "UpBlock", "UpBlock"),
+            16,
+            (1, 2, 2, 4),
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock", "UpBlock"),
+            16,
+            (1, 2, 2),
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock", "DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock", "UpBlock", "UpBlock"),
+            16,
+            (1, 2, 2, 4),
+        ),
         # AttentionGate test cases
         (
             2,
             ("DownBlock", "DownBlock"),
             ("AttnGateUpBlock", "AttnGateUpBlock"),
-            (32, 64),
+            32,
+            (1, 2),
         ),
         (
             3,
             ("DownBlock", "DownBlock"),
             ("AttnGateUpBlock", "AttnGateUpBlock"),
-            (32, 64),
+            32,
+            (1, 2),
         ),
     ],
 )
-def test_forward_pass(dimensions, down_block_types, up_block_types, block_out_channels):
+def test_forward_pass(
+    dimensions, down_block_types, up_block_types, n_channels, block_out_channel_mults
+):
     """Test the forward pass of the UNet model."""
     model = UNet(
         dimensions=dimensions,
         down_block_types=down_block_types,
         up_block_types=up_block_types,
-        block_out_channels=block_out_channels,
-        resnet_groups=16,
+        block_out_channel_mults=block_out_channel_mults,
+        n_channels=n_channels,
+        res_groups=4,
+        num_layers_per_block=1,
     )
     input_dims = (1, 1) + (64,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
-
     timestep = 0.5  # Example timestep
     output = model(sample, timestep)
     assert output.shape == input_dims  # Check output shape
 
 
 @pytest.mark.parametrize(
-    "dimensions,down_block_types,up_block_types,block_out_channels",
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
     [
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (8, 16)),
-        (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), (8, 16)),
-        (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), (8, 16)),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2)),
+        (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 8, (1, 2)),
+        (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 8, (1, 2)),
     ],
 )
-def test_no_timestep(dimensions, down_block_types, up_block_types, block_out_channels):
+def test_no_timestep(
+    dimensions, down_block_types, up_block_types, n_channels, block_out_channel_mults
+):
     """Test the forward pass of the UNet model without a timestep."""
     model = UNet(
         dimensions=dimensions,
         down_block_types=down_block_types,
         up_block_types=up_block_types,
-        block_out_channels=block_out_channels,
-        add_time_embedding=False,
-        resnet_groups=8,
+        n_channels=n_channels,
+        block_out_channel_mults=block_out_channel_mults,
+        time_embedding=False,
+        res_groups=8,
     )
     input_dims = (1, 1) + (64,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
 
     output = model(sample)
     assert output.shape == input_dims
+
+
+@pytest.mark.parametrize(
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults, in_channels, out_channels",
+    [
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (2, 4), 1, 3),
+        (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (2, 4), 1, 3),
+        (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (2, 4), 1, 3),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 16, (2, 4), 6, 3),
+        (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 16, (2, 4), 6, 3),
+        (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 16, (2, 4), 6, 3),
+    ],
+)
+def test_out_channels(
+    dimensions,
+    down_block_types,
+    up_block_types,
+    n_channels,
+    block_out_channel_mults,
+    in_channels,
+    out_channels,
+):
+    """Test the forward pass of the UNet model with a different number of output channels."""
+    model = UNet(
+        dimensions=dimensions,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        n_channels=n_channels,
+        block_out_channel_mults=block_out_channel_mults,
+        in_channels=in_channels,
+        out_channels=out_channels,
+        res_groups=16,
+    )
+    input_dims = (1, in_channels) + (64,) * dimensions
+    sample = torch.randn(*input_dims)
+    timestep = 0.5
+    output = model(sample, timestep)
+    assert output.shape == (1, out_channels) + (64,) * dimensions

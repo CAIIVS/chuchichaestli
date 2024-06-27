@@ -22,7 +22,6 @@ import torch
 import pytest
 
 from chuchichaestli.models.attention.attention_gate import AttentionGate
-from chuchichaestli.models.unet import UNet
 
 
 @pytest.mark.parametrize(
@@ -46,24 +45,3 @@ def test_attention_gate_forward(dimension: int, feats: int):
 
     # Check output shape
     assert output.shape == x.shape
-
-
-def test_attention_gate_unet():
-    """Test that the attention gate can be used in a UNet model."""
-    dimensions = 2
-    down_block_types = ["DownBlock"] * 4
-    up_block_types = ["AttnGateUpBlock"] * 4
-    block_out_channels = [64, 128, 256, 512]
-    model = UNet(
-        dimensions=dimensions,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
-        block_out_channels=block_out_channels,
-        resnet_groups=16,
-    )
-    input_dims = (1, 1) + (64,) * dimensions
-    sample = torch.randn(*input_dims)  # Example input
-
-    timestep = 0.5  # Example timestep
-    output = model(sample, timestep)
-    assert output.shape == input_dims  # Check output shape
