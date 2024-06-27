@@ -197,3 +197,38 @@ def test_out_channels(
     timestep = 0.5
     output = model(sample, timestep)
     assert output.shape == (1, out_channels) + (64,) * dimensions
+
+
+@pytest.mark.parametrize(
+    "in_kernel_size,out_kernel_size,res_kernel_size",
+    [
+        (1, 1, 1),
+        (3, 3, 3),
+        (5, 5, 5),
+        (7, 7, 7),
+        (9, 9, 9),
+        (1, 3, 5),
+        (5, 3, 1),
+        (3, 1, 5),
+        (5, 1, 3),
+        (1, 5, 3),
+    ],
+)
+def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
+    """Test the forward pass of the UNet model with different kernel sizes."""
+    model = UNet(
+        dimensions=2,
+        down_block_types=("DownBlock", "DownBlock"),
+        up_block_types=("UpBlock", "UpBlock"),
+        n_channels=16,
+        block_out_channel_mults=(1, 2),
+        in_kernel_size=in_kernel_size,
+        out_kernel_size=out_kernel_size,
+        res_kernel_size=res_kernel_size,
+        res_groups=16,
+    )
+    input_dims = (1, 1, 64, 64)
+    sample = torch.randn(*input_dims)
+    timestep = 0.5
+    output = model(sample, timestep)
+    assert output.shape == input_dims

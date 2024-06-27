@@ -25,6 +25,33 @@ from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 
 
+class Norm(nn.Module):
+    """Normalization layer implementation."""
+
+    def __init__(self, dimensions: int, norm_type: str, channels: int, num_groups: int):
+        """Initialize the normalization layer."""
+        super().__init__()
+        match norm_type:
+            case "group":
+                self.norm = nn.GroupNorm(num_groups, channels)
+            case "instance" if dimensions == 1:
+                self.norm = nn.InstanceNorm1d(channels)
+            case "instance" if dimensions == 2:
+                self.norm = nn.InstanceNorm2d(channels)
+            case "instance" if dimensions == 3:
+                self.norm = nn.InstanceNorm3d(channels)
+            case "batch" if dimensions == 1:
+                self.norm = nn.BatchNorm1d(channels)
+            case "batch" if dimensions == 2:
+                self.norm = nn.BatchNorm2d(channels)
+            case "batch" if dimensions == 3:
+                self.norm = nn.BatchNorm3d(channels)
+
+    def forward(self, x):
+        """Forward pass through the normalization layer."""
+        return self.norm(x)
+
+
 class ResidualBlock(nn.Module):
     """Residual block implementation."""
 
@@ -38,6 +65,8 @@ class ResidualBlock(nn.Module):
         res_groups: int = 32,
         res_act_fn: str = "silu",
         res_dropout: float = 0.1,
+        res_norm_type: str = "group",
+        res_kernel_size: int = 3,
     ):
         """Initialize the residual block."""
         super().__init__()
@@ -46,18 +75,17 @@ class ResidualBlock(nn.Module):
 
         self.dimensions = dimensions
 
-        if in_channels % res_groups != 0:
-            raise ValueError(
-                f"Number of input channels ({in_channels}) must be divisible by the number of groups ({res_groups})."
-            )
-
-        self.norm1 = nn.GroupNorm(res_groups, in_channels)
+        self.norm1 = Norm(dimensions, res_norm_type, in_channels, res_groups)
         self.act1 = act_cls()
-        self.conv1 = conv_cls(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv1 = conv_cls(
+            in_channels, out_channels, kernel_size=res_kernel_size, padding="same"
+        )
 
-        self.norm2 = nn.GroupNorm(res_groups, out_channels)
+        self.norm2 = Norm(dimensions, res_norm_type, out_channels, res_groups)
         self.act2 = act_cls()
-        self.conv2 = conv_cls(out_channels, out_channels, kernel_size=3, padding=1)
+        self.conv2 = conv_cls(
+            out_channels, out_channels, kernel_size=res_kernel_size, padding="same"
+        )
 
         self.shortcut = (
             conv_cls(in_channels, out_channels, kernel_size=1)

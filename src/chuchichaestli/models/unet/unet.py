@@ -18,6 +18,8 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
+import warnings
+
 import torch
 from torch import nn
 
@@ -25,13 +27,13 @@ from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
 from chuchichaestli.models.downsampling import Downsample
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.unet.blocks import (
+    AttnDownBlock,
+    AttnGateUpBlock,
+    AttnMidBlock,
+    AttnUpBlock,
     DownBlock,
     MidBlock,
     UpBlock,
-    AttnDownBlock,
-    AttnMidBlock,
-    AttnUpBlock,
-    AttnGateUpBlock,
 )
 from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
@@ -77,9 +79,13 @@ class UNet(nn.Module):
         num_layers_per_block: int = 1,
         groups: int = 8,
         act: str = "silu",
+        in_kernel_size: int = 3,
+        out_kernel_size: int = 3,
         res_groups: int = 32,
         res_act_fn: str = "silu",
         res_dropout: float = 0.1,
+        res_norm_type: str = "group",
+        res_kernel_size: int = 3,
         attn_head_dim: int = 32,
         attn_n_heads: int = 1,
         attn_gate_inter_channels: int = 32,
@@ -102,10 +108,19 @@ class UNet(nn.Module):
 
         conv_cls = DIM_TO_CONV_MAP[dimensions]
 
+        if n_channels % res_groups != 0:
+            warnings.warn(
+                f"Number of channels ({n_channels}) is not divisible by the number of groups ({res_groups}). Setting number of groups to in_channels."
+            )
+            res_groups = n_channels
+            groups = min(groups, n_channels)
+
         res_args = {
             "res_groups": res_groups,
             "res_act_fn": res_act_fn,
             "res_dropout": res_dropout,
+            "res_norm_type": res_norm_type,
+            "res_kernel_size": res_kernel_size,
         }
 
         attn_args = {
@@ -114,7 +129,9 @@ class UNet(nn.Module):
             "inter_channels": attn_gate_inter_channels,
         }
 
-        self.conv_in = conv_cls(in_channels, n_channels, kernel_size=3, padding=1)
+        self.conv_in = conv_cls(
+            in_channels, n_channels, kernel_size=in_kernel_size, padding="same"
+        )
 
         self.time_channels = time_channels
         self.time_emb = (
@@ -191,7 +208,9 @@ class UNet(nn.Module):
 
         self.norm = nn.GroupNorm(groups, outs)
         self.act = ACTIVATION_FUNCTIONS[act]()
-        self.conv_out = conv_cls(outs, out_channels, kernel_size=3, padding=1)
+        self.conv_out = conv_cls(
+            outs, out_channels, kernel_size=out_kernel_size, padding="same"
+        )
 
     def forward(
         self, x: torch.Tensor, t: int | torch.Tensor | None = None
