@@ -1,4 +1,6 @@
-"""This file is part of Chuchichaestli.
+"""Dim-to-Layer maps for different dimensions.
+
+This file is part of Chuchichaestli.
 
 Chuchichaestli is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,3 +17,17 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
+
+from torch import nn
+
+DIM_TO_CONV_MAP = {
+    1: nn.Conv1d,
+    2: nn.Conv2d,
+    3: nn.Conv3d,
+}
+
+DIM_TO_CONVT_MAP = {
+    1: nn.ConvTranspose1d,
+    2: nn.ConvTranspose2d,
+    3: nn.ConvTranspose3d,
+}

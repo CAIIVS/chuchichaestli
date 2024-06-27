@@ -20,89 +20,70 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 
 import pytest
 import torch
-from chuchichaestli.models.resnet import ResnetBlock1D, ResnetBlock2D, ResnetBlock3D
+from chuchichaestli.models.resnet import ResidualBlock
 
 
-@pytest.fixture
-def resnet_block1d():
-    """Create an instance of the ResnetBlock1D module."""
-    return ResnetBlock1D(in_channels=16, mid_channels=32, out_channels=16)
-
-
-def test_forward_resnet_block1d(resnet_block1d):
+@pytest.mark.parametrize(
+    "dimensions, in_channels, out_channels, time_channels, res_groups, res_act_fn, res_droupout",
+    [
+        (1, 32, 32, 32, 16, "silu", 0.1),
+        (2, 32, 32, 32, 16, "silu", 0.1),
+        (3, 32, 32, 32, 16, "silu", 0.1),
+        (1, 48, 32, 32, 16, "silu", 0.1),
+        (2, 48, 32, 32, 16, "silu", 0.1),
+        (3, 48, 32, 32, 16, "silu", 0.1),
+        (1, 8, 16, 16, 4, "relu", 0.1),
+        (2, 8, 16, 16, 4, "relu", 0.1),
+        (3, 8, 16, 16, 4, "relu", 0.1),
+        (1, 32, 64, 16, 16, "mish", 0.1),
+        (2, 32, 64, 16, 16, "mish", 0.1),
+        (3, 32, 64, 16, 16, "mish", 0.1),
+    ],
+)
+def test_forward_resnet(
+    dimensions,
+    in_channels,
+    out_channels,
+    time_channels,
+    res_groups,
+    res_act_fn,
+    res_droupout,
+):
     """Test the forward method of the ResnetBlock1D module."""
     # Create dummy input tensor
-    input_tensor = torch.randn(1, 16, 32)
+    input_shape = (1, in_channels) + (32,) * dimensions
+    input_tensor = torch.randn(input_shape)
 
-    # Call the forward method
-    output_tensor = resnet_block1d.forward(input_tensor)
+    t_embedding = torch.randn((1, time_channels))
 
-    # Check the output tensor shape
-    assert output_tensor.shape == (1, 16, 32)
-
-
-@pytest.fixture
-def resnet_block2d():
-    """Create an instance of the ResnetBlock2D module."""
-    return ResnetBlock2D(in_channels=64, out_channels=32)
-
-
-def test_forward_resnet_block2d(resnet_block2d):
-    """Test the forward method of the ResnetBlock2D module."""
-    # Create dummy input tensor
-    input_tensor = torch.randn(1, 64, 32, 32)
-    temb = torch.randn(1, 512)
-
-    # Call the forward method
-    output_tensor = resnet_block2d.forward(input_tensor, temb)
-
-    # Check the output tensor shape
-    assert output_tensor.shape == (1, 32, 32, 32)
-
-
-def test_forward_resnet_block2d_with_temb():
-    """Test the forward method of the ResnetBlock2D module."""
-    # Create dummy input tensor
-    input_tensor = torch.randn(1, 64, 32, 32)
-    temb = torch.randn(1, 512)
-
-    # Call the forward method
-    output_tensor = ResnetBlock2D(in_channels=64, out_channels=32).forward(
-        input_tensor, temb
+    resnet = ResidualBlock(
+        dimensions,
+        in_channels,
+        out_channels,
+        True,
+        time_channels,
+        res_groups,
+        res_act_fn,
+        res_droupout,
     )
 
-    # Check the output tensor shape
-    assert output_tensor.shape == (1, 32, 32, 32)
-
-
-def test_forward_resnet_block2d_channels_not_divisible():
-    """Test the forward method of the ResnetBlock2D module."""
     # Call the forward method
-    with pytest.raises(ValueError):
-        ResnetBlock2D(in_channels=16, out_channels=32)
-
-
-@pytest.fixture
-def resnet_block3d():
-    """Create an instance of the ResnetBlock3D module."""
-    return ResnetBlock3D(in_channels=64, out_channels=32)
-
-
-def test_forward_resnet_block3d(resnet_block3d):
-    """Test the forward method of the ResnetBlock3D module."""
-    # Create dummy input tensor
-    input_tensor = torch.randn(1, 64, 32, 32, 32)
-    temb = torch.randn(1, 512)
-
-    # Call the forward method
-    output_tensor = resnet_block3d.forward(input_tensor, temb)
+    output_tensor = resnet.forward(input_tensor, t_embedding)
 
     # Check the output tensor shape
-    assert output_tensor.shape == (1, 32, 32, 32, 32)
+    assert output_tensor.shape == (1, out_channels) + (32,) * dimensions
 
 
-def test_forward_resnet_block3d_channels_not_divisible():
+@pytest.mark.parametrize(
+    "dimensions,input_channels, res_groups",
+    [
+        (1, 16, 17),
+        (2, 16, 17),
+        (3, 16, 17),
+    ],
+)
+def test_forward_groups_not_divisible(dimensions, input_channels, res_groups):
     """Test the forward method of the ResnetBlock3D module."""
     # Call the forward method
     with pytest.raises(ValueError):
-        ResnetBlock3D(in_channels=16, out_channels=32)
+        ResidualBlock(dimensions, input_channels, 32, True, 32, res_groups=res_groups)
