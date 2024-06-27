@@ -1,4 +1,6 @@
-"""This file is part of Chuchichaestli.
+"""Attention mechanism implementations.
+
+This file is part of Chuchichaestli.
 
 Chuchichaestli is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,3 +17,13 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
+
+from chuchichaestli.models.attention.self_attention import SelfAttention
+from chuchichaestli.models.attention.attention_gate import AttentionGate
+
+ATTENTION_MAP = {
+    "self_attention": SelfAttention,
+    "attention_gate": AttentionGate,
+}
+
+__all__ = ["ATTENTION_MAP"]
