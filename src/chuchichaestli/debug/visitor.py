@@ -24,8 +24,8 @@ from enum import Enum
 from collections.abc import Callable
 from typing import Any
 
-
 from torch import nn
+from chuchichaestli.debug import as_bytes, cli_pbar
 
 
 class HookDirection(Enum):
@@ -49,9 +49,10 @@ class Visitor:
 
     def __init__(
         self,
-        hook_default: Hook,
+        hook_default: Hook | None = None,
         hook_map: dict[object, Hook] = {},
         max_depth: int | None = None,
+        _memory_stats: list = [],
     ):
         """Initialize the Visitor.
 
@@ -59,13 +60,26 @@ class Visitor:
             hook_default: The default hook to use.
             hook_map: A mapping from layer types to hooks.
             max_depth: The maximum depth to visit.
+            memory_stats: Precached memory statistics history.
         """
         self.hook_default = hook_default
         self.hook_map = hook_map
         self.max_depth = max_depth
+        self._memory_stats = _memory_stats
+
+    @property
+    def memory_stats(self):
+        """Return the collected memory statistics."""
+        return self._memory_stats
+
+    def unlink(self):
+        """Unlink hooks and maps."""
+        self.hook_default = None
+        self.hook_map = {}
 
     def visit(self, visitee, depth: int = 0, caller: nn.Module | None = None):
         """Function called when visiting an object."""
+        # print(visitee, depth, caller)
         if self.max_depth and depth > self.max_depth:
             return
         for layer in visitee.modules():
@@ -82,3 +96,42 @@ class Visitor:
                     layer.register_forward_hook(hook.fn)
                     layer.register_backward_hook(hook.fn)
             self.visit(layer, depth=depth + 1, caller=layer)
+
+    def report(
+        self,
+        unit: str = "MB",
+        with_bar: bool = True,
+        bar_length: int = 60,
+        verbose: bool = True,
+    ) -> list[str] | None:
+        """Report the memory statistics for the visited module(s).
+
+        Args:
+            unit (str): The byte unit; one in [KB, MB, GB, TB, KiB, MiB, GiB, TiB].
+            with_bar (bool): Add simple horizontal percentage bars.
+            bar_length (int): The length of the percentage bars in number of characters.
+            verbose (bool): Directly print lines to stdout.
+        """
+        if not hasattr(self, "memory_stats"):
+            return []
+        divisor = as_bytes(unit)
+        mem_stats = self.memory_stats.copy()
+        if not mem_stats:
+            return []
+        total_alloc = sum(module["allocated"] for module in mem_stats)
+        for stat in mem_stats:
+            stat["rel_alloc"] = stat["allocated"] / total_alloc
+            stat["allocated"] /= divisor
+        total_alloc /= divisor
+
+        lines = []
+        module_name_length = max([len(stat["module"]) for stat in mem_stats])
+
+        for stat in mem_stats:
+            prefix = [stat["module"].ljust(module_name_length), stat["allocated"], unit]
+            postfix = [stat["rel_alloc"] * 100, "%"]
+            line = cli_pbar(stat["rel_alloc"], prefix, postfix, bar_length=bar_length)
+            lines.append(line)
+        if verbose:
+            print("\n".join(lines))
+        return lines
