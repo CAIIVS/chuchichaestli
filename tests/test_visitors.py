@@ -18,6 +18,7 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
+
 import pytest
 import torch
 from chuchichaestli.debug.memory_usage import (

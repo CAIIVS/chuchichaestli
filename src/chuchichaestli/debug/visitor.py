@@ -60,7 +60,7 @@ class Visitor:
             hook_default: The default hook to use.
             hook_map: A mapping from layer types to hooks.
             max_depth: The maximum depth to visit.
-            memory_stats: Precached memory statistics history.
+            _memory_stats: Precached memory statistics history.
         """
         self.hook_default = hook_default
         self.hook_map = hook_map
