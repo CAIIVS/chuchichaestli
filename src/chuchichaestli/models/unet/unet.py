@@ -108,7 +108,7 @@ class UNet(nn.Module):
 
         conv_cls = DIM_TO_CONV_MAP[dimensions]
 
-        if n_channels % res_groups != 0:
+        if res_norm_type == "group" and n_channels % res_groups != 0:
             warnings.warn(
                 f"Number of channels ({n_channels}) is not divisible by the number of groups ({res_groups}). Setting number of groups to in_channels."
             )
