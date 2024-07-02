@@ -19,6 +19,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 import torch
+import torch.types
 
 from chuchichaestli.diffusion.base import DiffusionProcess
 
@@ -31,7 +32,11 @@ class DDPM(DiffusionProcess):
     """
 
     def __init__(
-        self, num_timesteps: int, beta_start: float = 1e-4, beta_end: float = 0.02
+        self,
+        num_timesteps: int,
+        beta_start: float = 1e-4,
+        beta_end: float = 0.02,
+        device: str = "cuda",
     ) -> None:
         """Initialize the DDPM algorithm.
 
@@ -39,10 +44,11 @@ class DDPM(DiffusionProcess):
             num_timesteps: Number of time steps in the diffusion process.
             beta_start: Start value for beta.
             beta_end: End value for beta.
+            device: Device to use for the computation.
         """
-        super().__init__(timesteps=num_timesteps)
+        super().__init__(timesteps=num_timesteps, device=device)
         self.num_time_steps = num_timesteps
-        self.betas = torch.linspace(beta_start, beta_end, num_timesteps)
+        self.betas = torch.linspace(beta_start, beta_end, num_timesteps, device=device)
         self.alpha = 1.0 - self.betas
         self.alpha_cumprod = torch.cumprod(self.alpha, dim=0)
         self.sqrt_alpha_cumprod = torch.sqrt(self.alpha_cumprod)

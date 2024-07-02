@@ -26,9 +26,10 @@ import torch
 class DiffusionProcess(ABC):
     """Base class for diffusion processes."""
 
-    def __init__(self, timesteps: int) -> None:
+    def __init__(self, timesteps: int, device: str = "cuda") -> None:
         """Initialize the diffusion process."""
         self.num_time_steps = timesteps
+        self.device = device
 
     @abstractmethod
     def noise_step(
@@ -59,7 +60,7 @@ class DiffusionProcess(ABC):
 
     def sample_timesteps(self, n: int) -> torch.Tensor:
         """Sample timesteps for the diffusion process."""
-        return torch.randint(0, self.num_time_steps, (n,))
+        return torch.randint(0, self.num_time_steps, (n,), device=self.device)
 
     def sample_noise(self, shape: torch.Size) -> torch.Tensor:
         """Sample noise for the diffusion process.
@@ -67,4 +68,4 @@ class DiffusionProcess(ABC):
         Args:
             shape: Shape of the noise tensor.
         """
-        return torch.empty(shape).normal_()
+        return torch.empty(shape, device=self.device).normal_()
