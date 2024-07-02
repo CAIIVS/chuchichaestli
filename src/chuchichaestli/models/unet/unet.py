@@ -39,6 +39,8 @@ from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
 )
 from chuchichaestli.models.upsampling import Upsample
+from chuchichaestli.models.resnet import Norm
+
 
 BLOCK_MAP = {
     "DownBlock": DownBlock,
@@ -206,7 +208,7 @@ class UNet(nn.Module):
             if i > 0:
                 self.up_blocks.append(Upsample(dimensions, outs))
 
-        self.norm = nn.GroupNorm(groups, outs)
+        self.norm = Norm(dimensions, res_norm_type, outs, groups)
         self.act = ACTIVATION_FUNCTIONS[act]()
         self.conv_out = conv_cls(
             outs, out_channels, kernel_size=out_kernel_size, padding="same"
