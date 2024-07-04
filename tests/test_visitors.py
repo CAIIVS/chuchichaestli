@@ -37,7 +37,9 @@ def test_cuda_memory_stats_visitor():
     res_block = ResidualBlock(3, 64, 32, True, 64)
     visitor.visit(res_block)
     res_block(torch.randn(1, 64, 32, 32, 32), torch.randn(1, 64))
-    assert len(visitor.memory_stats) == 10 + 1  # 10 layers + resnet block itself
+    assert (
+        len(visitor.memory_stats) == 10 + 2 + 1
+    )  # 10 layers + 2 for the Norm internals + resnet block itself
 
 
 @pytest.fixture
