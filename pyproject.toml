@@ -1,6 +1,6 @@
 [project]
 name = "chuchichaestli"
-version = "0.0.1"
+dynamic = ["version"]
 license = { file = "LICENSE" }
 authors = [
   { name = "Yann Billeter", email = "bily@zhaw.ch" },
@@ -32,6 +32,9 @@ Issues = "https://github.com/CAIIVS/chuchichaestli/issues"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/chuchichaestli/__about__.py"
 
 [tool.hatch.envs.test]
 dependencies = [

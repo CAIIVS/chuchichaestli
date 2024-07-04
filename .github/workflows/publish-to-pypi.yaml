@@ -98,6 +98,7 @@ jobs:
 
   publish-to-testpypi:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
+    if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
     needs:
     - build
     runs-on: ubuntu-latest
@@ -120,3 +121,39 @@ jobs:
       with:
         skip-existing: true
         repository-url: https://test.pypi.org/legacy/
+
+  version-bump-dev:
+    name: Dev version bump ↗️
+    needs:
+    - publish-to-testpypi
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Bump version
+      run: |
+        git config --global user.name 'autobump'
+        git config --global user.email 'autobump@chuchichaestli.dev'
+        VERSION=`hatch version`
+        hatch version dev
+        NEW_VERSION=`hatch version`
+        git add src/chuchichaestli/__about__.py
+        git commit -m "Bump version: $VERSION → $NEW_VERSION"
+        git push
+
+  version-bump-release:
+    name: Release version bump ⬆️
+    needs:
+    - publish-to-pypi
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Bump version
+      run: |
+        git config --global user.name 'autobump'
+        git config --global user.email 'autobump@chuchichaestli.dev'
+        VERSION=`hatch version`
+        hatch version major
+        NEW_VERSION=`hatch version`
+        git add src/chuchichaestli/__about__.py
+        git commit -m "Bump version: $VERSION → $NEW_VERSION"
+        git push
