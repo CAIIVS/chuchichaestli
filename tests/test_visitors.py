@@ -72,13 +72,9 @@ def mps_visitor(request):
 
 def test_mps_memory_allocation(mps_visitor):
     """Test the MPS memory allocation visitor."""
-    visitor = MPSMemoryAllocationVisitor()
-    res_block = ResidualBlock(3, 64, 32, True, 64)
-    visitor.visit(res_block)
-    res_block(torch.randn(1, 64, 32, 32, 32), torch.randn(1, 64))
     visitor = mps_visitor
     if visitor:
-        assert len(visitor.memory_stats) == 11
+        assert len(visitor.memory_stats) == 10 + 1  # 10 layers + resnet block itself
 
 
 def test_mps_memory_report(mps_visitor):
