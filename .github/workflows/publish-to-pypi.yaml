@@ -1,7 +1,7 @@
 # This workflow will build the package, and publish it on test-pypi and pypi (if tagged)
 # https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
 
-name: Upload Python Package to the PyPI repository
+name: Release 🐍 📦 on PyPI
 
 
 on:
@@ -34,31 +34,32 @@ jobs:
         name: python-package-distributions
         path: dist/
 
+
   publish-to-pypi:
-    name: Publish Python 🐍 distribution 📦 to PyPI
+    name: Publish 🐍 📦 to PyPI
     if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
     needs:
     - build
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/chuchichaestli  # Replace <package-name> with your PyPI project name
+      url: https://pypi.org/p/chuchichaestli
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
 
     steps:
-    - name: Download all the dists
+    - name: Download 📦
       uses: actions/download-artifact@v3
       with:
         name: python-package-distributions
         path: dist/
-    - name: Publish distribution 📦 to PyPI
+    - name: Upload 📦 to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
 
+
   github-release:
-    name: |-
-      Sign the Python 🐍 distribution 📦 with Sigstore
-      and upload them to GitHub Release
+    name: |
+      Sign the 🐍 📦 with Sigstore and upload them to GitHub Release
     needs:
     - publish-to-pypi
     runs-on: ubuntu-latest
@@ -68,12 +69,12 @@ jobs:
       id-token: write  # IMPORTANT: mandatory for sigstore
 
     steps:
-    - name: Download all the dists
+    - name: Download 📦
       uses: actions/download-artifact@v3
       with:
         name: python-package-distributions
         path: dist/
-    - name: Sign the dists with Sigstore
+    - name: Sign 📦 with Sigstore
       uses: sigstore/gh-action-sigstore-python@v2.1.1
       with:
         inputs: |-
@@ -96,11 +97,40 @@ jobs:
         gh release upload '${{ github.ref_name }}' dist/**
         --repo '${{ github.repository }}'
 
+
+  test-build:
+    name: Build test distribution 📦
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+    - name: Install pypa/build & hatch
+      run: |
+        python3 -m pip install build hatch --user
+    - name: Amend 📦 version with git hash
+      run:   |
+        VERSION=`hatch version`
+        VERSION_HASH=`git rev-parse --short "$GITHUB_SHA"`
+        hatch version "${VERSION}+${VERSION_HASH}"
+    - name: Build the 📦
+      run: |
+        python3 -m build
+    - name: Store the 📦
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-test-distributions
+        path: dist/
+
+
   publish-to-testpypi:
-    name: Publish Python 🐍 distribution 📦 to TestPyPI
+    name: Publish 🐍 📦 to TestPyPI
     if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
     needs:
-    - build
+    - test-build
     runs-on: ubuntu-latest
 
     environment:
@@ -111,28 +141,34 @@ jobs:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
 
     steps:
-    - name: Download all the dists
+    - name: Download 📦
       uses: actions/download-artifact@v3
       with:
-        name: python-package-distributions
+        name: python-test-distributions
         path: dist/
-    - name: Publish distribution 📦 to TestPyPI
+    - name: Upload 📦 to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         skip-existing: true
         repository-url: https://test.pypi.org/legacy/
 
+
   version-bump-dev:
     name: Dev version bump ↗️
     needs:
     - publish-to-testpypi
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     steps:
+    - uses: actions/checkout@v4
+    - name: Install hatch
+      run: |
+        python3 -m pip install hatch --user
     - name: Bump version
       run: |
-        git config --global user.name 'autobump'
-        git config --global user.email 'autobump@chuchichaestli.dev'
+        git config --global user.name 'autobump[bot]'
+        git config --global user.email 'autobump[bot]@chuchichaestli.dev'
         VERSION=`hatch version`
         hatch version dev
         NEW_VERSION=`hatch version`
@@ -140,17 +176,23 @@ jobs:
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
         git push
 
+
   version-bump-release:
     name: Release version bump ⬆️
     needs:
     - publish-to-pypi
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     steps:
+    - uses: actions/checkout@v4
+    - name: Install hatch
+      run: |
+        python3 -m pip install hatch --user
     - name: Bump version
       run: |
-        git config --global user.name 'autobump'
-        git config --global user.email 'autobump@chuchichaestli.dev'
+        git config --global user.name 'autobump[bot]'
+        git config --global user.email 'autobump[bot]@chuchichaestli.dev'
         VERSION=`hatch version`
         hatch version major
         NEW_VERSION=`hatch version`
