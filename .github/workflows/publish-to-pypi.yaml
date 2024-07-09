@@ -133,6 +133,18 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    #   if: github.event_name == 'pull_request'
+    #   with:
+    #     fetch-depth: 0
+    #     ref: ${{ github.event.pull_request.head.ref }}
+    # - uses: actions/checkout@v4
+    #   if: github.event_name == 'push'
+    #   with:
+    #     fetch-depth: 0
+    - name: Dump GitHub context
+      env:
+        GITHUB_CONTEXT: ${{ toJson(github) }}
+      run: echo "$GITHUB_CONTEXT"
     - name: Install hatch
       run: |
         python3 -m pip install hatch --user
@@ -150,13 +162,21 @@ jobs:
 
   version-bump-release:
     name: Release version bump ⬆️
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
     needs:
     - publish-to-pypi
-    if: github.event_name == 'push' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
+      if: github.event_name == 'pull_request'
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.ref }}
+    - uses: actions/checkout@v4
+      if: github.event_name == 'push'
+      with:
+        fetch-depth: 0
     - name: Install hatch
       run: |
         python3 -m pip install hatch --user
