@@ -1,8 +1,17 @@
 [project]
-name = "Chuchichaestli"
-version = "0.0.1"
+name = "chuchichaestli"
+dynamic = ["version"]
 license = { file = "LICENSE" }
-authors = [{ name = "Yann Billeter", email = "bily@zhaw.ch" }]
+authors = [
+  { name = "Yann Billeter", email = "bily@zhaw.ch" },
+  { name = "Daniel Barco", email = "baoc@zhaw.ch" },
+  { name = "Philipp Denzel", email = "denp@zhaw.ch" },
+  { name = "Martin Oswald", email = "oswd@zhaw.ch" },
+  { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
+]
+maintainers = [
+  { name = "Yann Billeter", email = "bily@zhaw.ch" },
+]
 description = "Where you find all the state-of-the-art cooking utensils (salt, pepper, gradient descent... the usual)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,11 +26,15 @@ dev = ["ruff==0.4.1", "pre-commit==3.7.0", "pytest==8.1.1"]
 
 [project.urls]
 Homepage = "https://github.com/CAIIVS/chuchichaestli"
+Repository = "https://github.com/CAIIVS/chuchichaestli.git"
 Issues = "https://github.com/CAIIVS/chuchichaestli/issues"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/chuchichaestli/__about__.py"
 
 [tool.hatch.envs.test]
 dependencies = [
