@@ -187,7 +187,7 @@ jobs:
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@chuchichaestli.dev'
         VERSION=`hatch version`
-        hatch version major
+        hatch version micro
         NEW_VERSION=`hatch version`
         git add src/chuchichaestli/__about__.py
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
