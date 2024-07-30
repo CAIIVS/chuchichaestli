@@ -7,10 +7,8 @@ name: Release 🐍 📦 on PyPI
 on:
   push:
     branches: [ "main" ]
-    ignore: 
-      - refs/tags/**  # ignore tag pushes
     paths-ignore:
-      - pyproject.toml   
+      - pyproject.toml
   pull_request:
     branches: [ "main" ]
 
