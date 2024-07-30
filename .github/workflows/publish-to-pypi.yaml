@@ -6,7 +6,6 @@ name: Release 🐍 📦 on PyPI
 
 on:
   push:
-    branches: [ "main" ]
     paths-ignore:
       - src/chuchichaestli/__about__.py
 
@@ -136,7 +135,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      if: github.event_name == 'pull_request'
+      # Only run this job on pull requests
+      if: github.ref != 'refs/heads/master'
       with:
         fetch-depth: 0
         ref: ${{ github.event.pull_request.head.ref }}
@@ -167,8 +167,8 @@ jobs:
 
   version-bump-release:
     name: Release version bump ⬆️
-    if: github.event.pull_request.merged == true  
-        # || github.event_name == 'push'
+    # Only run this job on the master branch
+    if: github.ref == 'refs/heads/master'
     needs:
     - publish-to-pypi
     runs-on: ubuntu-latest
