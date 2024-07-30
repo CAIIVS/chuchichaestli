@@ -162,7 +162,7 @@ jobs:
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{ secrets.READ_WRITE_PAT }}
-        branch: ${{ github.event.pull_request.head.ref }}
+        branch: ${{ github.ref }}
 
 
   version-bump-release:
