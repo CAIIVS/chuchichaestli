@@ -7,6 +7,10 @@ name: Release 🐍 📦 on PyPI
 on:
   push:
     branches: [ "main" ]
+    ignore: 
+      - refs/tags/**  # ignore tag pushes
+    paths-ignore:
+      - pyproject.toml   
   pull_request:
     branches: [ "main" ]
 
@@ -167,7 +171,8 @@ jobs:
 
   version-bump-release:
     name: Release version bump ⬆️
-    if: github.event_name == 'push' || github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true  
+        # || github.event_name == 'push'
     needs:
     - publish-to-pypi
     runs-on: ubuntu-latest
