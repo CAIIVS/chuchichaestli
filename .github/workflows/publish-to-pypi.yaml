@@ -140,6 +140,8 @@ jobs:
       with:
         fetch-depth: 0
         ref: ${{ github.event.pull_request.head.ref }}
+        persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
+        token: ${{ secrets.READ_WRITE_PAT }}
     - uses: actions/checkout@v4
       if: github.event_name == 'push'
       with:
@@ -156,7 +158,11 @@ jobs:
         NEW_VERSION=`hatch version`
         git add src/chuchichaestli/__about__.py
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
-        git push
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.READ_WRITE_PAT }}
+        branch: ${{ github.event.pull_request.head.ref }}
 
 
   version-bump-release:
@@ -175,6 +181,8 @@ jobs:
       with:
         fetch-depth: 0
         ref: ${{ github.event.pull_request.head.ref }}
+        persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
+        token: ${{ secrets.READ_WRITE_PAT }}
     - uses: actions/checkout@v4
       if: github.event_name == 'push'
       with:
@@ -191,4 +199,8 @@ jobs:
         NEW_VERSION=`hatch version`
         git add src/chuchichaestli/__about__.py
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
-        git push
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.READ_WRITE_PAT }}
+        branch: ${{ github.event.pull_request.head.ref }}
