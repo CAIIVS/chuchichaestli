@@ -23,6 +23,24 @@ import torch.types
 
 from chuchichaestli.diffusion.base import DiffusionProcess
 
+SCHEDULES = {
+    "linear": lambda beta_start, beta_end, num_timesteps, device: torch.linspace(
+        beta_start, beta_end, num_timesteps, device=device
+    ),
+    "linear_scaled": lambda beta_start, beta_end, num_timesteps, device: torch.linspace(
+        (1000 / num_timesteps) * beta_start,
+        (1000 / num_timesteps) * beta_end,
+        num_timesteps,
+        device=device,
+    ),
+    "sigmoid_beta_unscaled": lambda beta_start,
+    beta_end,
+    num_timesteps,
+    device: torch.sigmoid(torch.linspace(-6, 6, num_timesteps, device=device))
+    * (beta_end - beta_start)
+    + beta_start,
+}
+
 
 class DDPM(DiffusionProcess):
     """Diffusion Probabilistic Model (DDPM) noise process.
@@ -37,6 +55,7 @@ class DDPM(DiffusionProcess):
         beta_start: float = 1e-4,
         beta_end: float = 0.02,
         device: str = "cuda",
+        schedule: str = "linear",
     ) -> None:
         """Initialize the DDPM algorithm.
 
@@ -45,11 +64,12 @@ class DDPM(DiffusionProcess):
             beta_start: Start value for beta.
             beta_end: End value for beta.
             device: Device to use for the computation.
+            schedule: Schedule for beta.
         """
         super().__init__(timesteps=num_timesteps, device=device)
         self.num_time_steps = num_timesteps
-        self.betas = torch.linspace(beta_start, beta_end, num_timesteps, device=device)
-        self.alpha = 1.0 - self.betas
+        self.beta = SCHEDULES[schedule](beta_start, beta_end, num_timesteps, device)
+        self.alpha = 1.0 - self.beta
         self.alpha_cumprod = torch.cumprod(self.alpha, dim=0)
         self.sqrt_alpha_cumprod = torch.sqrt(self.alpha_cumprod)
         self.sqrt_1m_alpha_cumprod = torch.sqrt(1.0 - self.alpha_cumprod)
@@ -70,7 +90,7 @@ class DDPM(DiffusionProcess):
         timesteps = self.sample_timesteps(x_t.shape[0])
         noise = self.sample_noise(x_t.shape)
 
-        s_shape = [x_t.shape[0]] + [1] * (x_t.dim() - 1)
+        s_shape = [-1] + [1] * (x_t.dim() - 1)
 
         s1 = self.sqrt_alpha_cumprod[timesteps].reshape(s_shape)
         s2 = self.sqrt_1m_alpha_cumprod[timesteps].reshape(s_shape)
@@ -92,9 +112,7 @@ class DDPM(DiffusionProcess):
 
         x_tm1 = coef_outer_t * (x_t - coef_inner_t * model_output)
 
-        t = torch.full((x_t.shape[0],), t)
-
-        if (t > 0).all():
+        if t > 0:
             noise = torch.empty_like(x_t).normal_()
             sigma_t = self.betas[t] ** 0.5
             return x_tm1 + sigma_t * noise
