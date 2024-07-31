@@ -106,7 +106,7 @@ class DDPM(DiffusionProcess):
             t: Current timestep.
             model_output: Output of the model at the current timestep.
         """
-        coef_shape = [x_t.shape[0]] + [1] * (x_t.dim() - 1)
+        coef_shape = [-1] + [1] * (x_t.dim() - 1)
         coef_inner_t = self.coef_inner[t].reshape(coef_shape)
         coef_outer_t = self.coef_outer[t].reshape(coef_shape)
 
