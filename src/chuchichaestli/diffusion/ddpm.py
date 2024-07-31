@@ -114,7 +114,7 @@ class DDPM(DiffusionProcess):
 
         if t > 0:
             noise = torch.empty_like(x_t).normal_()
-            sigma_t = self.betas[t] ** 0.5
+            sigma_t = self.beta[t] ** 0.5
             return x_tm1 + sigma_t * noise
 
         return x_tm1
