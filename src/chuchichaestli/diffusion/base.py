@@ -22,11 +22,29 @@ from abc import ABC, abstractmethod
 
 import torch
 
+SCHEDULES = {
+    "linear": lambda beta_start, beta_end, num_timesteps, device: torch.linspace(
+        beta_start, beta_end, num_timesteps, device=device
+    ),
+    "linear_scaled": lambda beta_start, beta_end, num_timesteps, device: torch.linspace(
+        (1000 / num_timesteps) * beta_start,
+        (1000 / num_timesteps) * beta_end,
+        num_timesteps,
+        device=device,
+    ),
+    "sigmoid_beta_unscaled": lambda beta_start,
+    beta_end,
+    num_timesteps,
+    device: torch.sigmoid(torch.linspace(-6, 6, num_timesteps, device=device))
+    * (beta_end - beta_start)
+    + beta_start,
+}
+
 
 class DiffusionProcess(ABC):
     """Base class for diffusion processes."""
 
-    def __init__(self, timesteps: int, device: str = "cuda") -> None:
+    def __init__(self, timesteps: int, device: str = "cpu") -> None:
         """Initialize the diffusion process."""
         self.num_time_steps = timesteps
         self.device = device

@@ -21,25 +21,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 import torch
 import torch.types
 
-from chuchichaestli.diffusion.base import DiffusionProcess
-
-SCHEDULES = {
-    "linear": lambda beta_start, beta_end, num_timesteps, device: torch.linspace(
-        beta_start, beta_end, num_timesteps, device=device
-    ),
-    "linear_scaled": lambda beta_start, beta_end, num_timesteps, device: torch.linspace(
-        (1000 / num_timesteps) * beta_start,
-        (1000 / num_timesteps) * beta_end,
-        num_timesteps,
-        device=device,
-    ),
-    "sigmoid_beta_unscaled": lambda beta_start,
-    beta_end,
-    num_timesteps,
-    device: torch.sigmoid(torch.linspace(-6, 6, num_timesteps, device=device))
-    * (beta_end - beta_start)
-    + beta_start,
-}
+from chuchichaestli.diffusion.base import DiffusionProcess, SCHEDULES
 
 
 class DDPM(DiffusionProcess):
@@ -54,7 +36,7 @@ class DDPM(DiffusionProcess):
         num_timesteps: int,
         beta_start: float = 1e-4,
         beta_end: float = 0.02,
-        device: str = "cuda",
+        device: str = "cpu",
         schedule: str = "linear",
     ) -> None:
         """Initialize the DDPM algorithm.

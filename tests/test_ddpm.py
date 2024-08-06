@@ -29,29 +29,53 @@ def ddpm():
     return DDPM(num_timesteps=10)
 
 
-def test_noise_step(ddpm):
+@pytest.mark.parametrize(
+    "dimensions, batchsize",
+    [
+        (1, 1),
+        (2, 1),
+        (3, 1),
+        (1, 4),
+        (2, 4),
+        (3, 4),
+    ],
+)
+def test_noise_step(ddpm, dimensions, batchsize):
     """Test the noise_step method of the DDPM class."""
     # Create dummy input tensor
-    x_t = torch.randn(1, 16, 32)
+    input_shape = (batchsize, 16) + (32,) * dimensions
+    x_t = torch.randn(input_shape)
 
     # Call the noise_step method
     output = ddpm.noise_step(x_t)
 
     # Check the output shape
-    assert output[0].shape == (1, 16, 32)
-    assert output[1].shape == (1, 16, 32)
-    assert output[2].shape == (1,)
+    assert output[0].shape == input_shape
+    assert output[1].shape == input_shape
+    assert output[2].shape[0] == batchsize
 
 
-def test_denoise_step(ddpm):
+@pytest.mark.parametrize(
+    "dimensions, batchsize",
+    [
+        (1, 1),
+        (2, 1),
+        (3, 1),
+        (1, 4),
+        (2, 4),
+        (3, 4),
+    ],
+)
+def test_denoise_step(ddpm, dimensions, batchsize):
     """Test the denoise_step method of the DDPM class."""
     # Create dummy input tensors
-    x_t = torch.randn(1, 16, 32)
+    input_shape = (batchsize, 16) + (32,) * dimensions
+    x_t = torch.randn(input_shape)
     t = 0
-    model_output = torch.randn(1, 16, 32)
+    model_output = torch.randn(input_shape)
 
     # Call the denoise_step method
     output = ddpm.denoise_step(x_t, t, model_output)
 
     # Check the output shape
-    assert output.shape == (1, 16, 32)
+    assert output.shape == input_shape

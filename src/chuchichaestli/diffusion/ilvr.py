@@ -69,6 +69,8 @@ class ILVR(DDPM):
         beta_start: float = 1e-4,
         beta_end: float = 0.02,
         low_pass_filter=LinearLowPassFilter4,
+        device: str = "cpu",
+        schedule: str = "linear",
     ) -> None:
         """Initialize the ILVR algorithm.
 
@@ -77,37 +79,17 @@ class ILVR(DDPM):
             beta_start: Start value for beta.
             beta_end: End value for beta.
             low_pass_filter: Low-pass filter function.
+            device: Device to use for the computation.
+            schedule: Schedule for beta.
         """
-        self.num_time_steps = num_timesteps
-        self.betas = torch.linspace(beta_start, beta_end, num_timesteps)
-        self.alpha = 1.0 - self.betas
-        self.alpha_cumprod = torch.cumprod(self.alpha, dim=0)
-        self.sqrt_alpha_cumprod = torch.sqrt(self.alpha_cumprod)
-        self.sqrt_1m_alpha_cumprod = torch.sqrt(1.0 - self.alpha_cumprod)
-        self.coef_inner = (1 - self.alpha) / self.sqrt_1m_alpha_cumprod
-        self.coef_outer = 1.0 / torch.sqrt(self.alpha)
-
+        super().__init__(
+            num_timesteps=num_timesteps,
+            beta_start=beta_start,
+            beta_end=beta_end,
+            device=device,
+            schedule=schedule,
+        )
         self.low_pass_filter = low_pass_filter
-
-    def noise_step(
-        self, x_t: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Noise step for the diffusion process.
-
-        Args:
-            x_t: Tensor of shape (batch_size, *).
-
-        Returns:
-            Tuple of the sampled tensor, noise tensor and timesteps.
-        """
-        timesteps = self.sample_timesteps(x_t.shape[0])
-        noise = self.sample_noise(x_t.shape)
-
-        s_shape = [x_t.shape[0]] + [1] * (x_t.dim() - 1)
-
-        s1 = self.sqrt_alpha_cumprod[timesteps].reshape(s_shape)
-        s2 = self.sqrt_1m_alpha_cumprod[timesteps].reshape(s_shape)
-        return s1 * x_t + s2 * noise, noise, timesteps
 
     def denoise_step(
         self,

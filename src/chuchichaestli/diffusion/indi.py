@@ -32,7 +32,10 @@ class InDI(DiffusionProcess):
     """
 
     def __init__(
-        self, num_timesteps: int, epsilon: float | torch.Tensor = 0.01
+        self,
+        num_timesteps: int,
+        epsilon: float | torch.Tensor = 0.01,
+        device: str = "cpu",
     ) -> None:
         """Initialize the InDI algorithm.
 
@@ -41,14 +44,17 @@ class InDI(DiffusionProcess):
             epsilon: Noise level. Can be a scalar or a tensor of shape (num_timesteps,).
                 For eps_t = eps_0 / sqrt(t), the noise perturbation is a pure Brownian motion.
                 For eps = eps_0 = cst, the InDI scheme is recovered.
+            device: Device to use for the computation.
 
         """
+        super().__init__(timesteps=num_timesteps, device=device)
         self.num_time_steps = num_timesteps
         self.delta = 1.0 / num_timesteps
         if isinstance(epsilon, float):
-            self.epsilon = torch.full((num_timesteps,), epsilon)
+            self.epsilon = torch.full((num_timesteps,), epsilon, device=device)
         else:
             self.epsilon = epsilon
+            self.epsilon.to(device)
 
     def sample_timesteps(self, batch_size: int) -> torch.Tensor:
         """Sample timesteps for the InDI diffusion process.
@@ -59,7 +65,10 @@ class InDI(DiffusionProcess):
         Returns:
             Tensor of shape (batch_size,) with the sampled timesteps.
         """
-        return torch.randint(0, self.num_time_steps, (batch_size,)) * self.delta
+        return (
+            torch.randint(0, self.num_time_steps, (batch_size,), device=self.device)
+            * self.delta
+        )
 
     def noise_step(
         self, x: torch.Tensor, y: torch.Tensor
@@ -74,12 +83,13 @@ class InDI(DiffusionProcess):
             Tuple of the sampled tensor, noise tensor and timesteps.
         """
         timesteps = self.sample_timesteps(x.shape[0])
+        timesteps = timesteps.view(-1, *([1] * (x.dim() - 1)))
 
         x_t = (1 - timesteps) * x + timesteps * y
         # TODO: Verify that this is correct.
         noise = x_t - x
 
-        return x_t, noise, timesteps
+        return x_t, noise, timesteps.view(-1)
 
     def denoise_step(
         self, x_t: torch.Tensor, t: int, model_output: torch.Tensor
