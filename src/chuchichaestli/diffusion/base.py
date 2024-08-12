@@ -32,12 +32,33 @@ SCHEDULES = {
         num_timesteps,
         device=device,
     ),
-    "sigmoid_beta_unscaled": lambda beta_start,
-    beta_end,
-    num_timesteps,
-    device: torch.sigmoid(torch.linspace(-6, 6, num_timesteps, device=device))
+    "squared": lambda beta_min, beta_max, num_timesteps, device: beta_min
+    + (beta_max - beta_min)
+    * (torch.arange(num_timesteps, dtype=torch.float32, device=device) / num_timesteps)
+    ** 2,
+    "sigmoid": lambda beta_start, beta_end, num_timesteps, device: torch.sigmoid(
+        torch.linspace(-6, 6, num_timesteps, device=device)
+    )
     * (beta_end - beta_start)
     + beta_start,
+    "cosine": lambda beta_min, beta_max, num_timesteps, device: beta_min
+    + (beta_max - beta_min)
+    * (
+        1
+        - torch.cos(
+            (
+                torch.arange(num_timesteps, dtype=torch.float32, device=device)
+                / num_timesteps
+            )
+            * torch.pi
+            / 2
+        )
+    ),
+    "exponential": lambda beta_min, beta_max, num_timesteps, device: beta_min
+    * (beta_max / beta_min)
+    ** (
+        torch.arange(num_timesteps, dtype=torch.float32, device=device) / num_timesteps
+    ),
 }
 
 

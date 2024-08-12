@@ -30,23 +30,28 @@ def ddpm():
 
 
 @pytest.mark.parametrize(
-    "dimensions, batchsize",
+    "dimensions, batchsize, schedule",
     [
-        (1, 1),
-        (2, 1),
-        (3, 1),
-        (1, 4),
-        (2, 4),
-        (3, 4),
+        (1, 1, "linear"),
+        (2, 1, "linear"),
+        (3, 1, "linear"),
+        (1, 4, "linear"),
+        (2, 4, "linear"),
+        (3, 4, "linear"),
+        (1, 1, "linear_scaled"),
+        (1, 2, "squared"),
+        (1, 2, "cosine"),
+        (1, 2, "exponential"),
     ],
 )
-def test_noise_step(ddpm, dimensions, batchsize):
+def test_noise_step(dimensions, batchsize, schedule):
     """Test the noise_step method of the DDPM class."""
     # Create dummy input tensor
     input_shape = (batchsize, 16) + (32,) * dimensions
     x_t = torch.randn(input_shape)
 
     # Call the noise_step method
+    ddpm = DDPM(num_timesteps=10, schedule=schedule)
     output = ddpm.noise_step(x_t)
 
     # Check the output shape
