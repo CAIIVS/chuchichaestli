@@ -36,6 +36,7 @@ class InDI(DiffusionProcess):
         num_timesteps: int,
         epsilon: float | torch.Tensor = 0.01,
         device: str = "cpu",
+        **kwargs,
     ) -> None:
         """Initialize the InDI algorithm.
 
@@ -45,9 +46,10 @@ class InDI(DiffusionProcess):
                 For eps_t = eps_0 / sqrt(t), the noise perturbation is a pure Brownian motion.
                 For eps = eps_0 = cst, the InDI scheme is recovered.
             device: Device to use for the computation.
+            kwargs: Additional keyword arguments.
 
         """
-        super().__init__(timesteps=num_timesteps, device=device)
+        super().__init__(timesteps=num_timesteps, device=device, **kwargs)
         self.num_time_steps = num_timesteps
         self.delta = 1.0 / num_timesteps
         if isinstance(epsilon, float):

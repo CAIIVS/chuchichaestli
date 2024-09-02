@@ -62,13 +62,72 @@ SCHEDULES = {
 }
 
 
+class DistributionAdapter(ABC):
+    """Base class for distribution adapters."""
+
+    @abstractmethod
+    def __call__(
+        self,
+        shape: torch.Size,
+        device: str,
+    ) -> torch.Tensor:
+        """Sample noise from the distribution."""
+        pass
+
+
+class HalfNormalDistribution(DistributionAdapter):
+    """Half normal distribution adapter."""
+
+    def __init__(
+        self, mean: float | torch.Tensor, scale: float | torch.Tensor = 1.0
+    ) -> None:
+        """Initialize the half normal distribution adapter."""
+        self.mean = mean
+        self.scale = scale
+
+    def __call__(
+        self,
+        shape: torch.Size,
+        device: str,
+    ) -> torch.Tensor:
+        """Sample noise from the distribution."""
+        return torch.randn(shape, device=device).abs() * self.scale + self.mean
+
+
+class NormalDistribution(DistributionAdapter):
+    """Normal distribution adapter."""
+
+    def __init__(
+        self, mean: float | torch.Tensor, scale: float | torch.Tensor = 1.0
+    ) -> None:
+        """Initialize the normal distribution adapter."""
+        self.mean = mean
+        self.scale = scale
+
+    def __call__(
+        self,
+        shape: torch.Size,
+        device: str,
+    ) -> torch.Tensor:
+        """Sample noise from the distribution."""
+        return torch.randn(shape, device=device) * self.scale + self.mean
+
+
 class DiffusionProcess(ABC):
     """Base class for diffusion processes."""
 
-    def __init__(self, timesteps: int, device: str = "cpu") -> None:
+    def __init__(
+        self,
+        timesteps: int,
+        device: str = "cpu",
+        noise_distribution: DistributionAdapter | None = None,
+        *args,
+        **kwargs,
+    ) -> None:
         """Initialize the diffusion process."""
         self.num_time_steps = timesteps
         self.device = device
+        self.noise_distribution = noise_distribution
 
     @abstractmethod
     def noise_step(
@@ -106,5 +165,9 @@ class DiffusionProcess(ABC):
 
         Args:
             shape: Shape of the noise tensor.
+            mean: Mean of the noise tensor.
+            scale: Scale of the noise tensor.
         """
-        return torch.empty(shape, device=self.device).normal_()
+        if self.noise_distribution is not None:
+            return self.noise_distribution(shape, device=self.device)
+        return torch.randn(shape, device=self.device)

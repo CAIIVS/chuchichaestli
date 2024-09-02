@@ -1,4 +1,4 @@
-"""Implementation of the Diffusion Probabilistic Model (DDPM) noise process as described in the paper.
+"""Implementation of PriorGrad.
 
 This file is part of Chuchichaestli.
 
@@ -19,30 +19,34 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 import torch
-import torch.types
 
-from chuchichaestli.diffusion.base import DiffusionProcess, SCHEDULES
+from chuchichaestli.diffusion.base import NormalDistribution
+from chuchichaestli.diffusion.ddpm import DDPM
 
 
-class DDPM(DiffusionProcess):
-    """Diffusion Probabilistic Model (DDPM) noise process.
+class PriorGrad(DDPM):
+    """PriorGrad noise process.
 
-    The DDPM noise process is described in the paper "Denoising Diffusion Probabilistic Models" by Ho et al.
-    See https://arxiv.org/abs/2006.11239.
+    Implementation of "PriorGrad: Improving conditional denoising diffusion models with data-dependent adataptive prior"
+    by Lee et al. (see https://arxiv.org/abs/2106.06406)
     """
 
     def __init__(
         self,
+        mean: float | torch.Tensor,
+        scale: float | torch.Tensor,
         num_timesteps: int,
         beta_start: float = 1e-4,
         beta_end: float = 0.02,
         device: str = "cpu",
         schedule: str = "linear",
         **kwargs,
-    ) -> None:
-        """Initialize the DDPM algorithm.
+    ):
+        """Initialize the PriorGrad algorithm.
 
         Args:
+            mean: Mean value of the noise process.
+            scale: Scale value of the noise process.
             num_timesteps: Number of time steps in the diffusion process.
             beta_start: Start value for beta.
             beta_end: End value for beta.
@@ -50,15 +54,19 @@ class DDPM(DiffusionProcess):
             schedule: Schedule for beta.
             kwargs: Additional keyword arguments.
         """
-        super().__init__(timesteps=num_timesteps, device=device, **kwargs)
-        self.num_time_steps = num_timesteps
-        self.beta = SCHEDULES[schedule](beta_start, beta_end, num_timesteps, device)
-        self.alpha = 1.0 - self.beta
-        self.alpha_cumprod = torch.cumprod(self.alpha, dim=0)
-        self.sqrt_alpha_cumprod = torch.sqrt(self.alpha_cumprod)
-        self.sqrt_1m_alpha_cumprod = torch.sqrt(1.0 - self.alpha_cumprod)
-        self.coef_inner = (1 - self.alpha) / self.sqrt_1m_alpha_cumprod
-        self.coef_outer = 1.0 / torch.sqrt(self.alpha)
+        scale = scale.to(device)
+        mean = mean.to(device)
+        distr = NormalDistribution(0, scale)
+        super().__init__(
+            noise_distribution=distr,
+            num_timesteps=num_timesteps,
+            beta_start=beta_start,
+            beta_end=beta_end,
+            device=device,
+            schedule=schedule,
+            **kwargs,
+        )
+        self.mean = mean
 
     def noise_step(
         self, x_t: torch.Tensor
@@ -78,7 +86,7 @@ class DDPM(DiffusionProcess):
 
         s1 = self.sqrt_alpha_cumprod[timesteps].reshape(s_shape)
         s2 = self.sqrt_1m_alpha_cumprod[timesteps].reshape(s_shape)
-        return s1 * x_t + s2 * noise, noise, timesteps
+        return s1 * (x_t - self.mean) + s2 * noise, noise, timesteps
 
     def denoise_step(
         self,
@@ -106,4 +114,4 @@ class DDPM(DiffusionProcess):
             sigma_t = self.beta[t] ** 0.5
             return x_tm1 + sigma_t * noise
 
-        return x_tm1
+        return x_tm1 + self.mean

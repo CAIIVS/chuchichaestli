@@ -21,5 +21,6 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 from chuchichaestli.diffusion.ddpm import DDPM
 from chuchichaestli.diffusion.ilvr import ILVR
 from chuchichaestli.diffusion.indi import InDI
+from chuchichaestli.diffusion.prior_grad import PriorGrad
 
-__all__ = ["DDPM", "ILVR", "InDI"]
+__all__ = ["DDPM", "ILVR", "InDI", "PriorGrad"]

@@ -71,6 +71,7 @@ class ILVR(DDPM):
         low_pass_filter=LinearLowPassFilter4,
         device: str = "cpu",
         schedule: str = "linear",
+        **kwargs,
     ) -> None:
         """Initialize the ILVR algorithm.
 
@@ -81,6 +82,7 @@ class ILVR(DDPM):
             low_pass_filter: Low-pass filter function.
             device: Device to use for the computation.
             schedule: Schedule for beta.
+            kwargs: Additional arguments for the diffusion process.
         """
         super().__init__(
             num_timesteps=num_timesteps,
@@ -88,6 +90,7 @@ class ILVR(DDPM):
             beta_end=beta_end,
             device=device,
             schedule=schedule,
+            **kwargs,
         )
         self.low_pass_filter = low_pass_filter
 
