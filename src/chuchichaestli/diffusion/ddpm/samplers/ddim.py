@@ -1,4 +1,4 @@
-"""Diffusion schedulers sub-module.
+"""Implementation of the Denoising Diffusion Implicit Model (DDIM).
 
 This file is part of Chuchichaestli.
 
@@ -18,6 +18,11 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from chuchichaestli.diffusion.ddpm import DDPM, InDI, PriorGrad, CFGDDPM, BBDM
 
-__all__ = ["DDPM", "InDI", "PriorGrad", "CFGDDPM", "BBDM"]
+class DDIM:
+    """Denoising Diffusion Implicit Model (DDIM) sampler.
+
+    See https://arxiv.org/abs/2010.02502.
+    """
+
+    pass

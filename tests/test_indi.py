@@ -20,7 +20,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 
 import pytest
 import torch
-from chuchichaestli.diffusion.indi import InDI
+from chuchichaestli.diffusion.ddpm.indi import InDI
 
 
 @pytest.mark.parametrize(
@@ -54,29 +54,40 @@ def test_noise_step(dimensions, batchsize):
 
 
 @pytest.mark.parametrize(
-    "dimensions, batchsize",
+    "dimensions, batchsize, yield_intermediate",
     [
-        (1, 1),
-        (2, 1),
-        (3, 1),
-        (1, 4),
-        (2, 4),
-        (3, 4),
+        (1, 1, False),
+        (2, 1, False),
+        (3, 1, False),
+        (1, 4, False),
+        (2, 4, False),
+        (3, 4, False),
+        (1, 1, True),
+        (2, 1, True),
+        (3, 1, True),
+        (1, 4, True),
+        (2, 4, True),
+        (3, 4, True),
     ],
 )
-def test_denoise_step(dimensions, batchsize):
+def test_denoise_step(dimensions, batchsize, yield_intermediate):
     """Test the denoise_step method of the InDI class."""
     # Create an instance of the InDI class
     indi = InDI(num_timesteps=10)
 
     # Create dummy input tensors
     input_shape = (batchsize, 16) + (32,) * dimensions
-    x_t = torch.randn(input_shape)
-    t = 5
-    model_output = torch.randn(input_shape)
+    c = torch.randn(input_shape)
+
+    model = lambda x, t: x[:, :16, ...]  # noqa: E731
 
     # Call the denoise_step method
-    x_tmdelta = indi.denoise_step(x_t, t, model_output)
+    output_generator = indi.generate(
+        model, c, n=2, yield_intermediate=yield_intermediate
+    )
+    output = None
+    for o in output_generator:
+        output = o
 
     # Check the output shape
-    assert x_tmdelta.shape == input_shape
+    assert output.shape == (2 * batchsize, 16) + (32,) * dimensions

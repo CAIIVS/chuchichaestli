@@ -1,4 +1,4 @@
-"""Tests for DDPM.
+"""Tests for CFGDDPM.
 
 This file is part of Chuchichaestli.
 
@@ -20,7 +20,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 
 import pytest
 import torch
-from chuchichaestli.diffusion.ddpm import DDPM
+from chuchichaestli.diffusion.ddpm import CFGDDPM
 
 
 @pytest.mark.parametrize(
@@ -43,13 +43,14 @@ def test_noise_step(dimensions, batchsize, schedule):
     # Create dummy input tensor
     input_shape = (batchsize, 16) + (32,) * dimensions
     x_t = torch.randn(input_shape)
+    c = torch.randn(input_shape)
 
     # Call the noise_step method
-    ddpm = DDPM(num_timesteps=10, schedule=schedule)
-    output = ddpm.noise_step(x_t)
+    ddpm = CFGDDPM(num_timesteps=10, schedule=schedule)
+    output = ddpm.noise_step(x_t, c)
 
     # Check the output shape
-    assert output[0].shape == input_shape
+    assert output[0].shape == (batchsize, 2 * 16) + (32,) * dimensions
     assert output[1].shape == input_shape
     assert output[2].shape[0] == batchsize
 
@@ -74,7 +75,7 @@ def test_noise_step(dimensions, batchsize, schedule):
 def test_generation(dimensions, batchsize, yield_intermediate):
     """Test the denoise_step method of the DDPM class."""
     # Create dummy input tensors
-    ddpm = DDPM(num_timesteps=10)
+    ddpm = CFGDDPM(num_timesteps=10)
     input_shape = (batchsize, 16) + (32,) * dimensions
     c = torch.randn(input_shape)
 

@@ -43,50 +43,62 @@ def test_noise_step(dimensions, batchsize, schedule):
     # Create dummy input tensor
     input_shape = (batchsize, 16) + (32,) * dimensions
     x_t = torch.randn(input_shape)
+    c = torch.randn(input_shape)
 
     # Call the noise_step method
     ddpm = PriorGrad(
         num_timesteps=10,
         schedule=schedule,
-        mean=torch.randn(input_shape),
-        scale=torch.randn(input_shape),
+        mean=torch.randn((16,) + (32,) * dimensions),
+        scale=torch.randn((16,) + (32,) * dimensions),
     )
-    output = ddpm.noise_step(x_t)
+    output = ddpm.noise_step(x_t, c)
 
     # Check the output shape
-    assert output[0].shape == input_shape
-    assert output[1].shape == input_shape
+    assert output[0].shape == (batchsize, 32) + (32,) * dimensions  # x_t and c
+    assert output[1].shape == (batchsize, 16) + (32,) * dimensions  # noise
     assert output[2].shape[0] == batchsize
 
 
 @pytest.mark.parametrize(
-    "dimensions, batchsize",
+    "dimensions, batchsize, yield_intermediate",
     [
-        (1, 1),
-        (2, 1),
-        (3, 1),
-        (1, 4),
-        (2, 4),
-        (3, 4),
+        (1, 1, False),
+        (2, 1, False),
+        (3, 1, False),
+        (1, 4, False),
+        (2, 4, False),
+        (3, 4, False),
+        (1, 1, True),
+        (2, 1, True),
+        (3, 1, True),
+        (1, 4, True),
+        (2, 4, True),
+        (3, 4, True),
     ],
 )
-def test_denoise_step(dimensions, batchsize):
+def test_generation(dimensions, batchsize, yield_intermediate):
     """Test the denoise_step method of the DDPM class."""
     # Create dummy input tensors
     input_shape = (batchsize, 16) + (32,) * dimensions
-    x_t = torch.randn(input_shape)
-    t = 0
-    model_output = torch.randn(input_shape)
+    c = torch.randn(input_shape)
+
+    model = lambda x, t: x[:, :16, ...]  # noqa: E731
 
     prior_grad = PriorGrad(
         num_timesteps=10,
         schedule="linear",
-        mean=torch.randn(input_shape),
-        scale=torch.randn(input_shape),
+        mean=torch.randn((1, 16) + (32,) * dimensions),
+        scale=torch.randn((1, 16) + (32,) * dimensions),
     )
 
     # Call the denoise_step method
-    output = prior_grad.denoise_step(x_t, t, model_output)
+    output_generator = prior_grad.generate(
+        model, c, n=2, yield_intermediate=yield_intermediate
+    )
+    output = None
+    for o in output_generator:
+        output = o
 
     # Check the output shape
-    assert output.shape == input_shape
+    assert output.shape == (2 * batchsize, 16) + (32,) * dimensions

@@ -18,9 +18,12 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
+from collections.abc import Generator
+from typing import Any
+
 import torch
 
-from chuchichaestli.diffusion.base import DiffusionProcess
+from chuchichaestli.diffusion.ddpm.base import DiffusionProcess
 
 
 class InDI(DiffusionProcess):
@@ -73,13 +76,15 @@ class InDI(DiffusionProcess):
         )
 
     def noise_step(
-        self, x: torch.Tensor, y: torch.Tensor
+        self, x: torch.Tensor, y: torch.Tensor, *args, **kwargs
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Noise step for the diffusion process.
 
         Args:
             x: High quality sample, tensor of shape (batch_size, *).
             y: Corresponding low quality sample, tensor of shape (batch_size, *).
+            *args: Additional arguments.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             Tuple of the sampled tensor, noise tensor and timesteps.
@@ -93,26 +98,48 @@ class InDI(DiffusionProcess):
 
         return x_t, noise, timesteps.view(-1)
 
-    def denoise_step(
-        self, x_t: torch.Tensor, t: int, model_output: torch.Tensor
-    ) -> torch.Tensor:
+    def generate(
+        self,
+        model: Any,
+        condition: torch.Tensor,
+        n: int = 1,
+        yield_intermediate: bool = False,
+        *args,
+        **kwargs,
+    ) -> torch.Tensor | Generator[torch.Tensor, None, None]:
         """Sample from the diffusion process.
 
+        Samples n times the number of conditions from the diffusion process.
+
         Args:
-            x_t: Tensor of shape (batch_size, *).
-            t: Current timestep.
-            model_output: Output of the model at the current timestep.
+            model: Model to use for sampling.
+            condition: Tensor to condition generation on. For unconditional generation, supply a zero-tensor of the sample shape.
+            n: Number of samples to generate (batch size).
+            yield_intermediate: Yield intermediate results. This turns the function into a generator.
+            *args: Additional arguments.
+            **kwargs: Additional keyword
         """
-        eps_t = self.epsilon[t]
-        eps_tmdelta = self.epsilon[t - 1]
-
-        t *= self.delta
-        noise = self.sample_noise(x_t.shape)
-
-        x_tmdelta = (
-            (self.delta / t) * model_output
-            + (1 - self.delta / t) * x_t
-            + (t - self.delta) * torch.sqrt(eps_tmdelta**2 - eps_t**2) * noise
+        c = (
+            condition.unsqueeze(0)
+            .expand(n, *condition.shape)
+            .reshape(-1, *condition.shape[1:])
         )
 
-        return x_tmdelta
+        x_t = c + self.epsilon[-1] * self.sample_noise(c.shape)
+        for i in reversed(range(1, self.num_time_steps)):
+            eps_t = self.epsilon[i]
+            eps_tmdelta = self.epsilon[i - 1]
+
+            t = i / self.num_time_steps
+            noise = self.sample_noise(c.shape)
+
+            x_tmdelta = (
+                (self.delta / t) * model(x_t, i)
+                + (1 - self.delta / t) * x_t
+                + (t - self.delta) * torch.sqrt(eps_tmdelta**2 - eps_t**2) * noise
+            )
+            x_t = x_tmdelta
+            if yield_intermediate:
+                yield x_t
+
+        yield x_tmdelta

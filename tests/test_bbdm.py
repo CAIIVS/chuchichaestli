@@ -18,41 +18,36 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from functools import partial
-
 import pytest
 import torch
-from chuchichaestli.diffusion import ILVR
-from chuchichaestli.diffusion.ilvr import low_pass_filter
+from chuchichaestli.diffusion.ddpm import BBDM
 
 
 @pytest.mark.parametrize(
-    "dimensions, batchsize",
+    "dimensions, batchsize, schedule",
     [
-        (1, 1),
-        (2, 1),
-        (3, 1),
-        (1, 4),
-        (2, 4),
-        (3, 4),
+        (1, 1, "linear"),
+        (2, 1, "linear"),
+        (3, 1, "linear"),
+        (1, 4, "linear"),
+        (2, 4, "linear"),
+        (3, 4, "linear"),
+        (1, 1, "linear_scaled"),
+        (1, 2, "squared"),
+        (1, 2, "cosine"),
+        (1, 2, "exponential"),
     ],
 )
-def test_noise_step(dimensions, batchsize):
+def test_noise_step(dimensions, batchsize, schedule):
     """Test the noise_step method of the DDPM class."""
     # Create dummy input tensor
-    match dimensions:
-        case 1:
-            lpf = partial(low_pass_filter, N=4, mode="linear")
-        case 2:
-            lpf = partial(low_pass_filter, N=4, mode="bilinear")
-        case 3:
-            lpf = partial(low_pass_filter, N=4, mode="trilinear")
-    ilvr = ILVR(num_timesteps=10, low_pass_filter=lpf)
     input_shape = (batchsize, 16) + (32,) * dimensions
     x_t = torch.randn(input_shape)
+    c = torch.randn(input_shape)
 
     # Call the noise_step method
-    output = ilvr.noise_step(x_t)
+    bbdm = BBDM(num_timesteps=10, schedule=schedule)
+    output = bbdm.noise_step(x_t, c)
 
     # Check the output shape
     assert output[0].shape == input_shape
@@ -61,35 +56,39 @@ def test_noise_step(dimensions, batchsize):
 
 
 @pytest.mark.parametrize(
-    "dimensions, batchsize",
+    "dimensions, batchsize, yield_intermediate",
     [
-        (1, 1),
-        (2, 1),
-        (3, 1),
-        (1, 4),
-        (2, 4),
-        (3, 4),
+        (1, 1, False),
+        (2, 1, False),
+        (3, 1, False),
+        (1, 4, False),
+        (2, 4, False),
+        (3, 4, False),
+        (1, 1, True),
+        (2, 1, True),
+        (3, 1, True),
+        (1, 4, True),
+        (2, 4, True),
+        (3, 4, True),
     ],
 )
-def test_denoise_step(dimensions, batchsize):
+def test_generation(dimensions, batchsize, yield_intermediate):
     """Test the denoise_step method of the DDPM class."""
     # Create dummy input tensors
-    match dimensions:
-        case 1:
-            lpf = partial(low_pass_filter, N=4, mode="linear")
-        case 2:
-            lpf = partial(low_pass_filter, N=4, mode="bilinear")
-        case 3:
-            lpf = partial(low_pass_filter, N=4, mode="trilinear")
-    ilvr = ILVR(num_timesteps=10, low_pass_filter=lpf)
+    bbdm = BBDM(num_timesteps=10)
     input_shape = (batchsize, 16) + (32,) * dimensions
-    x_t = torch.randn(input_shape)
-    y = torch.randn(input_shape)
-    t = 0
-    model_output = torch.randn(input_shape)
+    c = torch.randn(input_shape)
+
+    model = lambda x, t: x[:, :16, ...]  # noqa: E731
 
     # Call the denoise_step method
-    output = ilvr.denoise_step(x_t, y, t, model_output)
+    output_generator = bbdm.generate(
+        model, c, n=2, yield_intermediate=yield_intermediate
+    )
+
+    output = None
+    for o in output_generator:
+        output = o
 
     # Check the output shape
-    assert output.shape == input_shape
+    assert output.shape == (2 * batchsize, 16) + (32,) * dimensions

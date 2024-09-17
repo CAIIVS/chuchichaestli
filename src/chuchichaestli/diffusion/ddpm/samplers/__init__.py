@@ -1,4 +1,4 @@
-"""Diffusion schedulers sub-module.
+"""DDPM sampler implementations.
 
 This file is part of Chuchichaestli.
 
@@ -17,7 +17,3 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
-
-from chuchichaestli.diffusion.ddpm import DDPM, InDI, PriorGrad, CFGDDPM, BBDM
-
-__all__ = ["DDPM", "InDI", "PriorGrad", "CFGDDPM", "BBDM"]

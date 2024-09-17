@@ -19,8 +19,11 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 import torch
+
+from chuchichaestli.diffusion.distributions import DistributionAdapter
 
 SCHEDULES = {
     "linear": lambda beta_start, beta_end, num_timesteps, device: torch.linspace(
@@ -62,55 +65,10 @@ SCHEDULES = {
 }
 
 
-class DistributionAdapter(ABC):
-    """Base class for distribution adapters."""
-
-    @abstractmethod
-    def __call__(
-        self,
-        shape: torch.Size,
-        device: str,
-    ) -> torch.Tensor:
-        """Sample noise from the distribution."""
-        pass
-
-
-class HalfNormalDistribution(DistributionAdapter):
-    """Half normal distribution adapter."""
-
-    def __init__(
-        self, mean: float | torch.Tensor, scale: float | torch.Tensor = 1.0
-    ) -> None:
-        """Initialize the half normal distribution adapter."""
-        self.mean = mean
-        self.scale = scale
-
-    def __call__(
-        self,
-        shape: torch.Size,
-        device: str,
-    ) -> torch.Tensor:
-        """Sample noise from the distribution."""
-        return torch.randn(shape, device=device).abs() * self.scale + self.mean
-
-
-class NormalDistribution(DistributionAdapter):
-    """Normal distribution adapter."""
-
-    def __init__(
-        self, mean: float | torch.Tensor, scale: float | torch.Tensor = 1.0
-    ) -> None:
-        """Initialize the normal distribution adapter."""
-        self.mean = mean
-        self.scale = scale
-
-    def __call__(
-        self,
-        shape: torch.Size,
-        device: str,
-    ) -> torch.Tensor:
-        """Sample noise from the distribution."""
-        return torch.randn(shape, device=device) * self.scale + self.mean
+SAMPLERS = {
+    "DDIM": "ddim",
+    "default": "default",
+}
 
 
 class DiffusionProcess(ABC):
@@ -131,12 +89,14 @@ class DiffusionProcess(ABC):
 
     @abstractmethod
     def noise_step(
-        self, x_t: torch.Tensor
+        self, x_t: torch.Tensor, *args, **kwargs
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Noise step for the diffusion process.
 
         Args:
             x_t: Tensor of shape (batch_size, *).
+            *args: Additional arguments.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             Tuple of the sampled tensor, noise tensor and timesteps.
@@ -144,15 +104,26 @@ class DiffusionProcess(ABC):
         pass
 
     @abstractmethod
-    def denoise_step(
-        self, x_t: torch.Tensor, t: int, model_output: torch.Tensor
+    def generate(
+        self,
+        model: Any,
+        condition: torch.Tensor,
+        n: int = 1,
+        yield_intermediate: bool = False,
+        *args,
+        **kwargs,
     ) -> torch.Tensor:
         """Sample from the diffusion process.
 
+        Samples n times the number of conditions from the diffusion process.
+
         Args:
-            x_t: Tensor of shape (batch_size, *).
-            t: Current timestep.
-            model_output: Output of the model at the current timestep.
+            model: Model to use for sampling.
+            condition: Tensor to condition generation on. For unconditional generation, supply a zero-tensor of the sample shape.
+            n: Number of samples to generate (batch size).
+            yield_intermediate: Yield intermediate results. This turns the function into a generator.
+            *args: Additional arguments.
+            **kwargs: Additional keyword
         """
         pass
 
@@ -169,5 +140,5 @@ class DiffusionProcess(ABC):
             scale: Scale of the noise tensor.
         """
         if self.noise_distribution is not None:
-            return self.noise_distribution(shape, device=self.device)
+            return self.noise_distribution(shape)
         return torch.randn(shape, device=self.device)
