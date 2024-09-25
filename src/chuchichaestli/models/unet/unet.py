@@ -199,8 +199,8 @@ class UNet(nn.Module):
         """Forward pass through the UNet model."""
         if t is not None:
             if not torch.is_tensor(t):
-                t = torch.tensor([t], dtype=torch.long, device=x.device)
-            t *= torch.ones(x.shape[0], dtype=t.dtype, device=t.device)
+                t = torch.tensor(t, dtype=torch.long, device=x.device)
+            t = t.expand(x.shape[0])
 
             t = self.time_emb(t)
         x = self.conv_in(x)
