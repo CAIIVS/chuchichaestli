@@ -144,45 +144,41 @@ class CFGDDPM(DiffusionProcess):
             eps_t = model(torch.cat([zeros, z_t], dim=1), t)
             ceps_t = model(torch.cat([c, z_t], dim=1), t)
             eps_tilde_t = (1 + self.w) * ceps_t - self.w * eps_t
-            if self.sampler != "default":
-                z_t = self.sampler.sample_step()
-            else:
-                alpha_lambda_t = self.alpha(lambda_t)
-                sigma_lambda_t = self.sigma(lambda_t)
-                sigma_lambda_tp1 = self.sigma(lambda_tp1)
-                x_tilde_t = (z_t - sigma_lambda_t * eps_tilde_t) / alpha_lambda_t
-                if yield_intermediate:
-                    yield x_tilde_t
-                if t < self.num_time_steps:
-                    mu_tilde = (
-                        torch.exp(lambda_t - lambda_tp1)
-                        * (self.alpha(lambda_tp1) / self.alpha(lambda_t))
-                        * z_t
-                    ) + (1 - torch.exp(lambda_t - lambda_tp1)) * self.alpha(
-                        lambda_tp1
-                    ) * x_tilde_t
+            alpha_lambda_t = self.alpha(lambda_t)
+            sigma_lambda_t = self.sigma(lambda_t)
+            sigma_lambda_tp1 = self.sigma(lambda_tp1)
+            x_tilde_t = (z_t - sigma_lambda_t * eps_tilde_t) / alpha_lambda_t
+            if yield_intermediate:
+                yield x_tilde_t
+            if t < self.num_time_steps:
+                mu_tilde = (
+                    torch.exp(lambda_t - lambda_tp1)
+                    * (self.alpha(lambda_tp1) / self.alpha(lambda_t))
+                    * z_t
+                ) + (1 - torch.exp(lambda_t - lambda_tp1)) * self.alpha(
+                    lambda_tp1
+                ) * x_tilde_t
 
-                    sigma_tilde_squared = (
-                        1 - torch.exp(lambda_t - lambda_tp1)
-                    ) * sigma_lambda_tp1**2
+                sigma_tilde_squared = (
+                    1 - torch.exp(lambda_t - lambda_tp1)
+                ) * sigma_lambda_tp1**2
 
-                    sigma_lambda_t_reverse = (
-                        1 - torch.exp(lambda_t - lambda_tp1)
-                    ) * sigma_lambda_t**2
+                sigma_lambda_t_reverse = (
+                    1 - torch.exp(lambda_t - lambda_tp1)
+                ) * sigma_lambda_t**2
 
-                    print(
-                        lambda_t,
-                        lambda_tp1,
-                        lambda_t - lambda_tp1,
-                        torch.exp(lambda_t - lambda_tp1),
-                        1 - torch.exp(lambda_t - lambda_tp1),
-                    )
+                print(
+                    lambda_t,
+                    lambda_tp1,
+                    lambda_t - lambda_tp1,
+                    torch.exp(lambda_t - lambda_tp1),
+                    1 - torch.exp(lambda_t - lambda_tp1),
+                )
 
-                    std = (
-                        sigma_tilde_squared ** (1 - self.v)
-                        * sigma_lambda_t_reverse**self.v
-                    )
-                    z_t = torch.normal(mu_tilde, std)
+                std = (
+                    sigma_tilde_squared ** (1 - self.v) * sigma_lambda_t_reverse**self.v
+                )
+                z_t = torch.normal(mu_tilde, std)
 
         yield x_tilde_t
 

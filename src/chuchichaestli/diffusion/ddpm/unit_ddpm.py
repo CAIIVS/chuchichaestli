@@ -20,7 +20,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 
 from torch import Tensor
 from torch import nn
-from chuchichaestli.diffusion.ddpm.samplers import DDPM
+from chuchichaestli.diffusion.ddpm import DDPM
 
 
 class UNITDDPM(DDPM):
