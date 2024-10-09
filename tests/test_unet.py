@@ -232,3 +232,85 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
     timestep = 0.5
     output = model(sample, timestep)
     assert output.shape == input_dims
+
+
+@pytest.mark.parametrize(
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults,skip_connection_action",
+    [
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "concat"),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+        ),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "avg"),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock", "DownBlock"),
+            ("AttnUpBlock", "UpBlock", "AttnUpBlock"),
+            8,
+            (1, 2, 3),
+            "avg",
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "avg",
+        ),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "add"),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock", "DownBlock"),
+            ("AttnUpBlock", "UpBlock", "AttnUpBlock"),
+            8,
+            (1, 2, 3),
+            "add",
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "add",
+        ),
+    ],
+)
+def test_skip_connection_action(
+    dimensions,
+    down_block_types,
+    up_block_types,
+    n_channels,
+    block_out_channel_mults,
+    skip_connection_action,
+):
+    """Test the forward pass of the UNet model without a timestep."""
+    model = UNet(
+        dimensions=dimensions,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        n_channels=n_channels,
+        block_out_channel_mults=block_out_channel_mults,
+        time_embedding=False,
+        res_groups=8,
+        skip_connection_action=skip_connection_action,
+    )
+    input_dims = (1, 1) + (64,) * dimensions
+    sample = torch.randn(*input_dims)  # Example input
+
+    output = model(sample)
+    assert output.shape == input_dims

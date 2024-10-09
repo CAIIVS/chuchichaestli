@@ -91,8 +91,38 @@ class UNet(nn.Module):
         attn_head_dim: int = 32,
         attn_n_heads: int = 1,
         attn_gate_inter_channels: int = 32,
+        skip_connection_action: str = "concat",
+        skip_connection_between_levels: bool = None,
     ):
-        """UNet model implementation."""
+        """UNet model implementation.
+
+        Args:
+            dimensions: Number of dimensions.
+            in_channels: Number of input channels.
+            n_channels: Number of channels in the first layer.
+            out_channels: Number of output channels.
+            down_block_types: Types of down blocks.
+            mid_block_type: Type of mid block.
+            up_block_types: Types of up blocks.
+            block_out_channel_mults: Output channel multipliers for each block.
+            time_embedding: Whether to use a time embedding.
+            time_channels: Number of time channels.
+            num_layers_per_block: Number of layers per block.
+            groups: Number of groups for group normalization.
+            act: Activation function.
+            in_kernel_size: Kernel size for the input convolution.
+            out_kernel_size: Kernel size for the output convolution.
+            res_groups: Number of groups for the residual block normalization (if group norm).
+            res_act_fn: Activation function for the residual block.
+            res_dropout: Dropout rate for the residual block.
+            res_norm_type: Normalization type for the residual block.
+            res_kernel_size: Kernel size for the residual block.
+            attn_head_dim: Dimension of the attention head.
+            attn_n_heads: Number of attention heads.
+            attn_gate_inter_channels: Number of intermediate channels for the attention gate.
+            skip_connection_action: Action to take for the skip connection. Can be "concat", "avg", "add", or None (= do not use skip connections).
+            skip_connection_between_levels: Whether to use skip connections between levels (i.e. when channels are not equal). Default is True for concat and False for avg and add.
+        """
         super().__init__()
 
         if dimensions not in DIM_TO_CONV_MAP:
@@ -179,6 +209,9 @@ class UNet(nn.Module):
             attn_args=attn_args,
         )
 
+        if skip_connection_between_levels is None:
+            skip_connection_between_levels = skip_connection_action == "concat"
+
         for i in reversed(range(n_mults)):
             outs = ins
             for _ in range(num_layers_per_block):
@@ -190,6 +223,7 @@ class UNet(nn.Module):
                     time_channels=time_channels,
                     res_args=res_args,
                     attn_args=attn_args,
+                    skip_connection_action=skip_connection_action,
                 )
                 self.up_blocks.append(up_block)
 
@@ -202,6 +236,9 @@ class UNet(nn.Module):
                 time_channels=time_channels,
                 res_args=res_args,
                 attn_args=attn_args,
+                skip_connection_action=skip_connection_action
+                if skip_connection_between_levels
+                else None,
             )
             self.up_blocks.append(up_block)
             ins = outs
