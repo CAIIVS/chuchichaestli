@@ -28,10 +28,9 @@ from collections.abc import Generator
 
 
 class CFGDDPM(DiffusionProcess):
-    """Diffusion Probabilistic Model (DDPM) noise process.
+    """Classifier-free conditional diffusion probabilistic model (CF-DDPM).
 
-    The DDPM noise process is described in the paper "Denoising Diffusion Probabilistic Models" by Ho et al.
-    See https://arxiv.org/abs/2006.11239.
+    See https://arxiv.org/abs/2207.12598.
     """
 
     def __init__(
@@ -43,7 +42,6 @@ class CFGDDPM(DiffusionProcess):
         guidance_strength: float = 0.0,
         noise_interpolation_coeff: float = 0.3,
         device: str = "cpu",
-        sampler: str = "default",
         **kwargs,
     ) -> None:
         """Initialize the DDPM algorithm.
@@ -61,7 +59,6 @@ class CFGDDPM(DiffusionProcess):
             guidance_strength: Strength of the guidance signal (w in paper). 0 means no guidance in generation.
             noise_interpolation_coeff: Coefficient for noise interpolation (v in paper).
             device: Device to use for the computation.
-            sampler: Sampler to use for the noise process.
             kwargs: Additional keyword arguments.
         """
         super().__init__(timesteps=num_timesteps, device=device, **kwargs)
@@ -73,7 +70,6 @@ class CFGDDPM(DiffusionProcess):
         self.w = torch.tensor(guidance_strength, device=device)
         self.v = torch.tensor(noise_interpolation_coeff, device=device)
         self.u_generation = torch.linspace(0, 1, num_timesteps, device=device)
-        self.sampler = sampler
 
     def noise_step(
         self, x_t: torch.Tensor, condition: torch.Tensor, *args, **kwargs
