@@ -1,4 +1,4 @@
-"""Activation functions for neural networks.
+"""VAE implementation and utilities.
 
 This file is part of Chuchichaestli.
 
@@ -18,17 +18,6 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from torch import nn
+from chuchichaestli.models.vae.vae import VAE
 
-
-ACTIVATION_FUNCTIONS = {
-    "swish": nn.SiLU,
-    "silu": nn.SiLU,
-    "mish": nn.Mish,
-    "gelu": nn.GELU,
-    "relu": nn.ReLU,
-    "leaky_relu": nn.LeakyReLU,
-    "tanh": nn.Tanh,
-    "sigmoid": nn.Sigmoid,
-    "identity": nn.Identity,
-}
+__all__ = [VAE]
