@@ -35,7 +35,7 @@ class Downsample(nn.Module):
             num_channels, num_channels, kernel_size=3, stride=2, padding=1
         )
 
-    def forward(self, x: torch.Tensor, _t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, _t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the downsampling layer."""
         return self.conv(x)
 

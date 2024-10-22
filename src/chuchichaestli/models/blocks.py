@@ -65,6 +65,37 @@ class DownBlock(nn.Module):
         return x
 
 
+class EncoderDownBlock(DownBlock):
+    """Down block for the encoder of VAE."""
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        time_embedding: bool = True,
+        time_channels: int = 32,
+        res_args: dict = {},
+        attention: str | None = None,
+        attn_args: dict = {},
+    ):
+        """Initialize the encoder down block."""
+        super().__init__(
+            dimensions,
+            in_channels,
+            out_channels,
+            time_embedding,
+            time_channels,
+            res_args,
+            attention,
+            attn_args,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the encoder down block."""
+        return super().forward(x, None)
+
+
 class MidBlock(nn.Module):
     """Mid block for UNet."""
 
@@ -99,6 +130,35 @@ class MidBlock(nn.Module):
         x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
         return x
+
+
+class EncoderMidBlock(MidBlock):
+    """Mid block for the encoder of VAE."""
+
+    def __init__(
+        self,
+        dimensions: int,
+        channels: int,
+        time_embedding: bool = True,
+        time_channels: int = 32,
+        res_args: dict = {},
+        attention: str | None = None,
+        attn_args: dict = {},
+    ):
+        """Initialize the encoder mid block."""
+        super().__init__(
+            dimensions,
+            channels,
+            time_embedding,
+            time_channels,
+            res_args,
+            attention,
+            attn_args,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the encoder mid block."""
+        return super().forward(x, None)
 
 
 class UpBlock(nn.Module):
@@ -146,7 +206,68 @@ class UpBlock(nn.Module):
         return x
 
 
+class EncoderUpBlock(nn.Module):
+    """Up block for the encoder of VAE."""
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        time_embedding: bool = True,
+        time_channels: int = 32,
+        res_args: dict = {},
+        attention: str | None = None,
+        attn_args: dict = {},
+    ):
+        """Initialize the up block."""
+        super().__init__()
+        self.res_block = ResidualBlock(
+            dimensions,
+            in_channels,
+            out_channels,
+            time_embedding,
+            time_channels,
+            **res_args,
+        )
+
+        match ATTENTION_MAP.get(attention, None):
+            case "self_attention":
+                self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
+            case "attention_gate":
+                self.attn = ATTENTION_MAP[attention](
+                    in_channels, out_channels, **attn_args
+                )
+            case _:
+                self.attn = None
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor = None) -> torch.Tensor:
+        """Forward pass through the up block."""
+        x = self.attn(x, x) if self.attn else x
+        x = self.res_block(x, t)
+        return x
+
+
 AttnDownBlock = partial(DownBlock, attention="self_attention")
 AttnMidBlock = partial(MidBlock, attention="self_attention")
 AttnUpBlock = partial(UpBlock, attention="self_attention")
 AttnGateUpBlock = partial(UpBlock, attention="attention_gate")
+AttnEncoderDownBlock = partial(EncoderDownBlock, attention="self_attention")
+AttnEncoderMidBlock = partial(EncoderMidBlock, attention="self_attention")
+AttnEncoderUpBlock = partial(EncoderUpBlock, attention="self_attention")
+
+BLOCK_MAP = {
+    "DownBlock": DownBlock,
+    "MidBlock": MidBlock,
+    "UpBlock": UpBlock,
+    "EncoderDownBlock": EncoderDownBlock,
+    "EncoderMidBlock": EncoderMidBlock,
+    "EncoderUpBlock": EncoderUpBlock,
+    "AttnDownBlock": AttnDownBlock,
+    "AttnMidBlock": AttnMidBlock,
+    "AttnUpBlock": AttnUpBlock,
+    "AttnGateUpBlock": AttnGateUpBlock,
+    "AttnEncoderDownBlock": AttnEncoderDownBlock,
+    "AttnEncoderMidBlock": AttnEncoderMidBlock,
+    "AttnEncoderUpBlock": AttnEncoderUpBlock,
+}

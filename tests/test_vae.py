@@ -23,226 +23,350 @@ import torch
 from torch import nn
 from chuchichaestli.models.vae import VAE
 
+import math
+
 
 @pytest.mark.parametrize(
-    "in_shape,n_channels,latent_dim,block_out_channel_mults,kernel_size,stride,padding",
+    "dimensions,in_channels,n_channels,latent_dim,block_out_channel_mults,down_block_types,up_block_types",
     [
-        ((3, 64, 64), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((1, 28), 16, 128, (2, 2), 3, 1, 0),  # 1D data
-        ((3, 16, 16, 16), 32, 256, (2, 2, 2), 3, 2, 1),  # 3D data
-        ((1, 32, 32), 16, 128, (2, 2, 2), 3, 1, 1),
-        ((3, 32, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 64, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 16, 32), 32, 256, (1, 2, 2, 4), 4, 2, 1),
+        (2, 3, 32, 256, (2,), ("EncoderDownBlock",), ("EncoderUpBlock",)),
+        (
+            1,
+            1,
+            16,
+            128,
+            (2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock"),
+        ),
+        (
+            3,
+            3,
+            64,
+            512,
+            (2, 2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock", "EncoderUpBlock"),
+        ),
     ],
 )
 def test_vae_initialization(
-    in_shape,
+    dimensions,
+    in_channels,
     n_channels,
     latent_dim,
     block_out_channel_mults,
-    kernel_size,
-    stride,
-    padding,
+    down_block_types,
+    up_block_types,
 ):
     """Test VAE initialization with different parameters."""
     vae = VAE(
-        in_shape=in_shape,
+        dimensions=dimensions,
+        in_channels=in_channels,
         n_channels=n_channels,
-        latent_dim=latent_dim,
         block_out_channel_mults=block_out_channel_mults,
-        kernel_size=kernel_size,
-        stride=stride,
-        padding=padding,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
     )
-    assert isinstance(vae.encoder, nn.Sequential)
-    assert isinstance(vae.decoder, nn.Sequential)
-    assert isinstance(vae.fc_mu, nn.Linear)
-    assert isinstance(vae.fc_logvar, nn.Linear)
-    assert isinstance(vae.fc_decode, nn.Linear)
+    assert isinstance(vae.encoder, nn.Module)
+    assert isinstance(vae.decoder, nn.Module)
 
 
 @pytest.mark.parametrize(
-    "in_shape,n_channels,latent_dim,block_out_channel_mults,kernel_size,stride,padding",
+    "dimensions,in_channels,n_channels,block_out_channel_mults,down_block_types,up_block_types,input_shape,encoder_out_block_type",
     [
-        ((3, 64, 64), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((1, 28), 16, 128, (2, 2), 3, 1, 0),  # 1D data
-        ((3, 16, 16, 16), 32, 256, (2, 2, 2), 4, 2, 1),  # 3D data
-        ((1, 32, 32), 16, 128, (2, 2, 2), 3, 1, 1),
-        ((3, 32, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 64, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 16, 32), 32, 256, (1, 2, 2, 4), 4, 2, 1),
+        (
+            2,
+            3,
+            4,
+            (2,),
+            ("EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock"),
+            (1, 3, 64, 64),
+            "EncoderOutBlock",
+        ),
+        (
+            2,
+            3,
+            4,
+            (2,),
+            ("EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock"),
+            (1, 3, 64, 64),
+            "SDVAEEncoderOutBlock",
+        ),
+        (
+            1,
+            1,
+            16,
+            (2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock"),
+            (1, 1, 28),
+            "EncoderOutBlock",
+        ),
+        (
+            3,
+            3,
+            64,
+            (2, 2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock", "EncoderUpBlock"),
+            (1, 3, 16, 16, 16),
+            "EncoderOutBlock",
+        ),
+        (
+            1,
+            1,
+            16,
+            (2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock"),
+            (1, 1, 28),
+            "SDVAEEncoderOutBlock",
+        ),
+        (
+            3,
+            3,
+            64,
+            (2, 2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock", "EncoderUpBlock"),
+            (1, 3, 16, 16, 16),
+            "SDVAEEncoderOutBlock",
+        ),
     ],
 )
 def test_vae_encode_shape(
-    in_shape,
+    dimensions,
+    in_channels,
     n_channels,
-    latent_dim,
     block_out_channel_mults,
-    kernel_size,
-    stride,
-    padding,
+    down_block_types,
+    up_block_types,
+    input_shape,
+    encoder_out_block_type,
 ):
     """Test the output shape of the VAE encoder with different parameters."""
+    latent_dim = n_channels * math.prod(block_out_channel_mults)
     vae = VAE(
-        in_shape=in_shape,
+        dimensions=dimensions,
+        in_channels=in_channels,
         n_channels=n_channels,
         latent_dim=latent_dim,
         block_out_channel_mults=block_out_channel_mults,
-        kernel_size=kernel_size,
-        stride=stride,
-        padding=padding,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        encoder_out_block_type=encoder_out_block_type,
     )
-    x = torch.randn(1, *in_shape)  # A batch with a single input
+    x = torch.randn(input_shape)
     dist = vae.encode(x)
+    spatial_dims = (
+        [dim / (2 ** (len(block_out_channel_mults) - 1)) for dim in input_shape[2:]]
+        if len(block_out_channel_mults) > 1
+        else input_shape[2:]
+    )
     assert isinstance(dist, torch.distributions.MultivariateNormal)
-    assert dist.mean.shape == (1, vae.fc_mu.out_features)
-
-
-@pytest.mark.parametrize(
-    "in_shape,n_channels,latent_dim,block_out_channel_mults,kernel_size,stride,padding",
-    [
-        ((3, 64, 64), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((1, 28), 16, 128, (2, 2), 3, 1, 0),  # 1D data
-        ((3, 16, 16, 16), 32, 256, (2, 2, 2), 4, 2, 1),  # 3D data
-        ((1, 32, 32), 16, 128, (2, 2, 2), 3, 1, 1),
-        ((3, 32, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 64, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 16, 32), 32, 256, (1, 2, 2, 4), 4, 2, 1),
-    ],
-)
-def test_vae_reparameterize(
-    in_shape,
-    n_channels,
-    latent_dim,
-    block_out_channel_mults,
-    kernel_size,
-    stride,
-    padding,
-):
-    """Test the reparameterization process of the VAE with different parameters."""
-    vae = VAE(
-        in_shape=in_shape,
-        n_channels=n_channels,
-        latent_dim=latent_dim,
-        block_out_channel_mults=block_out_channel_mults,
-        kernel_size=kernel_size,
-        stride=stride,
-        padding=padding,
+    assert dist.mean.shape == (
+        input_shape[0],
+        latent_dim,
+        *spatial_dims,
     )
-    x = torch.randn(1, *in_shape)
-    dist = vae.encode(x)
-    z = vae.reparameterize(dist)
-    assert z.shape == (1, vae.fc_mu.out_features)
 
 
 @pytest.mark.parametrize(
-    "in_shape,n_channels,latent_dim,block_out_channel_mults,kernel_size,stride,padding",
+    "dimensions,in_channels,n_channels,block_out_channel_mults,down_block_types,up_block_types,input_shape,decoder_in_block_type",
     [
-        ((3, 64, 64), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((1, 28), 16, 128, (2, 2), 3, 1, 0),  # 1D data
-        ((3, 16, 16, 16), 32, 256, (2, 2, 2), 4, 2, 1),  # 3D data
-        ((1, 32, 32), 16, 128, (2, 2, 2), 3, 1, 1),
-        ((3, 32, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 64, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 16, 32), 32, 256, (1, 2, 2, 4), 4, 2, 1),
+        (
+            2,
+            3,
+            32,
+            (2,),
+            ("EncoderDownBlock",),
+            ("EncoderUpBlock",),
+            (1, 3, 64, 64),
+            "DecoderInBlock",
+        ),
+        (
+            1,
+            1,
+            16,
+            (2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock"),
+            (1, 1, 28),
+            "DecoderInBlock",
+        ),
+        (
+            3,
+            3,
+            64,
+            (2, 2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock", "EncoderUpBlock"),
+            (1, 3, 16, 16, 16),
+            "DecoderInBlock",
+        ),
+        (
+            2,
+            3,
+            32,
+            (2,),
+            ("EncoderDownBlock",),
+            ("EncoderUpBlock",),
+            (1, 3, 64, 64),
+            "SDVAEDecoderInBlock",
+        ),
+        (
+            1,
+            1,
+            16,
+            (2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock"),
+            (1, 1, 28),
+            "SDVAEDecoderInBlock",
+        ),
+        (
+            3,
+            3,
+            64,
+            (2, 2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock", "EncoderUpBlock"),
+            (1, 3, 16, 16, 16),
+            "SDVAEDecoderInBlock",
+        ),
     ],
 )
 def test_vae_decode_shape(
-    in_shape,
+    dimensions,
+    in_channels,
     n_channels,
-    latent_dim,
     block_out_channel_mults,
-    kernel_size,
-    stride,
-    padding,
+    down_block_types,
+    up_block_types,
+    input_shape,
+    decoder_in_block_type,
 ):
     """Test the output shape of the VAE decoder with different parameters."""
+    latent_dim = in_channels * math.prod(block_out_channel_mults)
+    print(latent_dim)
     vae = VAE(
-        in_shape=in_shape,
+        dimensions=dimensions,
+        in_channels=in_channels,
         n_channels=n_channels,
         latent_dim=latent_dim,
         block_out_channel_mults=block_out_channel_mults,
-        kernel_size=kernel_size,
-        stride=stride,
-        padding=padding,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        decoder_in_block_type=decoder_in_block_type,
     )
-    z = torch.randn(1, vae.fc_mu.out_features)
+    spatial_dims = (
+        [dim // (2 ** (len(block_out_channel_mults) - 1)) for dim in input_shape[2:]]
+        if len(block_out_channel_mults) > 1
+        else input_shape[2:]
+    )
+    z = torch.randn((input_shape[0], latent_dim, *spatial_dims))
     decoded = vae.decode(z)
-    assert decoded.shape == (1, *in_shape)
+    assert decoded.shape == input_shape
 
 
 @pytest.mark.parametrize(
-    "in_shape,n_channels,latent_dim,block_out_channel_mults,kernel_size,stride,padding",
+    "dimensions,in_channels,n_channels,block_out_channel_mults,down_block_types,up_block_types,input_shape",
     [
-        ((3, 64, 64), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((1, 28), 16, 128, (2, 2), 3, 1, 0),  # 1D data
-        ((3, 16, 16, 16), 32, 256, (2, 2, 2), 4, 2, 1),  # 3D data
-        ((1, 32, 32), 16, 128, (2, 2, 2), 3, 1, 1),
-        ((3, 32, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 64, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 16, 32), 32, 256, (1, 2, 2, 4), 4, 2, 1),
+        (2, 3, 32, (2,), ("EncoderDownBlock",), ("EncoderUpBlock",), (1, 3, 64, 64)),
+        (
+            1,
+            1,
+            16,
+            (2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock"),
+            (1, 1, 28),
+        ),
+        (
+            3,
+            3,
+            64,
+            (2, 2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock", "EncoderUpBlock"),
+            (1, 3, 16, 16, 16),
+        ),
     ],
 )
 def test_vae_forward(
-    in_shape,
+    dimensions,
+    in_channels,
     n_channels,
-    latent_dim,
     block_out_channel_mults,
-    kernel_size,
-    stride,
-    padding,
+    down_block_types,
+    up_block_types,
+    input_shape,
 ):
     """Test the forward pass of the VAE model with different parameters."""
     vae = VAE(
-        in_shape=in_shape,
+        dimensions=dimensions,
+        in_channels=in_channels,
         n_channels=n_channels,
-        latent_dim=latent_dim,
         block_out_channel_mults=block_out_channel_mults,
-        kernel_size=kernel_size,
-        stride=stride,
-        padding=padding,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
     )
-    x = torch.randn(1, *in_shape)
-    x_tilde, z, dist = vae.forward(x)
+    x = torch.randn(input_shape)
+    dist = vae.encode(x)
+    z = dist.sample()
+    x_tilde = vae.decode(z)
     assert x_tilde.shape == x.shape
-    assert z.shape == (1, vae.fc_mu.out_features)
-    assert isinstance(dist, torch.distributions.MultivariateNormal)
 
 
 @pytest.mark.parametrize(
-    "in_shape,n_channels,latent_dim,block_out_channel_mults,kernel_size,stride,padding",
+    "dimensions,in_channels,n_channels,block_out_channel_mults,down_block_types,up_block_types,input_shape",
     [
-        ((3, 64, 64), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((1, 28), 16, 128, (2, 2), 3, 1, 0),  # 1D data
-        ((3, 16, 16, 16), 32, 256, (2, 2, 2), 4, 2, 1),  # 3D data
-        ((1, 32, 32), 16, 128, (2, 2, 2), 3, 1, 1),
-        ((3, 32, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 64, 32), 32, 256, (2, 2, 2, 2), 4, 2, 1),
-        ((3, 64, 16, 32), 32, 256, (1, 2, 2, 4), 4, 2, 1),
+        (2, 3, 32, (2,), ("EncoderDownBlock",), ("EncoderUpBlock",), (1, 3, 64, 64)),
+        (
+            1,
+            1,
+            16,
+            (2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock"),
+            (1, 1, 28),
+        ),
+        (
+            3,
+            3,
+            64,
+            (2, 2, 2),
+            ("EncoderDownBlock", "EncoderDownBlock", "EncoderDownBlock"),
+            ("EncoderUpBlock", "EncoderUpBlock", "EncoderUpBlock"),
+            (1, 3, 16, 16, 16),
+        ),
     ],
 )
 def test_vae_gradient_flow(
-    in_shape,
+    dimensions,
+    in_channels,
     n_channels,
-    latent_dim,
     block_out_channel_mults,
-    kernel_size,
-    stride,
-    padding,
+    down_block_types,
+    up_block_types,
+    input_shape,
 ):
     """Test that gradients flow properly during backpropagation with different parameters."""
     vae = VAE(
-        in_shape=in_shape,
+        dimensions=dimensions,
+        in_channels=in_channels,
         n_channels=n_channels,
-        latent_dim=latent_dim,
         block_out_channel_mults=block_out_channel_mults,
-        kernel_size=kernel_size,
-        stride=stride,
-        padding=padding,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
     )
-    x = torch.randn(1, *in_shape)
-    x_tilde, _, _ = vae.forward(x)
+    x = torch.randn(input_shape)
+    dist = vae.encode(x)
+    z = dist.sample()
+    x_tilde = vae.decode(z)
     loss = nn.functional.mse_loss(x_tilde, x)
     loss.backward()
     for param in vae.parameters():
