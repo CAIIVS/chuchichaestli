@@ -24,33 +24,14 @@ import torch
 from torch import nn
 
 from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
+from chuchichaestli.models.blocks import BLOCK_MAP
 from chuchichaestli.models.downsampling import Downsample
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
-from chuchichaestli.models.unet.blocks import (
-    AttnDownBlock,
-    AttnGateUpBlock,
-    AttnMidBlock,
-    AttnUpBlock,
-    DownBlock,
-    MidBlock,
-    UpBlock,
-)
 from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
 )
 from chuchichaestli.models.upsampling import Upsample
 from chuchichaestli.models.resnet import Norm
-
-
-BLOCK_MAP = {
-    "DownBlock": DownBlock,
-    "MidBlock": MidBlock,
-    "UpBlock": UpBlock,
-    "AttnDownBlock": AttnDownBlock,
-    "AttnMidBlock": AttnMidBlock,
-    "AttnUpBlock": AttnUpBlock,
-    "AttnGateUpBlock": AttnGateUpBlock,
-}
 
 
 class UNet(nn.Module):

@@ -35,7 +35,7 @@ class Upsample(nn.Module):
             num_channels, num_channels, kernel_size=4, stride=2, padding=1
         )
 
-    def forward(self, x: torch.Tensor, _t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, _t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the upsampling layer."""
         return self.conv(x)
 
