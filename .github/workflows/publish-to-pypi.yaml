@@ -6,9 +6,8 @@ name: Release 🐍 📦 on PyPI
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    paths-ignore:
+      - src/chuchichaestli/__about__.py
 
 
 jobs:
@@ -49,7 +48,7 @@ jobs:
 
     steps:
     - name: Download 📦
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4.1.7
       with:
         name: python-package-distributions
         path: dist/
@@ -70,7 +69,7 @@ jobs:
 
     steps:
     - name: Download 📦
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4.1.7
       with:
         name: python-package-distributions
         path: dist/
@@ -114,7 +113,7 @@ jobs:
 
     steps:
     - name: Download 📦
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4.1.7
       with:
         name: python-package-distributions
         path: dist/
@@ -136,14 +135,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      if: github.event_name == 'pull_request'
       with:
         fetch-depth: 0
         ref: ${{ github.event.pull_request.head.ref }}
-    - uses: actions/checkout@v4
-      if: github.event_name == 'push'
-      with:
-        fetch-depth: 0
+        persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
+        token: ${{ secrets.READ_WRITE_PAT }}
     - name: Install hatch
       run: |
         python3 -m pip install hatch --user
@@ -156,12 +152,25 @@ jobs:
         NEW_VERSION=`hatch version`
         git add src/chuchichaestli/__about__.py
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
-        git push
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.READ_WRITE_PAT }}
+        branch: version-bump
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v4
+      with:
+        branch: version-bump
+        title: 'Dev Version Bump'
+        body: 'Automated dev version bump'
+        base: main
+        head: version-bump
 
 
   version-bump-release:
     name: Release version bump ⬆️
-    if: github.event_name == 'push' || github.event.pull_request.merged == true
+    # Only run this job on the master branch
+    if: github.ref == 'refs/heads/master'
     needs:
     - publish-to-pypi
     runs-on: ubuntu-latest
@@ -175,6 +184,8 @@ jobs:
       with:
         fetch-depth: 0
         ref: ${{ github.event.pull_request.head.ref }}
+        persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
+        token: ${{ secrets.READ_WRITE_PAT }}
     - uses: actions/checkout@v4
       if: github.event_name == 'push'
       with:
@@ -191,4 +202,16 @@ jobs:
         NEW_VERSION=`hatch version`
         git add src/chuchichaestli/__about__.py
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
-        git push
+     name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.READ_WRITE_PAT }}
+        branch: version-bump
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v4
+      with:
+        branch: version-bump
+        title: 'Release Version Bump'
+        body: 'Automated version bump for release'
+        base: main
+        head: version-bump
