@@ -26,41 +26,57 @@ import torch
 from chuchichaestli.diffusion.distributions import DistributionAdapter
 
 SCHEDULES = {
+    # A simple linear schedule from `beta_start` to `beta_end`
     "linear": lambda beta_start, beta_end, num_timesteps, device: torch.linspace(
         beta_start, beta_end, num_timesteps, device=device
     ),
+    # Scaled linear schedule to account for different step sizes
     "linear_scaled": lambda beta_start, beta_end, num_timesteps, device: torch.linspace(
         (1000 / num_timesteps) * beta_start,
         (1000 / num_timesteps) * beta_end,
         num_timesteps,
         device=device,
     ),
+    # A quadratic growth schedule from `beta_min` to `beta_max`
     "squared": lambda beta_min, beta_max, num_timesteps, device: beta_min
-    + (beta_max - beta_min)
-    * (torch.arange(num_timesteps, dtype=torch.float32, device=device) / num_timesteps)
-    ** 2,
-    "sigmoid": lambda beta_start, beta_end, num_timesteps, device: torch.sigmoid(
-        torch.linspace(-6, 6, num_timesteps, device=device)
-    )
-    * (beta_end - beta_start)
-    + beta_start,
+    + (
+        (beta_max - beta_min)
+        * (
+            torch.arange(num_timesteps, dtype=torch.float32, device=device)
+            / num_timesteps
+        )
+        ** 2
+    ),
+    # A sigmoid-shaped schedule to achieve a smoother transition from `beta_start` to `beta_end`
+    "sigmoid": lambda beta_start, beta_end, num_timesteps, device: (
+        torch.sigmoid(torch.linspace(-6, 6, num_timesteps, device=device))
+        * (beta_end - beta_start)
+        + beta_start
+    ),
+    # A cosine-shaped schedule for smoother transitions, emphasizing the start and the end
     "cosine": lambda beta_min, beta_max, num_timesteps, device: beta_min
-    + (beta_max - beta_min)
-    * (
-        1
-        - torch.cos(
-            (
-                torch.arange(num_timesteps, dtype=torch.float32, device=device)
-                / num_timesteps
+    + (
+        (beta_max - beta_min)
+        * (
+            1
+            - torch.cos(
+                (
+                    torch.arange(num_timesteps, dtype=torch.float32, device=device)
+                    / num_timesteps
+                )
+                * torch.pi
+                / 2
             )
-            * torch.pi
-            / 2
         )
     ),
+    # An exponential schedule to smoothly increase the beta value over time
     "exponential": lambda beta_min, beta_max, num_timesteps, device: beta_min
-    * (beta_max / beta_min)
-    ** (
-        torch.arange(num_timesteps, dtype=torch.float32, device=device) / num_timesteps
+    * (
+        (beta_max / beta_min)
+        ** (
+            torch.arange(num_timesteps, dtype=torch.float32, device=device)
+            / num_timesteps
+        )
     ),
 }
 
