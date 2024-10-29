@@ -114,17 +114,33 @@ class UpBlock(nn.Module):
         res_args: dict = {},
         attention: str | None = None,
         attn_args: dict = {},
+        skip_connection_action: str = None,
     ):
         """Initialize the up block."""
         super().__init__()
-        self.res_block = ResidualBlock(
-            dimensions,
-            in_channels + out_channels,
-            out_channels,
-            time_embedding,
-            time_channels,
-            **res_args,
-        )
+        self.skip_connection_action = skip_connection_action
+        if skip_connection_action == "concat":
+            self.res_block = ResidualBlock(
+                dimensions,
+                in_channels + out_channels,
+                out_channels,
+                time_embedding,
+                time_channels,
+                **res_args,
+            )
+        elif skip_connection_action in ["avg", "add", None]:
+            self.res_block = ResidualBlock(
+                dimensions,
+                in_channels,
+                out_channels,
+                time_embedding,
+                time_channels,
+                **res_args,
+            )
+        else:
+            raise ValueError(
+                f"Invalid skip connection action: {skip_connection_action}"
+            )
 
         match ATTENTION_MAP.get(attention, None):
             case "self_attention":
@@ -141,7 +157,22 @@ class UpBlock(nn.Module):
     ) -> torch.Tensor:
         """Forward pass through the up block."""
         x = self.attn(x, h) if self.attn else x
-        xh = torch.cat([x, h], dim=1)
+        if self.skip_connection_action == "avg":
+            replication_factor = x.shape[1] // h.shape[1]
+            h = h.repeat(
+                (1, replication_factor) + (1,) * len(x.shape[2:])
+            )  # Repeat channels
+            xh = (x + h) / 2
+        elif self.skip_connection_action == "add":
+            replication_factor = x.shape[1] // h.shape[1]
+            h = h.repeat(
+                (1, replication_factor) + (1,) * len(x.shape[2:])
+            )  # Repeat channels
+            xh = x + h
+        elif self.skip_connection_action == "concat":
+            xh = torch.cat([x, h], dim=1)
+        else:
+            xh = x
         x = self.res_block(xh, t)
         return x
 
