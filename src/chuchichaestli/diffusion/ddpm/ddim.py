@@ -76,7 +76,7 @@ class DDIM(DDPM):
         yield_intermediate: bool = False,
         *args,
         **kwargs,
-    ) -> Tensor | Generator[Tensor, None, None]:
+    ) -> Tensor | Generator[Tensor, None, torch.Tensor]:
         """Sample from the DDPM model using DDIM."""
         c = (
             condition.unsqueeze(0)

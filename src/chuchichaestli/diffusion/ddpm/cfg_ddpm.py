@@ -111,7 +111,7 @@ class CFGDDPM(DiffusionProcess):
         yield_intermediate: bool = False,
         *args,
         **kwargs,
-    ) -> torch.Tensor | Generator:
+    ) -> torch.Tensor | Generator[torch.Tensor, None, torch.Tensor]:
         """Sample from the diffusion process.
 
         Samples n times the number of conditions from the diffusion process.

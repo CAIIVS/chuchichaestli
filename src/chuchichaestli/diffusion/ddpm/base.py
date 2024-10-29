@@ -20,6 +20,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 
 from abc import ABC, abstractmethod
 from typing import Any
+from collections.abc import Generator
 
 import torch
 
@@ -128,7 +129,7 @@ class DiffusionProcess(ABC):
         yield_intermediate: bool = False,
         *args,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> Generator[torch.Tensor, None, torch.Tensor]:
         """Sample from the diffusion process.
 
         Samples n times the number of conditions from the diffusion process.
