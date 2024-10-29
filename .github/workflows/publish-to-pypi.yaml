@@ -135,17 +135,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      # Only run this job on pull requests
-      if: github.ref != 'refs/heads/master'
       with:
         fetch-depth: 0
         ref: ${{ github.event.pull_request.head.ref }}
         persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
         token: ${{ secrets.READ_WRITE_PAT }}
-    - uses: actions/checkout@v4
-      if: github.event_name == 'push'
-      with:
-        fetch-depth: 0
     - name: Install hatch
       run: |
         python3 -m pip install hatch --user
@@ -162,7 +156,15 @@ jobs:
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{ secrets.READ_WRITE_PAT }}
-        branch: ${{ github.ref }}
+        branch: version-bump
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v4
+      with:
+        branch: version-bump
+        title: 'Dev Version Bump'
+        body: 'Automated dev version bump'
+        base: main
+        head: version-bump
 
 
   version-bump-release:
@@ -204,4 +206,12 @@ jobs:
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{ secrets.READ_WRITE_PAT }}
-        branch: ${{ github.event.pull_request.head.ref }}
+        branch: version-bump
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v4
+      with:
+        branch: version-bump
+        title: 'Release Version Bump'
+        body: 'Automated version bump for release'
+        base: main
+        head: version-bump
