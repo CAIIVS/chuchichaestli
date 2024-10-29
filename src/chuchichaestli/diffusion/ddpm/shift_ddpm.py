@@ -24,7 +24,7 @@ import torch.types
 from typing import Any
 from collections.abc import Generator
 
-from chuchichaestli.diffusion.ddpm.samplers import DDPM
+from chuchichaestli.diffusion.ddpm import DDPM
 
 
 class ShiftDDPM(DDPM):
@@ -43,6 +43,7 @@ class ShiftDDPM(DDPM):
         beta_end: float = 0.02,
         device: str = "cpu",
         schedule: str = "linear",
+        E: torch.Module = None,
     ) -> None:
         """Initialize the ShiftDDPM algorithm.
 
@@ -52,24 +53,27 @@ class ShiftDDPM(DDPM):
             beta_end: End value for beta.
             device: Device to use for the computation.
             schedule: Schedule for beta.
+            E: Prior shift predictor.
         """
         super().__init__(num_timesteps, beta_start, beta_end, device, schedule)
         self.k = self.sqrt_alpha_cumprod * (1 - self.sqrt_alpha_cumprod)
+        self.E = E
 
     def noise_step(
-        self, x_0: torch.Tensor, E: torch.Tensor, *args, **kwargs
+        self, x_0: torch.Tensor, condition: torch.Tensor | None = None, *args, **kwargs
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """A single step of the noise process.
 
         Args:
             x_0: Ground truth input tensor
-            E: Prior shift
+            condition: Tensor of shape (batch_size, *).
             args: Additional arguments
             kwargs: Additional keyword
 
         Returns:
             Tuple of the noised tensor, noise, and the timestep.
         """
+        E = self.E(condition)
         timesteps = self.sample_timesteps(x_0.shape[0])
         noise = self.sample_noise(x_0.shape)
         s_t = self.k[timesteps] * E
@@ -86,7 +90,6 @@ class ShiftDDPM(DDPM):
     def generate(
         self,
         model: Any,
-        E: Any,
         condition: torch.Tensor,
         n: int = 1,
         yield_intermediate: bool = False,
@@ -108,6 +111,7 @@ class ShiftDDPM(DDPM):
         """
         if n > 1:
             condition = condition.repeat(n, 1)
+        E = self.E(condition)
         x_t = self.sample_noise(condition.shape)
 
         for t in reversed(range(0, self.num_time_steps)):
