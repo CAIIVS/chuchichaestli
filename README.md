@@ -22,3 +22,27 @@ Alternatively, you can install the package directly from GitHub:
 ```bash
 pip install git+https://github.com/CAIIVS/chuchichaestli.git
 ```
+
+## Development
+
+### Creating a new release
+
+On the current version of the main branch, do the follwing.
+
+1. **Create an empty commit:**
+   ```bash
+   git commit --allow-empty -m "<Your commit message here>"
+   ```
+
+2. **Add a tag to the empty commit:**
+   ```bash
+   git tag -a <tag_name> -m "Tagging empty commit"
+   ```
+   Replace `<tag_name>` with the new version The `-a` option creates an annotated tag, and the `-m` option allows you to add a message to the tag.
+
+3. **Push the empty commit and tag:**
+   ```bash
+   git push --tags
+   ```
+
+This triggers a GitHub action that creates a PR for you to accept. Accepting the PR updates the version and triggers the release pipeline.
