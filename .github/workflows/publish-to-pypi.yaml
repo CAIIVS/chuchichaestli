@@ -3,7 +3,6 @@
 
 name: Release 🐍 📦 on PyPI
 
-
 on:
   push:
     paths-ignore:
@@ -48,7 +47,7 @@ jobs:
 
     steps:
     - name: Download 📦
-      uses: actions/download-artifact@v4.1.7
+      uses: actions/download-artifact@v3
       with:
         name: python-package-distributions
         path: dist/
@@ -69,7 +68,7 @@ jobs:
 
     steps:
     - name: Download 📦
-      uses: actions/download-artifact@v4.1.7
+      uses: actions/download-artifact@v3
       with:
         name: python-package-distributions
         path: dist/
@@ -84,8 +83,9 @@ jobs:
         GITHUB_TOKEN: ${{ github.token }}
       run: |-
         gh release create '${{ github.ref_name }}'
-        --repo '${{ github.repository }}'
         --notes ""
+        # --repo '${{ github.repository }}'
+        
     - name: Upload artifact signatures to GitHub Release
       env:
         GITHUB_TOKEN: ${{ github.token }}
@@ -94,7 +94,7 @@ jobs:
       # sigstore-produced signatures and certificates.
       run: |-
         gh release upload '${{ github.ref_name }}' dist/**
-        --repo '${{ github.repository }}'
+        # --repo '${{ github.repository }}'
 
 
   publish-to-testpypi:
@@ -113,7 +113,7 @@ jobs:
 
     steps:
     - name: Download 📦
-      uses: actions/download-artifact@v4.1.7
+      uses: actions/download-artifact@v3
       with:
         name: python-package-distributions
         path: dist/
@@ -132,6 +132,7 @@ jobs:
 
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
     - uses: actions/checkout@v4
@@ -177,6 +178,7 @@ jobs:
 
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
     - uses: actions/checkout@v4
