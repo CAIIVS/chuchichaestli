@@ -411,5 +411,24 @@ def test_vae_kl():
     _ = vae.kl_div(dist)
 
 
+def test_batch():
+    """Test the VAE model with batch size > 1."""
+    vae = VAE(
+        dimensions=2,
+        in_channels=1,
+        n_channels=16,
+        latent_dim=8,
+        block_out_channel_mults=(2, 2),
+        down_block_types=("EncoderDownBlock", "EncoderDownBlock"),
+        mid_block_type="EncoderMidBlock",
+        up_block_types=("EncoderUpBlock", "EncoderUpBlock"),
+    )
+    input_shape = (4, 1, 64, 64)
+    x = torch.randn(input_shape)
+    x_hat, dist = vae(x)
+    assert x_hat.shape == x.shape
+    assert dist.mean.shape[0] == 4
+
+
 if __name__ == "__main__":
     pytest.main(["-v", "test_vae.py"])

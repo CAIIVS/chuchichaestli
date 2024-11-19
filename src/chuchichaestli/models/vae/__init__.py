@@ -19,5 +19,6 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 from chuchichaestli.models.vae.vae import VAE
+from chuchichaestli.models.vae.vqvae import VQVAE
 
-__all__ = [VAE]
+__all__ = [VAE, VQVAE]
