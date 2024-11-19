@@ -250,13 +250,13 @@ def test_vae_decode_shape(
     decoder_in_block_type,
 ):
     """Test the output shape of the VAE decoder with different parameters."""
-    latent_dim = in_channels * math.prod(block_out_channel_mults)
+    latent_dim = 4
     print(latent_dim)
     vae = VAE(
         dimensions=dimensions,
         in_channels=in_channels,
         n_channels=n_channels,
-        latent_dim=latent_dim,
+        latent_dim=4,
         block_out_channel_mults=block_out_channel_mults,
         down_block_types=down_block_types,
         up_block_types=up_block_types,
@@ -267,7 +267,7 @@ def test_vae_decode_shape(
         if len(block_out_channel_mults) > 1
         else input_shape[2:]
     )
-    z = torch.randn((input_shape[0], latent_dim, *spatial_dims))
+    z = torch.randn((input_shape[0], 4, *spatial_dims))
     decoded = vae.decode(z)
     assert decoded.shape == input_shape
 
@@ -372,6 +372,43 @@ def test_vae_gradient_flow(
     for param in vae.parameters():
         if param.grad is not None:
             assert param.grad.abs().sum() > 0
+
+
+def test_vae_large():
+    """Test the VAE model with large input dimensions."""
+    vae = VAE(
+        dimensions=2,
+        in_channels=1,
+        n_channels=16,
+        latent_dim=8,
+        block_out_channel_mults=(2, 2),
+        down_block_types=("EncoderDownBlock", "EncoderDownBlock"),
+        mid_block_type="EncoderMidBlock",
+        up_block_types=("EncoderUpBlock", "EncoderUpBlock"),
+    )
+    input_shape = (1, 1, 512, 512)
+    x = torch.randn(input_shape)
+    dist = vae.encode(x)
+    z = dist.sample()
+    x_tilde = vae.decode(z)
+    assert x_tilde.shape == x.shape
+
+
+def test_vae_kl():
+    """Test the kl_div method of the VAE model."""
+    vae = VAE(
+        dimensions=2,
+        in_channels=1,
+        n_channels=16,
+        latent_dim=8,
+        block_out_channel_mults=(2, 2),
+        down_block_types=("EncoderDownBlock", "EncoderDownBlock"),
+        mid_block_type="EncoderMidBlock",
+        up_block_types=("EncoderUpBlock", "EncoderUpBlock"),
+    )
+    x = torch.randn((1, 1, 64, 64))
+    _, dist = vae(x)
+    _ = vae.kl_div(dist)
 
 
 if __name__ == "__main__":

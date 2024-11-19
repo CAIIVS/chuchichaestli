@@ -158,6 +158,8 @@ class VAE(nn.Module):
             in_out_args=decoder_args,
         )
 
+        self.levels = len(block_out_channel_mults)
+
     def encode(self, x: torch.Tensor, eps=1e-8):
         """Encode the input.
 
@@ -177,3 +179,27 @@ class VAE(nn.Module):
     def decode(self, z: torch.Tensor):
         """Decode the input."""
         return self.decoder(z)
+
+    def compute_latent_shape(self, input_shape: tuple[int]):
+        """Compute the shape of the latent space (no batch dimension)."""
+        spatial_dims = (
+            [dim // (2 ** (self.levels - 1)) for dim in input_shape[2:]]
+            if self.levels > 1
+            else input_shape[2:]
+        )
+        return (self.encoder.out_channels, *spatial_dims)
+
+    def forward(self, x: torch.Tensor, eps=1e-8):
+        """Forward pass through the model."""
+        posterior = self.encode(x, eps)
+        z = posterior.rsample()
+        return self.decode(z), posterior
+
+    @staticmethod
+    def kl_div(posterior: torch.distributions.MultivariateNormal):
+        """Compute the KL divergence."""
+        zeros = torch.zeros_like(posterior.mean)
+        eye = torch.eye(posterior.mean.shape[-1])
+        return torch.distributions.kl.kl_divergence(
+            posterior, torch.distributions.MultivariateNormal(zeros, eye)
+        )
