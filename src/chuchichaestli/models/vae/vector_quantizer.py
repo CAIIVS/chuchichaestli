@@ -25,21 +25,23 @@ from torch import nn
 class VectorQuantizer(nn.Module):
     """Vector Quantizer for VQ-VAE."""
 
-    def __init__(self, n_embeddings: int, embedding_dim: int):
+    def __init__(self, n_embeddings: int, embedding_dim: int, beta: float = 0.25):
         """Initialize VectorQuantizer.
 
         Args:
             n_embeddings (int): Number of embeddings.
             embedding_dim (int): Dimension of the embeddings.
+            beta (float): Beta parameter for the loss.
         """
         super().__init__()
-        self.embedding_dim
+        self.embedding_dim = embedding_dim
         self.embedding = nn.Embedding(n_embeddings, embedding_dim)
+        self.beta = beta
         self.embedding.weight.data.uniform_(-1 / n_embeddings, 1 / n_embeddings)
 
     def forward(self, z: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, tuple]:
         """Forward pass through the VQVAE."""
-        z = z.permute(0, 2, 3, 1).contiguous()
+        z = z.moveaxis(1, -1).contiguous()
         z_shape = z.shape
         z_flat = z.view(-1, self.embedding_dim)
 
@@ -50,8 +52,13 @@ class VectorQuantizer(nn.Module):
         )
         # This preserves the gradient flow.
         z_q: torch.Tensor = z + (z_q - z).detach()
-        z_q = z_q.permute(0, 3, 1, 2).contiguous()
-        return z_q, loss, (nearest_embs, z_flat)
+        z_q = z_q.moveaxis(-1, 1).contiguous()
+
+        counts = torch.bincount(nearest_embs, minlength=self.embedding.num_embeddings)
+        e_mean = counts.float() / nearest_embs.numel()
+        perplexity = torch.exp(-torch.sum(e_mean * torch.log(e_mean + 1e-10)))
+
+        return z_q, loss, (perplexity, nearest_embs, z_flat)
 
     def get_codebook_entry(
         self, indices: torch.LongTensor, shape: tuple[int, ...] | None = None
@@ -60,5 +67,5 @@ class VectorQuantizer(nn.Module):
         z_q = self.embedding(indices)
         if shape is not None:
             z_q = z_q.view(shape)
-            z_q = z_q.permute(0, 3, 1, 2).contiguous()
+            z_q = z_q.moveaxis(-1, 1).contiguous()
         return z_q

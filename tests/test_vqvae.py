@@ -1,4 +1,4 @@
-"""Variational autoencoder tests.
+"""Vector Quantized Variational Autoencoder tests.
 
 This file is part of Chuchichaestli.
 
@@ -21,9 +21,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 import pytest
 import torch
 from torch import nn
-from chuchichaestli.models.vae import VAE
-
-import math
+from chuchichaestli.models.vae import VQVAE
 
 
 @pytest.mark.parametrize(
@@ -50,7 +48,7 @@ import math
         ),
     ],
 )
-def test_vae_initialization(
+def test_vqvae_initialization(
     dimensions,
     in_channels,
     n_channels,
@@ -59,8 +57,8 @@ def test_vae_initialization(
     down_block_types,
     up_block_types,
 ):
-    """Test VAE initialization with different parameters."""
-    vae = VAE(
+    """Test VQVAE initialization with different parameters."""
+    vqvae = VQVAE(
         dimensions=dimensions,
         in_channels=in_channels,
         n_channels=n_channels,
@@ -68,8 +66,8 @@ def test_vae_initialization(
         down_block_types=down_block_types,
         up_block_types=up_block_types,
     )
-    assert isinstance(vae.encoder, nn.Module)
-    assert isinstance(vae.decoder, nn.Module)
+    assert isinstance(vqvae.encoder, nn.Module)
+    assert isinstance(vqvae.decoder, nn.Module)
 
 
 @pytest.mark.parametrize(
@@ -137,7 +135,7 @@ def test_vae_initialization(
         ),
     ],
 )
-def test_vae_encode_shape(
+def test_vqvae_encode_shape(
     dimensions,
     in_channels,
     n_channels,
@@ -147,29 +145,28 @@ def test_vae_encode_shape(
     input_shape,
     encoder_out_block_type,
 ):
-    """Test the output shape of the VAE encoder with different parameters."""
-    latent_dim = n_channels * math.prod(block_out_channel_mults)
-    vae = VAE(
+    """Test the output shape of the VQVAE encoder with different parameters."""
+    vqvae = VQVAE(
         dimensions=dimensions,
         in_channels=in_channels,
         n_channels=n_channels,
-        latent_dim=latent_dim,
+        latent_dim=4,
+        vq_embedding_dim=32,
         block_out_channel_mults=block_out_channel_mults,
         down_block_types=down_block_types,
         up_block_types=up_block_types,
         encoder_out_block_type=encoder_out_block_type,
     )
     x = torch.randn(input_shape)
-    dist = vae.encode(x)
+    z = vqvae.encode(x)
     spatial_dims = (
         [dim / (2 ** (len(block_out_channel_mults) - 1)) for dim in input_shape[2:]]
         if len(block_out_channel_mults) > 1
         else input_shape[2:]
     )
-    assert isinstance(dist, torch.distributions.MultivariateNormal)
-    assert dist.mean.shape == (
+    assert z.shape == (
         input_shape[0],
-        latent_dim,
+        32,
         *spatial_dims,
     )
 
@@ -239,7 +236,7 @@ def test_vae_encode_shape(
         ),
     ],
 )
-def test_vae_decode_shape(
+def test_vqvae_decode_shape(
     dimensions,
     in_channels,
     n_channels,
@@ -249,12 +246,13 @@ def test_vae_decode_shape(
     input_shape,
     decoder_in_block_type,
 ):
-    """Test the output shape of the VAE decoder with different parameters."""
-    vae = VAE(
+    """Test the output shape of the VQVAE decoder with different parameters."""
+    vqvae = VQVAE(
         dimensions=dimensions,
         in_channels=in_channels,
         n_channels=n_channels,
         latent_dim=4,
+        vq_embedding_dim=32,
         block_out_channel_mults=block_out_channel_mults,
         down_block_types=down_block_types,
         up_block_types=up_block_types,
@@ -265,8 +263,9 @@ def test_vae_decode_shape(
         if len(block_out_channel_mults) > 1
         else input_shape[2:]
     )
-    z = torch.randn((input_shape[0], 4, *spatial_dims))
-    decoded = vae.decode(z)
+    z_shape = (input_shape[0], 32, *spatial_dims)
+    z = torch.randn(z_shape)
+    decoded, _ = vqvae.decode(z)
     assert decoded.shape == input_shape
 
 
@@ -294,7 +293,7 @@ def test_vae_decode_shape(
         ),
     ],
 )
-def test_vae_forward(
+def test_vqvae_forward(
     dimensions,
     in_channels,
     n_channels,
@@ -303,8 +302,8 @@ def test_vae_forward(
     up_block_types,
     input_shape,
 ):
-    """Test the forward pass of the VAE model with different parameters."""
-    vae = VAE(
+    """Test the forward pass of the VQVAE model with different parameters."""
+    vqvae = VQVAE(
         dimensions=dimensions,
         in_channels=in_channels,
         n_channels=n_channels,
@@ -313,68 +312,14 @@ def test_vae_forward(
         up_block_types=up_block_types,
     )
     x = torch.randn(input_shape)
-    dist = vae.encode(x)
-    z = dist.sample()
-    x_tilde = vae.decode(z)
+    z = vqvae.encode(x)
+    x_tilde, _ = vqvae.decode(z)
     assert x_tilde.shape == x.shape
 
 
-@pytest.mark.parametrize(
-    "dimensions,in_channels,n_channels,block_out_channel_mults,down_block_types,up_block_types,input_shape",
-    [
-        (2, 3, 32, (2,), ("EncoderDownBlock",), ("EncoderUpBlock",), (1, 3, 64, 64)),
-        (
-            1,
-            1,
-            16,
-            (2, 2),
-            ("EncoderDownBlock", "EncoderDownBlock"),
-            ("EncoderUpBlock", "EncoderUpBlock"),
-            (1, 1, 28),
-        ),
-        (
-            3,
-            3,
-            64,
-            (2, 2, 2),
-            ("EncoderDownBlock", "EncoderDownBlock", "EncoderDownBlock"),
-            ("EncoderUpBlock", "EncoderUpBlock", "EncoderUpBlock"),
-            (1, 3, 16, 16, 16),
-        ),
-    ],
-)
-def test_vae_gradient_flow(
-    dimensions,
-    in_channels,
-    n_channels,
-    block_out_channel_mults,
-    down_block_types,
-    up_block_types,
-    input_shape,
-):
-    """Test that gradients flow properly during backpropagation with different parameters."""
-    vae = VAE(
-        dimensions=dimensions,
-        in_channels=in_channels,
-        n_channels=n_channels,
-        block_out_channel_mults=block_out_channel_mults,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
-    )
-    x = torch.randn(input_shape)
-    dist = vae.encode(x)
-    z = dist.sample()
-    x_tilde = vae.decode(z)
-    loss = nn.functional.mse_loss(x_tilde, x)
-    loss.backward()
-    for param in vae.parameters():
-        if param.grad is not None:
-            assert param.grad.abs().sum() > 0
-
-
-def test_vae_large():
-    """Test the VAE model with large input dimensions."""
-    vae = VAE(
+def test_vqvae_large():
+    """Test the VQVAE model with large input dimensions."""
+    vqvae = VQVAE(
         dimensions=2,
         in_channels=1,
         n_channels=16,
@@ -386,47 +331,10 @@ def test_vae_large():
     )
     input_shape = (1, 1, 512, 512)
     x = torch.randn(input_shape)
-    dist = vae.encode(x)
-    z = dist.sample()
-    x_tilde = vae.decode(z)
+    z = vqvae.encode(x)
+    x_tilde, _ = vqvae.decode(z)
     assert x_tilde.shape == x.shape
 
 
-def test_vae_kl():
-    """Test the kl_div method of the VAE model."""
-    vae = VAE(
-        dimensions=2,
-        in_channels=1,
-        n_channels=16,
-        latent_dim=8,
-        block_out_channel_mults=(2, 2),
-        down_block_types=("EncoderDownBlock", "EncoderDownBlock"),
-        mid_block_type="EncoderMidBlock",
-        up_block_types=("EncoderUpBlock", "EncoderUpBlock"),
-    )
-    x = torch.randn((1, 1, 64, 64))
-    _, dist = vae(x)
-    _ = vae.kl_div(dist)
-
-
-def test_batch():
-    """Test the VAE model with batch size > 1."""
-    vae = VAE(
-        dimensions=2,
-        in_channels=1,
-        n_channels=16,
-        latent_dim=8,
-        block_out_channel_mults=(2, 2),
-        down_block_types=("EncoderDownBlock", "EncoderDownBlock"),
-        mid_block_type="EncoderMidBlock",
-        up_block_types=("EncoderUpBlock", "EncoderUpBlock"),
-    )
-    input_shape = (4, 1, 64, 64)
-    x = torch.randn(input_shape)
-    x_hat, dist = vae(x)
-    assert x_hat.shape == x.shape
-    assert dist.mean.shape[0] == 4
-
-
 if __name__ == "__main__":
-    pytest.main(["-v", "test_vae.py"])
+    pytest.main(["-v", "test_vqvae.py"])

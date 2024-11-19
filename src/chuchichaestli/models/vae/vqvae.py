@@ -61,7 +61,6 @@ class VQVAE(nn.Module):
         decoder_act_fn: str = "silu",
         decoder_in_kernel_size: int = 3,
         decoder_out_kernel_size: int = 3,
-        double_z: bool = True,
     ):
         """Initializes the VQVAE model.
 
@@ -96,7 +95,6 @@ class VQVAE(nn.Module):
             decoder_act_fn (str): Activation function for the decoder. Default is "silu".
             decoder_in_kernel_size (int): Kernel size for the input layer of the decoder. Default is 3.
             decoder_out_kernel_size (int): Kernel size for the output layer of the decoder. Default is 3.
-            double_z (bool): Whether to use double the latent space dimensions. Default is True.
         """
         super().__init__()
 
@@ -146,7 +144,7 @@ class VQVAE(nn.Module):
             res_args=res_args,
             attn_args=attn_args,
             in_out_args=encoder_args,
-            double_z=double_z,
+            double_z=False,
         )
         self.softplus = nn.Softplus()
         self.decoder = Decoder(
@@ -190,7 +188,9 @@ class VQVAE(nn.Module):
     ):
         """Decode the input tensor."""
         if not force_no_quant:
+            print(z.shape)
             z, loss, _ = self.quantize(z)
+            print(z.shape)
         elif load_from_codebook:
             z = self.quantize.get_codebook_entry(z, shape)
             loss = torch.zeros(z.shape[0]).to(z.device, dtype=z.dtype)
