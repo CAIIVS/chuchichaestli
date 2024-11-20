@@ -96,6 +96,7 @@ class DiffusionProcess(ABC):
         timesteps: int,
         device: str = "cpu",
         noise_distribution: DistributionAdapter | None = None,
+        generator: torch.Generator | None = None,
         *args,
         **kwargs,
     ) -> None:
@@ -103,6 +104,7 @@ class DiffusionProcess(ABC):
         self.num_time_steps = timesteps
         self.device = device
         self.noise_distribution = noise_distribution
+        self.generator = generator
 
     @abstractmethod
     def noise_step(
@@ -158,4 +160,4 @@ class DiffusionProcess(ABC):
         """
         if self.noise_distribution is not None:
             return self.noise_distribution(shape)
-        return torch.randn(shape, device=self.device)
+        return torch.randn(shape, generator=self.generator, device=self.device)
