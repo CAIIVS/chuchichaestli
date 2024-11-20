@@ -72,7 +72,11 @@ class CFGDDPM(DiffusionProcess):
         self.u_generation = torch.linspace(0, 1, num_timesteps, device=device)
 
     def noise_step(
-        self, x_t: torch.Tensor, condition: torch.Tensor, *args, **kwargs
+        self,
+        x_t: torch.Tensor,
+        condition: torch.Tensor | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Noise step for the diffusion process.
 
