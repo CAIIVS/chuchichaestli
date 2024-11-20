@@ -92,3 +92,24 @@ def test_generation(dimensions, batchsize, yield_intermediate):
 
     # Check the output shape
     assert output.shape == (2 * batchsize, 16) + (32,) * dimensions
+
+
+def test_seed():
+    """Test the seed method of the DDPM class."""
+    gen = torch.Generator()
+    gen.manual_seed(42)
+    ddpm = CFGDDPM(num_timesteps=10, generator=gen)
+    input_shape = (4, 16) + (32,) * 2
+    c = torch.randn(input_shape)
+
+    model = lambda x, t: x[:, :16, ...]  # noqa: E731
+
+    # Call the denoise_step method
+    output_generator = ddpm.generate(model, c, n=2, yield_intermediate=False)
+
+    output = None
+    for o in output_generator:
+        output = o
+
+    # Check the output shape
+    assert output.shape == (2 * 4, 16) + (32,) * 2
