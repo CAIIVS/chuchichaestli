@@ -94,7 +94,8 @@ class DDPM(DiffusionProcess):
     def generate(
         self,
         model: Any,
-        condition: torch.Tensor,
+        condition: torch.Tensor | None = None,
+        shape: tuple[int, ...] | None = None,
         n: int = 1,
         yield_intermediate: bool = False,
         *args,
@@ -106,22 +107,31 @@ class DDPM(DiffusionProcess):
 
         Args:
             model: Model to use for sampling.
-            condition: Tensor to condition generation on. For unconditional generation, supply a zero-tensor of the sample shape.
+            condition: Tensor to condition generation on. For unconditional generation, set to None and use the shape parameter instead.
+            shape: Shape of the generated tensor. Only used if condition is None.
             n: Number of samples to generate (batch size).
             yield_intermediate: Yield intermediate results. This turns the function into a generator.
             *args: Additional arguments.
             **kwargs: Additional keyword
         """
-        c = (
-            condition.unsqueeze(0)
-            .expand(n, *condition.shape)
-            .reshape(-1, *condition.shape[1:])
-        )
-        x_t = self.sample_noise(c.shape)
+        if condition is not None:
+            c = (
+                condition.unsqueeze(0)
+                .expand(n, *condition.shape)
+                .reshape(-1, *condition.shape[1:])
+            )
+            x_t = self.sample_noise(c.shape)
+        elif shape is not None:
+            x_t = self.sample_noise((n,) + shape)
+        else:
+            raise ValueError("Either condition or shape must be provided.")
         coef_shape = [-1] + [1] * (x_t.dim() - 1)
 
         for t in reversed(range(0, self.num_time_steps)):
-            eps_t = model(torch.cat([c, x_t], dim=1), t)
+            if condition is not None:
+                eps_t = model(torch.cat([c, x_t], dim=1), t)
+            else:
+                eps_t = model(x_t, t)
             coef_inner_t = self.coef_inner[t].reshape(coef_shape)
             coef_outer_t = self.coef_outer[t].reshape(coef_shape)
             x_tm1 = coef_outer_t * (x_t - coef_inner_t * eps_t)

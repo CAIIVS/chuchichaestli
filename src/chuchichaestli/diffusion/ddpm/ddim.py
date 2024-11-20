@@ -71,24 +71,33 @@ class DDIM(DDPM):
     def generate(
         self,
         model: Any,
-        condition: Tensor,
+        condition: torch.Tensor | None = None,
+        shape: tuple[int, ...] | None = None,
         n: int = 1,
         yield_intermediate: bool = False,
         *args,
         **kwargs,
     ) -> Tensor | Generator[Tensor, None, torch.Tensor]:
         """Sample from the DDPM model using DDIM."""
-        c = (
-            condition.unsqueeze(0)
-            .expand(n, *condition.shape)
-            .reshape(-1, *condition.shape[1:])
-        )
-        x_tau = self.sample_noise(c.shape).to(self.device)
+        if condition is not None:
+            c = (
+                condition.unsqueeze(0)
+                .expand(n, *condition.shape)
+                .reshape(-1, *condition.shape[1:])
+            )
+            x_tau = self.sample_noise(c.shape).to(self.device)
+        elif shape is not None:
+            x_tau = self.sample_noise((n, *shape)).to(self.device)
+        else:
+            raise ValueError("Either condition or shape must be provided.")
         coef_shape = [-1] + [1] * (x_tau.dim() - 1)
 
         for idx, t in enumerate(self.tau):
             t = int(t)
-            eps_tau = model(torch.cat([c, x_tau], dim=1), t)
+            if condition is not None:
+                eps_tau = model(torch.cat([c, x_tau], dim=1), t)
+            else:
+                eps_tau = model(x_tau, t)
             x_0_hat = (
                 x_tau - self.sqrt_1m_alpha_cumprod[t] * eps_tau
             ) / self.sqrt_alpha_cumprod[t].reshape(coef_shape)

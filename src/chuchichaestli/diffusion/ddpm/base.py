@@ -126,7 +126,7 @@ class DiffusionProcess(ABC):
     def generate(
         self,
         model: Any,
-        condition: torch.Tensor,
+        condition: torch.Tensor | None = None,
         n: int = 1,
         yield_intermediate: bool = False,
         *args,
@@ -138,7 +138,7 @@ class DiffusionProcess(ABC):
 
         Args:
             model: Model to use for sampling.
-            condition: Tensor to condition generation on. For unconditional generation, supply a zero-tensor of the sample shape.
+            condition: Tensor to condition generation on. For unconditional generation, set to None and use the shape parameter instead.
             n: Number of samples to generate (batch size).
             yield_intermediate: Yield intermediate results. This turns the function into a generator.
             *args: Additional arguments.

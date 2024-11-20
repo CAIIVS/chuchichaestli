@@ -93,6 +93,50 @@ def test_generation(dimensions, batchsize, yield_intermediate):
     assert output.shape == (2 * batchsize, 16) + (32,) * dimensions
 
 
+@pytest.mark.parametrize(
+    "dimensions, batchsize, yield_intermediate",
+    [
+        (1, 1, False),
+        (2, 1, False),
+        (3, 1, False),
+        (1, 4, False),
+        (2, 4, False),
+        (3, 4, False),
+        (1, 1, True),
+        (2, 1, True),
+        (3, 1, True),
+        (1, 4, True),
+        (2, 4, True),
+        (3, 4, True),
+    ],
+)
+def test_generation_unconditional(dimensions, batchsize, yield_intermediate):
+    """Test the denoise_step method of the DDPM class."""
+    # Create dummy input tensors
+    ddpm = DDPM(num_timesteps=10)
+    input_shape = (batchsize, 16) + (32,) * dimensions
+
+    def model(x, t):
+        assert x.size(1) == 16
+        return x[:, :16, ...]
+
+    # Call the denoise_step method
+    output_generator = ddpm.generate(
+        model,
+        condition=None,
+        shape=input_shape[1:],
+        n=2,
+        yield_intermediate=yield_intermediate,
+    )
+
+    output = None
+    for o in output_generator:
+        output = o
+
+    # Check the output shape
+    assert output.shape == (2, 16) + (32,) * dimensions
+
+
 def test_seed():
     """Test the seed method of the DDPM class."""
     gen = torch.Generator()
