@@ -10,13 +10,13 @@ from scipy import linalg
 from tqdm import tqdm
 from sklearn.linear_model import LinearRegression
 
-from representations import get_representations, load_reps_from_path, save_outputs
+from representations import get_representation
+from .models import load_encoder
 
 
-
-class FID(Metric):
+class FD(Metric):
     
-    def __init__(self):
+    def __init__(self, model_name: str, device: str):
         # remember to call super
         super().__init__()
         # call `self.add_state`for every internal state that is needed for the metrics computations
@@ -25,7 +25,12 @@ class FID(Metric):
         self.add_state("real", default=torch.tensor(0), dist_reduce_fx="sum")
         self.add_state("fake", default=torch.tensor(0), dist_reduce_fx="sum")
 
-
+        self.model = load_encoder(model_name, device, ckpt=None, arch=None,
+                    clean_resize=False, #Use clean resizing (from pillow)
+                    sinception=True if model_name=='sinception' else False,
+                    depth=0, # Negative depth for internal layers, positive 1 for after projection head.
+                    )
+        self.device = device
 
     def compute_FD_with_stats(self, mu1, mu2, sigma1, sigma2, eps=1e-6):
         """
@@ -81,9 +86,9 @@ class FID(Metric):
 
         return mean_term + cov_term
 
-    def update(self, input_tensor, real:bool) -> None:
+    def update(self, batch, real:bool) -> None:
         
-        get_representations(model, DL, device, normalized=False)
+        features = get_representation(self.model, batch, self.device, normalized=False)
         # extract predicted class index for computing accuracy
         if real: 
             self.real += features.sum(dim=0)
