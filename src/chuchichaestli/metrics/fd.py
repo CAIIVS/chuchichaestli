@@ -23,7 +23,8 @@ class FD(Metric):
                     clean_resize=False, #Use clean resizing (from pillow)
                     sinception=True if model_name=='sinception' else False,
                     depth=0, # Negative depth for internal layers, positive 1 for after projection head.
-                    )        
+                    )     
+        self.device_str = device_str   
         
     def get_representation(self, model, batch, device, normalized=False):
         if isinstance(batch, list):
@@ -119,7 +120,7 @@ class FD(Metric):
 
     def update(self, batch, real:bool) -> None:
         
-        features = self.get_representation(self.model, batch, self.device, normalized=False)
+        features = self.get_representation(self.model, batch, self.device_str, normalized=False)
         # extract predicted class index for computing accuracy
         if real: 
             self.real += features.sum(dim=0)

@@ -14,7 +14,8 @@ class TestFD(unittest.TestCase):
         tensor1 = torch.rand(4, 128, 128).to(self.device)
         
         # Update the metric with the same tensor twice
-        self.fd_metric.update(tensor1, tensor1)
+        self.fd_metric.update(tensor1, real=True)
+        self.fd_metric.update(tensor1, real=False)
         
         # Compute the FD score
         score_same = self.fd_metric.compute()
@@ -26,7 +27,9 @@ class TestFD(unittest.TestCase):
         tensor2 = torch.rand(4, 128, 128).to(self.device)
         
         # Update the metric with two different tensors
-        self.fd_metric.update(tensor1, tensor2)
+        self.fd_metric.update(tensor1, real=True)
+        self.fd_metric.update(tensor2, real=False)
+
         
         # Compute the FD score
         score_diff = self.fd_metric.compute()
@@ -39,7 +42,8 @@ class TestFD(unittest.TestCase):
         tensor1 = torch.rand(4, 128, 128).to(self.device)
         
         # Update the metric with the same tensor twice
-        self.fd_metric.update(tensor1, tensor1)
+        self.fd_metric.update(tensor1, real=True)
+        self.fd_metric.update(tensor1, real=False)
         
         # Compute the FD score
         score = self.fd_metric.compute()
