@@ -52,8 +52,9 @@ class LearnedPerceptualImagePatchSimilarity(Metric):
 
     As input to ``forward`` and ``update`` the metric accepts the following input
 
-    - ``img1`` (:class:`~torch.Tensor`): tensor with images of shape ``(N, 3, H, W)``
-    - ``img2`` (:class:`~torch.Tensor`): tensor with images of shape ``(N, 3, H, W)``
+    - ``img1`` (:class:`~torch.Tensor`): tensor with images of shape ``(N, C, H, W)`` or ``(N, C, D, H, W)``
+
+    - ``img2`` (:class:`~torch.Tensor`): tensor with images of shape ``(N, C, H, W)`` or ``(N, C, D, H, W)``
 
     As output of `forward` and `compute` the metric returns the following output
 
@@ -148,15 +149,23 @@ class LearnedPerceptualImagePatchSimilarity(Metric):
             raise ValueError(
                 "Expected input to be a 4D or 5D tensor with shape (B, C, H, W) or (B, C, D, H, W)"
             )
+
         if img1.dim() == 5:
             # make batches of 2D images from 3D images
             # batch size is the product of the first two dimensions
             # TODO make smaller batches if too large for GPU
             B, C, D, H, W = img1.shape
+            if C == 1:
+                img1 = img1.repeat(1, 3, 1, 1, 1)
+                img2 = img2.repeat(1, 3, 1, 1, 1)
             img1 = img1.permute(0, 2, 1, 3, 4).reshape(B * D, C, H, W)
             img2 = img2.permute(0, 2, 1, 3, 4).reshape(B * D, C, H, W)
             self.store_loss(img1, img2)
         else:
+            B, C, D, H, W = img1.shape
+            if C == 1:
+                img1 = img1.repeat(1, 3, 1, 1)
+                img2 = img2.repeat(1, 3, 1, 1)
             self.store_loss(img1, img2)
 
     def compute(self) -> Tensor:

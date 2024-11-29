@@ -17,7 +17,7 @@ import torch.nn.functional as F
 
 import sys
 
-from chuchichaestli.metrics.backbones.encoder import Encoder
+from chuchichaestli.metrics.backbones.backbone_encoder import Encoder
 
 from chuchichaestli.metrics.backbones.resizer import pil_resize
 

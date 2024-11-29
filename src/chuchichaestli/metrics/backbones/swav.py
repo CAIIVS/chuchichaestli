@@ -22,7 +22,7 @@ except ImportError:
     from torch.utils.model_zoo import load_url as load_state_dict_from_url
 from torchvision import transforms
 
-from chuchichaestli.metrics.backbones.encoder import Encoder
+from chuchichaestli.metrics.backbones.backbone_encoder import Encoder
 
 SWAV_WEIGHTS_URL = (
     "https://www.dropbox.com/s/ghjrgktg0lyjorn/swav_800ep_pretrain.pth.tar?dl=1"
