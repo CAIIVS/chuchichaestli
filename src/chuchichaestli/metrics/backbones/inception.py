@@ -15,7 +15,7 @@ from torchvision import transforms
 import torchvision.transforms.functional as TF
 
 
-from chuchichaestli.metrics.backbones.encoder import Encoder
+from chuchichaestli.metrics.backbones.backbone_encoder import Encoder
 
 from chuchichaestli.metrics.backbones.resizer import pil_resize
 

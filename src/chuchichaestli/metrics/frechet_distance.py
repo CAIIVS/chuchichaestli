@@ -14,7 +14,7 @@ from torchmetrics.utilities.imports import (
 )
 from torchmetrics.utilities.plot import _AX_TYPE, _PLOT_OUT_TYPE
 
-from chuchichaestli.metrics.backbones.load_encoder import load_encoder
+from chuchichaestli.metrics.backbones.load_backbone_encoder import load_encoder
 
 
 # inspired by https://github.com/Lightning-AI/torchmetrics/blob/master/src/torchmetrics/image/fid.py
@@ -55,18 +55,6 @@ class FrechetDistance(Metric):
     multivariate normal distribution estimated from an image encoder features calculated on generated (fake) images.
     The metric was originally proposed in `fd ref1`_.
 
-    Using the default feature extraction (an image encoder using the original weights from `fd ref2`_), the input is
-    expected to be mini-batches of 3-channel RGB images of shape ``(3xHxW)``. All images will be resized to the img sizes of the original training data. The boolian
-    flag ``real`` determines if the images should update the statistics of the real distribution or the
-    fake distribution.
-
-    Using custom feature extractor is also possible. One can give a torch.nn.Module as `feature` argument. This
-    custom feature extractor is expected to have output shape of ``(1, num_features)``. This would change the
-    used feature extractor from default (an image encoder) to the given network. In case network doesn't have
-    ``num_features`` attribute, a random tensor will be given to the network to infer feature dimensionality. In this case, update
-    method expects to have the tensor given to `imgs` argument to be in the correct shape and type that is compatible
-    to the custom feature extractor.
-
     This metric is known to be unstable in its calculatations, and we recommend for the best results using this metric
     that you calculate using `torch.float64` (default is `torch.float32`) which can be set using the `.set_dtype`
     method of the metric.
@@ -82,33 +70,18 @@ class FrechetDistance(Metric):
 
     As output of `forward` and `compute` the metric returns the following output
 
-    - ``fid`` (:class:`~torch.Tensor`): float scalar tensor with mean FID value over samples
+    - ``fd`` (:class:`~torch.Tensor`): float scalar tensor with mean FD value over samples
 
     Args:
-        feature:
-            Either an integer or ``nn.Module``:
-
-            - an ``nn.Module`` for using a custom feature extractor. Expects that its forward method returns
-              an ``(N,d)`` matrix where ``N`` is the batch size and ``d`` is the feature size.
-
+        model_name: str indicating the feature extractor network to use.
+            Choose between `'inception'`, `'swav'`, `'clip'` or `'dinov2'`
+        device_str: str indicating the device to use. Choose between `'cuda'` or `'cpu'`
         reset_real_features: Whether to also reset the real features. Since in many cases the real dataset does not
             change, the features can be cached them to avoid recomputing them which is costly. Set this to ``False`` if
             your dataset does not change.
-        input_img_size: tuple of integers. Indicates input img size to the custom feature extractor network if provided.
+        num_features: Number of features to extract from the feature extractor. This is the dimensionality of the
+            feature vector and depends on the chosen feature extractor.
         kwargs: Additional keyword arguments, see :ref:`Metric kwargs` for more info.
-
-
-    Example:
-        >>> from torch import rand
-        >>> from torchmetrics.image.fid import FrechetInceptionDistance
-        >>> fid = FrechetInceptionDistance(feature=64)
-        >>> # generate two slightly overlapping image intensity distributions
-        >>> imgs_dist1 = torch.randint(0, 200, (100, 3, 299, 299), dtype=torch.uint8)
-        >>> imgs_dist2 = torch.randint(100, 255, (100, 3, 299, 299), dtype=torch.uint8)
-        >>> fid.update(imgs_dist1, real=True)
-        >>> fid.update(imgs_dist2, real=False)
-        >>> fid.compute()
-        tensor(12.6388)
 
     """
 
