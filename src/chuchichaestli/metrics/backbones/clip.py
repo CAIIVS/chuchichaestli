@@ -5,7 +5,7 @@ import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
-from chuchichaestli.metrics.backbones.encoder import Encoder
+from chuchichaestli.metrics.backbones.backbone_encoder import Encoder
 from chuchichaestli.metrics.backbones.resizer import pil_resize
 
 ARCH_WEIGHT_DEFAULTS = {

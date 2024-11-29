@@ -1,6 +1,6 @@
 import inspect
 
-from chuchichaestli.metrics.backbones.encoder import Encoder
+from chuchichaestli.metrics.backbones.backbone_encoder import Encoder
 from chuchichaestli.metrics.backbones.inception import InceptionEncoder
 from chuchichaestli.metrics.backbones.swav import ResNet50Encoder
 from chuchichaestli.metrics.backbones.clip import CLIPEncoder

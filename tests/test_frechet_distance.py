@@ -1,7 +1,7 @@
 import pytest
 import torch
 from torch.nn import Module
-from chuchichaestli.metrics.fd import FrechetDistance
+from chuchichaestli.metrics.frechet_distance import FrechetDistance
 
 
 @pytest.mark.parametrize(
