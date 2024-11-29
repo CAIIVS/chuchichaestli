@@ -2,6 +2,7 @@ import torch
 import open_clip
 from torchvision.transforms import Normalize, InterpolationMode
 import torchvision.transforms.functional as TF
+import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 from .encoder import Encoder
@@ -32,8 +33,10 @@ class CLIPEncoder(Encoder):
         if self.clean_resize:
             image = pil_resize(image, size)
         else:
-            image = TF.resize(image, size, interpolation=InterpolationMode.BICUBIC).convert('RGB')
-            image = TF.to_tensor(image)
+            image = F.interpolate(image,
+                    size=size,
+                    mode='bicubic',
+                    align_corners=False).squeeze()
         image  = TF.center_crop(image, size)
         return Normalize(mean, std)(image)
 

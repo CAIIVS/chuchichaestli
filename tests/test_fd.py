@@ -1,58 +1,109 @@
-import unittest
+import pytest
 import torch
-from chuchichaestli.metrics.fd import FD
+from torch.nn import Module
+from chuchichaestli.metrics.fd import FrechetDistance
 
-class TestFD(unittest.TestCase):
 
-    def setUp(self):
-        self.model_name = "inception"  # Example model name
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.fd_metric = FD(self.model_name, self.device)
+@pytest.mark.parametrize("model_name, num_features", [
+    ("inception", 2048),
+    ("swav", 2048),
+    ("clip", 1024),
+    ("dinov2", 1024),
+])
+def test_2D_same_input(model_name, num_features):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    metric = FrechetDistance(model_name, device, num_features=num_features).to(device)
+    for _ in range(2):
+        img = torch.rand(2, 1, 64, 64).to(device)
+        # dataloader transform from metric.model.transform lambda x: model_transform(x)
+        metric.update(img, real=True)
+        metric.update(img, real=False)
 
-    def test_2D_same_tensor(self):
-        # Create a random 2D tensor
-        tensor1 = torch.rand(4, 128, 128).to(self.device)
-        
-        # Update the metric with the same tensor twice
-        self.fd_metric.update(tensor1, real=True)
-        self.fd_metric.update(tensor1, real=False)
-        
-        # Compute the FD score
-        score_same = self.fd_metric.compute()
-        
-        # Reset the metric
-        self.fd_metric.reset()
-        
-        # Create another random 2D tensor
-        tensor2 = torch.rand(4, 128, 128).to(self.device)
-        
-        # Update the metric with two different tensors
-        self.fd_metric.update(tensor1, real=True)
-        self.fd_metric.update(tensor2, real=False)
+    assert torch.allclose(metric.real_features_sum, metric.fake_features_sum)
+    assert torch.allclose(metric.real_features_cov_sum, metric.fake_features_cov_sum)
+    assert torch.allclose(metric.real_features_num_samples, metric.fake_features_num_samples)
 
-        
-        # Compute the FD score
-        score_diff = self.fd_metric.compute()
-        
-        # Check that the score for the same tensor is smaller than for different tensors
-        self.assertLess(score_same, score_diff, "FD score for the same tensor should be smaller than for different tensors")
+    val = metric.compute()
+    assert torch.allclose(val, torch.zeros_like(val), atol=1e-3)
 
-    def test_2D_update_and_compute(self):
-        # Create a random 2D tensor
-        tensor1 = torch.rand(4, 128, 128).to(self.device)
-        
-        # Update the metric with the same tensor twice
-        self.fd_metric.update(tensor1, real=True)
-        self.fd_metric.update(tensor1, real=False)
-        
-        # Compute the FD score
-        score = self.fd_metric.compute()
-        
-        # Check that the score is a float
-        self.assertIsInstance(score, float, "FD score should be a float")
-        
-        # Check that the score is non-negative
-        self.assertGreaterEqual(score, 0, "FD score should be non-negative")
+@pytest.mark.parametrize("model_name, num_features", [
+    ("inception", 2048),
+    ("swav", 2048),
+    ("clip", 1024),
+    ("dinov2", 1024),
+])
+def test_3D_same_input(model_name, num_features):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    metric = FrechetDistance(model_name, device, num_features=num_features).to(device)
+    for _ in range(2):
+        img = torch.rand(2, 1, 32, 64, 64).to(device)
+        # dataloader transform from metric.model.transform lambda x: model_transform(x)
+        metric.update(img, real=True)
+        metric.update(img, real=False)
 
-if __name__ == "__main__":
-    unittest.main()
+    assert torch.allclose(metric.real_features_sum, metric.fake_features_sum)
+    assert torch.allclose(metric.real_features_cov_sum, metric.fake_features_cov_sum)
+    assert torch.allclose(metric.real_features_num_samples, metric.fake_features_num_samples)
+
+    val = metric.compute()
+    assert torch.allclose(val, torch.zeros_like(val), atol=1e-3)
+
+
+@pytest.mark.parametrize("model_name, num_features", [
+    ("inception", 2048),
+    ("swav", 2048),
+    ("clip", 1024),
+    ("dinov2", 1024),
+])
+def test_2D_same_input_vs_different(model_name, num_features):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    metric = FrechetDistance(model_name, device, num_features=num_features).to(device)
+    for _ in range(2):
+        img = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img, real=True)
+        metric.update(img, real=False)
+
+    val_same = metric.compute()
+    metric.reset()
+    
+    for _ in range(2):
+        img = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img, real=True)
+        img2 = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img2, real=False)
+        
+    val_diff = metric.compute()
+    
+    # assert that val_same is smaller than val_diff
+    assert torch.all(val_same < val_diff)
+    
+
+
+
+@pytest.mark.parametrize("model_name, num_features", [
+    ("inception", 2048),
+    ("swav", 2048),
+    ("clip", 1024),
+    ("dinov2", 1024),
+])
+def test_2D_same_input_vs_different(model_name, num_features):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    metric = FrechetDistance(model_name, device, num_features=num_features).to(device)
+    for _ in range(2):
+        img = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img, real=True)
+        metric.update(img, real=False)
+
+    val_same = metric.compute()
+    metric.reset()
+    
+    for _ in range(2):
+        img = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img, real=True)
+        img2 = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img2, real=False)
+        
+    val_diff = metric.compute()
+    
+    # assert that val_same is smaller than val_diff
+    assert torch.all(val_same < val_diff)
