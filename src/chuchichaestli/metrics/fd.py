@@ -50,19 +50,14 @@ class FrechetDistance(Metric):
     The metric was originally proposed in `fd ref1`_.
 
     Using the default feature extraction (an image encoder using the original weights from `fd ref2`_), the input is
-    expected to be mini-batches of 3-channel RGB images of shape ``(3xHxW)``. If argument ``normalize``
-    is ``True`` images are expected to be dtype ``float`` and have values in the ``[0,1]`` range, else if
-    ``normalize`` is set to ``False`` images are expected to have dtype ``uint8`` and take values in the ``[0, 255]``
-    range. All images will be resized to the img sizes of the original training data. The boolian
+    expected to be mini-batches of 3-channel RGB images of shape ``(3xHxW)``. All images will be resized to the img sizes of the original training data. The boolian
     flag ``real`` determines if the images should update the statistics of the real distribution or the
     fake distribution.
 
     Using custom feature extractor is also possible. One can give a torch.nn.Module as `feature` argument. This
     custom feature extractor is expected to have output shape of ``(1, num_features)``. This would change the
     used feature extractor from default (an image encoder) to the given network. In case network doesn't have
-    ``num_features`` attribute, a random tensor will be given to the network to infer feature dimensionality.
-    Size of this tensor can be controlled by ``input_img_size`` argument and type of the tensor can be controlled
-    with ``normalize`` argument (``True`` uses float32 tensors and ``False`` uses int8 tensors). In this case, update
+    ``num_features`` attribute, a random tensor will be given to the network to infer feature dimensionality. In this case, update
     method expects to have the tensor given to `imgs` argument to be in the correct shape and type that is compatible
     to the custom feature extractor.
 
@@ -93,18 +88,6 @@ class FrechetDistance(Metric):
         reset_real_features: Whether to also reset the real features. Since in many cases the real dataset does not
             change, the features can be cached them to avoid recomputing them which is costly. Set this to ``False`` if
             your dataset does not change.
-        normalize:
-            Argument for controlling the input image dtype normalization:
-
-            - If default feature extractor is used, controls whether input imgs have values in range [0, 1] or not:
-
-              - True: if input imgs have values ranged in [0, 1]. They are cast to int8/byte tensors.
-              - False: if input imgs have values ranged in [0, 255]. No casting is done.
-
-            - If custom feature extractor module is used, controls type of the input img tensors:
-
-              - True: if input imgs are expected to be in the data type of torch.float32.
-              - False: if input imgs are expected to be in the data type of torch.int8.
         input_img_size: tuple of integers. Indicates input img size to the custom feature extractor network if provided.
         kwargs: Additional keyword arguments, see :ref:`Metric kwargs` for more info.
 
@@ -155,15 +138,11 @@ class FrechetDistance(Metric):
         model_name: str = "inception",
         device_str: str = "cuda",
         reset_real_features: bool = True,
-        normalize: bool = False,
         num_features: int = 1024,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
 
-        if not isinstance(normalize, bool):
-            raise ValueError("Argument `normalize` expected to be a bool")
-        self.normalize = normalize
 
         self.model = load_encoder(model_name, device_str, ckpt=None, arch=None,
                     clean_resize=False, #Use clean resizing (from pillow)
@@ -233,7 +212,6 @@ class FrechetDistance(Metric):
             real: Whether given image is real or fake.
 
         """
-        imgs = (imgs * 255).byte() if self.normalize else imgs
         features = self.get_representation(self.model, imgs, self.device_str, normalized=False)
         self.orig_dtype = features.dtype
         features = features.double()
