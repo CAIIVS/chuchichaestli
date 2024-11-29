@@ -15,6 +15,7 @@ from .backbones.load_encoder import load_encoder
 
 
 # inspired by https://github.com/Lightning-AI/torchmetrics/blob/master/src/torchmetrics/image/fid.py
+# backbones from https://github.com/layer6ai-labs/dgm-eval/tree/master
 
 def _compute_fd(mu1: Tensor, sigma1: Tensor, mu2: Tensor, sigma2: Tensor) -> Tensor:
     r"""Compute adjusted version of `FD Score`_.
@@ -165,15 +166,6 @@ class FrechetDistance(Metric):
         self.add_state("fake_features_num_samples", torch.tensor(0).long(), dist_reduce_fx="sum")
 
     def get_representation(self, model, batch, device, normalized=False):
-        # if isinstance(batch, list):
-        #     # batch is likely list[array(images), array(labels)]
-        #     batch = batch[0]
-
-        # if not torch.is_tensor(batch):
-        #     # assume batch is then e.g. AutoImageProcessor.from_pretrained("facebook/data2vec-vision-base")
-        #     batch = batch["pixel_values"]
-        #     batch = batch[:, 0]
-
 
         # Convert grayscale to RGB
         if batch.ndim == 3:
@@ -203,15 +195,8 @@ class FrechetDistance(Metric):
         
         return pred
 
-    def update(self, imgs: Tensor, real: bool) -> None:
-        """Update the state with extracted features.
-
-        Args:
-            imgs: Input img tensors (batch) to evaluate. If used custom feature extractor please
-                make sure dtype and size is correct for the model.
-            real: Whether given image is real or fake.
-
-        """
+    def store_features(self, imgs: Tensor, real: bool) -> None:
+        """Store features in the correct state based on the real flag."""
         features = self.get_representation(self.model, imgs, self.device_str, normalized=False)
         self.orig_dtype = features.dtype
         features = features.double()
@@ -226,6 +211,30 @@ class FrechetDistance(Metric):
             self.fake_features_sum += features.sum(dim=0)
             self.fake_features_cov_sum += features.t().mm(features)
             self.fake_features_num_samples += imgs.shape[0]
+            
+
+    def update(self, imgs: Tensor, real: bool) -> None:
+        """Update the state with extracted features.
+
+        Args:
+            imgs: Input img tensors (batch) to evaluate. If used custom feature extractor please
+                make sure dtype and size is correct for the model.
+            real: Whether given image is real or fake.
+
+        """
+        if imgs.dim() < 4 or imgs.dim() > 5:
+            raise ValueError("Expected input to be a 4D or 5D tensor with shape (B, C, H, W) or (B, C, D, H, W)")
+        if imgs.dim() == 5:
+            # make batches of 2D images from 3D images
+            # batch size is the product of the first two dimensions
+            # TODO make smaller batches if too large for GPU
+            B, C, D, H, W = imgs.shape
+            imgs = imgs.permute(0, 2, 1, 3, 4).reshape(B * D, C, H, W)
+            self.store_features(imgs, real) 
+        else:
+            self.store_features(imgs, real)
+            
+
 
     def compute(self) -> Tensor:
         """Calculate FID score based on accumulated extracted features from the two distributions."""
