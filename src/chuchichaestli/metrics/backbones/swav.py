@@ -22,9 +22,12 @@ except ImportError:
     from torch.utils.model_zoo import load_url as load_state_dict_from_url
 from torchvision import transforms
 
-from .encoder import Encoder
+from chuchichaestli.metrics.backbones.encoder import Encoder
 
-SWAV_WEIGHTS_URL = 'https://www.dropbox.com/s/ghjrgktg0lyjorn/swav_800ep_pretrain.pth.tar?dl=1'
+SWAV_WEIGHTS_URL = (
+    "https://www.dropbox.com/s/ghjrgktg0lyjorn/swav_800ep_pretrain.pth.tar?dl=1"
+)
+
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
@@ -150,20 +153,20 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
     def __init__(
-            self,
-            block,
-            layers,
-            zero_init_residual=False,
-            groups=1,
-            widen=1,
-            width_per_group=64,
-            replace_stride_with_dilation=None,
-            norm_layer=None,
-            normalize=False,
-            output_dim=0,
-            hidden_mlp=0,
-            nmb_prototypes=0,
-            eval_mode=False,
+        self,
+        block,
+        layers,
+        zero_init_residual=False,
+        groups=1,
+        widen=1,
+        width_per_group=64,
+        replace_stride_with_dilation=None,
+        norm_layer=None,
+        normalize=False,
+        output_dim=0,
+        hidden_mlp=0,
+        nmb_prototypes=0,
+        eval_mode=False,
     ):
         super(ResNet, self).__init__()
         if norm_layer is None:
@@ -198,15 +201,27 @@ class ResNet(nn.Module):
         self.layer1 = self._make_layer(block, num_out_filters, layers[0])
         num_out_filters *= 2
         self.layer2 = self._make_layer(
-            block, num_out_filters, layers[1], stride=2, dilate=replace_stride_with_dilation[0]
+            block,
+            num_out_filters,
+            layers[1],
+            stride=2,
+            dilate=replace_stride_with_dilation[0],
         )
         num_out_filters *= 2
         self.layer3 = self._make_layer(
-            block, num_out_filters, layers[2], stride=2, dilate=replace_stride_with_dilation[1]
+            block,
+            num_out_filters,
+            layers[2],
+            stride=2,
+            dilate=replace_stride_with_dilation[1],
         )
         num_out_filters *= 2
         self.layer4 = self._make_layer(
-            block, num_out_filters, layers[3], stride=2, dilate=replace_stride_with_dilation[2]
+            block,
+            num_out_filters,
+            layers[3],
+            stride=2,
+            dilate=replace_stride_with_dilation[2],
         )
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
@@ -217,7 +232,9 @@ class ResNet(nn.Module):
         if output_dim == 0:
             self.projection_head = None
         elif hidden_mlp == 0:
-            self.projection_head = nn.Linear(num_out_filters * block.expansion, output_dim)
+            self.projection_head = nn.Linear(
+                num_out_filters * block.expansion, output_dim
+            )
         else:
             self.projection_head = nn.Sequential(
                 nn.Linear(num_out_filters * block.expansion, hidden_mlp),
@@ -325,13 +342,18 @@ class ResNet(nn.Module):
     def forward(self, inputs):
         if not isinstance(inputs, list):
             inputs = [inputs]
-        idx_crops = torch.cumsum(torch.unique_consecutive(
-            torch.tensor([inp.shape[-1] for inp in inputs]),
-            return_counts=True,
-        )[1], 0)
+        idx_crops = torch.cumsum(
+            torch.unique_consecutive(
+                torch.tensor([inp.shape[-1] for inp in inputs]),
+                return_counts=True,
+            )[1],
+            0,
+        )
         start_idx = 0
         for end_idx in idx_crops:
-            _out = self.forward_backbone(torch.cat(inputs[start_idx: end_idx]).cuda(non_blocking=True))
+            _out = self.forward_backbone(
+                torch.cat(inputs[start_idx:end_idx]).cuda(non_blocking=True)
+            )
             if start_idx == 0:
                 output = _out
             else:
@@ -366,11 +388,10 @@ class ResNet50Encoder(Encoder):
     def setup(self, **kwargs):
         self.model = resnet50(**kwargs)
 
-    def transform(self, image):      
+    def transform(self, image):
         mean = (0.485, 0.456, 0.406)
         std = [0.229, 0.224, 0.225]
-        image = F.interpolate(image,
-                size=(224, 224),
-                mode='bicubic',
-                align_corners=False).squeeze()
+        image = F.interpolate(
+            image, size=(224, 224), mode="bicubic", align_corners=False
+        ).squeeze()
         return Normalize(mean, std)(image)
