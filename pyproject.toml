@@ -9,21 +9,16 @@ authors = [
   { name = "Martin Oswald", email = "oswd@zhaw.ch" },
   { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
 ]
-maintainers = [
-  { name = "Yann Billeter", email = "bily@zhaw.ch" },
-]
+maintainers = [{ name = "Yann Billeter", email = "bily@zhaw.ch" }]
 description = "Where you find all the state-of-the-art cooking utensils (salt, pepper, gradient descent... the usual)."
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
 ]
-dependencies = [
-  "numpy==1.26.4", 
-  "torch>=2.2.2"
-  ]
+dependencies = ["numpy==1.26.4", "torch>=2.2.2", "torchmetrics>=1.4.0"]
 [project.optional-dependencies]
 dev = ["ruff==0.4.1", "pre-commit==3.7.0", "pytest==8.1.1"]
 
@@ -40,18 +35,15 @@ build-backend = "hatchling.build"
 path = "src/chuchichaestli/__about__.py"
 
 [tool.hatch.envs.test]
-dependencies = [
-  "pytest",
-  "pytest-cov"
-]
+dependencies = ["pytest", "pytest-cov"]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
 
 [tool.ruff.lint]
 extend-select = [
-    "UP", # pyupgrade
-    "D",  # pydocstyle
+  "UP", # pyupgrade
+  "D",  # pydocstyle
 ]
 
 [tool.ruff.lint.pydocstyle]
