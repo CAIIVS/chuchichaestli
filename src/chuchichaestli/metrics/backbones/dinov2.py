@@ -17,30 +17,33 @@ import torch.nn.functional as F
 
 import sys
 
-from .encoder import Encoder
+from chuchichaestli.metrics.backbones.encoder import Encoder
 
-from .resizer import pil_resize
+from chuchichaestli.metrics.backbones.resizer import pil_resize
 
 VALID_ARCHITECTURES = [
-                        'vits14',
-                        'vitb14',
-                        'vitl14',
-                        'vitg14',
-                    ]
+    "vits14",
+    "vitb14",
+    "vitl14",
+    "vitg14",
+]
+
 
 class DINOv2Encoder(Encoder):
-    def setup(self, arch=None, clean_resize:bool=False):
-        if arch is None: 
-            arch = 'vitl14'
+    def setup(self, arch=None, clean_resize: bool = False):
+        if arch is None:
+            arch = "vitl14"
 
         self.arch = arch
 
-        arch_str = f'dinov2_{self.arch}'
+        arch_str = f"dinov2_{self.arch}"
 
         if self.arch not in VALID_ARCHITECTURES:
-            sys.exit(f"arch={self.arch} is not a valid architecture. Choose from {VALID_ARCHITECTURES}")
+            sys.exit(
+                f"arch={self.arch} is not a valid architecture. Choose from {VALID_ARCHITECTURES}"
+            )
 
-        self.model = torch.hub.load('facebookresearch/dinov2', arch_str)
+        self.model = torch.hub.load("facebookresearch/dinov2", arch_str)
         self.clean_resize = clean_resize
 
     def transform(self, image):
@@ -51,9 +54,8 @@ class DINOv2Encoder(Encoder):
         if self.clean_resize:
             image = pil_resize(image, (224, 224))
         else:
-            image = F.interpolate(image,
-                              size=(224, 224),
-                              mode='bicubic',
-                              align_corners=False).squeeze()
+            image = F.interpolate(
+                image, size=(224, 224), mode="bicubic", align_corners=False
+            ).squeeze()
 
         return TF.Normalize(imagenet_mean, imagenet_std)(image)

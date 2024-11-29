@@ -11,7 +11,7 @@ from torchmetrics.metric import Metric
 from torchmetrics.utilities.imports import _MATPLOTLIB_AVAILABLE, _TORCH_FIDELITY_AVAILABLE
 from torchmetrics.utilities.plot import _AX_TYPE, _PLOT_OUT_TYPE
 
-from .backbones.load_encoder import load_encoder
+from chuchichaestli.metrics.backbones.load_encoder import load_encoder
 
 
 # inspired by https://github.com/Lightning-AI/torchmetrics/blob/master/src/torchmetrics/image/fid.py
@@ -92,17 +92,6 @@ class FrechetDistance(Metric):
         input_img_size: tuple of integers. Indicates input img size to the custom feature extractor network if provided.
         kwargs: Additional keyword arguments, see :ref:`Metric kwargs` for more info.
 
-    Raises:
-        ValueError:
-            If torch version is lower than 1.9
-        ModuleNotFoundError:
-            If ``feature`` is set to an ``int`` (default settings) and ``torch-fidelity`` is not installed
-        ValueError:
-            If ``feature`` is set to an ``int`` not in [64, 192, 768, 2048]
-        TypeError:
-            If ``feature`` is not an ``str``, ``int`` or ``torch.nn.Module``
-        ValueError:
-            If ``reset_real_features`` is not an ``bool``
 
     Example:
         >>> from torch import rand
@@ -196,8 +185,18 @@ class FrechetDistance(Metric):
         return pred
 
     def store_features(self, imgs: Tensor, real: bool) -> None:
-        """Store features in the correct state based on the real flag."""
-        features = self.get_representation(self.model, imgs, self.device_str, normalized=False)
+        """Store features in the correct state based on the real flag.
+
+        Args:
+            imgs: Input img tensors (batch) to evaluate. If used custom feature extractor please
+                make sure dtype and size is correct for the model.
+            real: Whether given image is real or fake.
+
+        """
+
+        features = self.get_representation(
+            self.model, imgs, self.device_str, normalized=False
+        )
         self.orig_dtype = features.dtype
         features = features.double()
 
