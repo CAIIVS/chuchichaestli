@@ -235,6 +235,8 @@ class FrechetDistance(Metric):
             self.store_features(imgs, real)
             
 
+    def set_dtype(self, dst_type: Union[str, torch.dtype]) -> "Metric":
+        """Transfer all metric state to specific dtype. Special version of standard `type` method.
 
     def compute(self) -> Tensor:
         """Calculate FID score based on accumulated extracted features from the two distributions."""
