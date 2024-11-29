@@ -9,6 +9,10 @@
 import torch
 import torch.nn as nn
 import ssl
+import torch.nn.functional as F
+from torchvision.transforms import Normalize, InterpolationMode
+
+
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # import lightly
@@ -362,11 +366,11 @@ class ResNet50Encoder(Encoder):
     def setup(self, **kwargs):
         self.model = resnet50(**kwargs)
 
-    def transform(self, x):
-        img_transform = transforms.Compose([
-            transforms.Resize(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225])
-        ])
-        return img_transform(x)
+    def transform(self, image):      
+        mean = (0.485, 0.456, 0.406)
+        std = [0.229, 0.224, 0.225]
+        image = F.interpolate(image,
+                size=(224, 224),
+                mode='bicubic',
+                align_corners=False).squeeze()
+        return Normalize(mean, std)(image)

@@ -51,9 +51,9 @@ class DINOv2Encoder(Encoder):
         if self.clean_resize:
             image = pil_resize(image, (224, 224))
         else:
-            image = TF.Compose([
-                TF.Resize((224, 224), TF.InterpolationMode.BICUBIC),
-                TF.ToTensor(),
-            ])(image)
+            image = F.interpolate(image,
+                              size=(224, 224),
+                              mode='bicubic',
+                              align_corners=False).squeeze()
 
         return TF.Normalize(imagenet_mean, imagenet_std)(image)

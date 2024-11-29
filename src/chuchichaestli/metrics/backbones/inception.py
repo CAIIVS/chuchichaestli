@@ -413,9 +413,9 @@ class InceptionEncoder(Encoder):
         if self.clean_resize: 
             image = pil_resize(image, (299, 299))
         else:
-            image = F.interpolate(TF.to_tensor(image).unsqueeze(0),
+            image = F.interpolate(image,
                               size=(299, 299),
-                              mode='bilinear',
+                              mode='bicubic',
                               align_corners=False).squeeze()
         return image
 
