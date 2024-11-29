@@ -111,9 +111,9 @@ def test_3D_same_input_vs_different(model_name, num_features):
     metric.reset()
 
     for _ in range(2):
-        img = torch.rand(2, 1, 32, 64, 64).to(device)
+        img = torch.rand(2, 1, 2, 64, 64).to(device)
         metric.update(img, real=True)
-        img2 = torch.rand(2, 1, 64, 64).to(device)
+        img2 = torch.rand(2, 1, 2, 64, 64).to(device)
         metric.update(img2, real=False)
 
     val_diff = metric.compute()

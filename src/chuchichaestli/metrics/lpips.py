@@ -155,14 +155,15 @@ class LearnedPerceptualImagePatchSimilarity(Metric):
             # batch size is the product of the first two dimensions
             # TODO make smaller batches if too large for GPU
             B, C, D, H, W = img1.shape
-            if C == 1:
-                img1 = img1.repeat(1, 3, 1, 1, 1)
-                img2 = img2.repeat(1, 3, 1, 1, 1)
             img1 = img1.permute(0, 2, 1, 3, 4).reshape(B * D, C, H, W)
+            _B, _C, _D, _H, _W = img2.shape
             img2 = img2.permute(0, 2, 1, 3, 4).reshape(B * D, C, H, W)
+            if C == 1:
+                img1 = img1.repeat(1, 3, 1, 1)
+                img2 = img2.repeat(1, 3, 1, 1)
             self.store_loss(img1, img2)
         else:
-            B, C, D, H, W = img1.shape
+            B, C, H, W = img1.shape
             if C == 1:
                 img1 = img1.repeat(1, 3, 1, 1)
                 img2 = img2.repeat(1, 3, 1, 1)
