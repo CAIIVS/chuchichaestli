@@ -49,5 +49,59 @@ def test_3D_same_input(model_name, num_features):
     assert torch.allclose(val, torch.zeros_like(val), atol=1e-3)
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.parametrize("model_name, num_features", [
+    ("inception", 2048),
+    ("swav", 2048),
+    ("clip", 1024),
+    ("dinov2", 1024),
+])
+def test_2D_same_input_vs_different(model_name, num_features):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    metric = FrechetDistance(model_name, device, num_features=num_features).to(device)
+    for _ in range(2):
+        img = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img, real=True)
+        metric.update(img, real=False)
+
+    val_same = metric.compute()
+    metric.reset()
+    
+    for _ in range(2):
+        img = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img, real=True)
+        img2 = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img2, real=False)
+        
+    val_diff = metric.compute()
+    
+    # assert that val_same is smaller than val_diff
+    assert torch.all(val_same < val_diff)
+    
+
+@pytest.mark.parametrize("model_name, num_features", [
+    ("inception", 2048),
+    ("swav", 2048),
+    ("clip", 1024),
+    ("dinov2", 1024),
+])
+def test_3D_same_input_vs_different(model_name, num_features):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    metric = FrechetDistance(model_name, device, num_features=num_features).to(device)
+    for _ in range(2):
+        img = torch.rand(2, 1, 32, 64, 64).to(device)
+        metric.update(img, real=True)
+        metric.update(img, real=False)
+
+    val_same = metric.compute()
+    metric.reset()
+    
+    for _ in range(2):
+        img = torch.rand(2, 1, 32, 64, 64).to(device)
+        metric.update(img, real=True)
+        img2 = torch.rand(2, 1, 64, 64).to(device)
+        metric.update(img2, real=False)
+        
+    val_diff = metric.compute()
+    
+    # assert that val_same is smaller than val_diff
+    assert torch.all(val_same < val_diff)
