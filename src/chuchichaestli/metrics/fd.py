@@ -8,7 +8,10 @@ from torch.nn import Module
 from torch.nn.functional import adaptive_avg_pool2d
 
 from torchmetrics.metric import Metric
-from torchmetrics.utilities.imports import _MATPLOTLIB_AVAILABLE, _TORCH_FIDELITY_AVAILABLE
+from torchmetrics.utilities.imports import (
+    _MATPLOTLIB_AVAILABLE,
+    _TORCH_FIDELITY_AVAILABLE,
+)
 from torchmetrics.utilities.plot import _AX_TYPE, _PLOT_OUT_TYPE
 
 from .backbones.load_encoder import load_encoder
@@ -16,6 +19,7 @@ from .backbones.load_encoder import load_encoder
 
 # inspired by https://github.com/Lightning-AI/torchmetrics/blob/master/src/torchmetrics/image/fid.py
 # backbones from https://github.com/layer6ai-labs/dgm-eval/tree/master
+
 
 def _compute_fd(mu1: Tensor, sigma1: Tensor, mu2: Tensor, sigma2: Tensor) -> Tensor:
     r"""Compute adjusted version of `FD Score`_.
@@ -38,6 +42,7 @@ def _compute_fd(mu1: Tensor, sigma1: Tensor, mu2: Tensor, sigma2: Tensor) -> Ten
     c = torch.linalg.eigvals(sigma1 @ sigma2).sqrt().real.sum(dim=-1)
 
     return a + b - 2 * c
+
 
 class FrechetDistance(Metric):
     r"""Calculate Fréchet distance (FD_) which is used to access the quality of generated images.
@@ -144,26 +149,49 @@ class FrechetDistance(Metric):
     ) -> None:
         super().__init__(**kwargs)
 
-
-        self.model = load_encoder(model_name, device_str, ckpt=None, arch=None,
-                    clean_resize=False, #Use clean resizing (from pillow)
-                    sinception=True if model_name=='sinception' else False,
-                    depth=0, # Negative depth for internal layers, positive 1 for after projection head.
-                    )     
-        self.device_str = device_str   
+        self.model = load_encoder(
+            model_name,
+            device_str,
+            ckpt=None,
+            arch=None,
+            clean_resize=False,  # Use clean resizing (from pillow)
+            sinception=True if model_name == "sinception" else False,
+            depth=0,  # Negative depth for internal layers, positive 1 for after projection head.
+        )
+        self.device_str = device_str
 
         if not isinstance(reset_real_features, bool):
             raise ValueError("Argument `reset_real_features` expected to be a bool")
         self.reset_real_features = reset_real_features
 
         mx_num_feats = (num_features, num_features)
-        self.add_state("real_features_sum", torch.zeros(num_features).double(), dist_reduce_fx="sum")
-        self.add_state("real_features_cov_sum", torch.zeros(mx_num_feats).double(), dist_reduce_fx="sum")
-        self.add_state("real_features_num_samples", torch.tensor(0).long(), dist_reduce_fx="sum")
+        self.add_state(
+            "real_features_sum",
+            torch.zeros(num_features).double(),
+            dist_reduce_fx="sum",
+        )
+        self.add_state(
+            "real_features_cov_sum",
+            torch.zeros(mx_num_feats).double(),
+            dist_reduce_fx="sum",
+        )
+        self.add_state(
+            "real_features_num_samples", torch.tensor(0).long(), dist_reduce_fx="sum"
+        )
 
-        self.add_state("fake_features_sum", torch.zeros(num_features).double(), dist_reduce_fx="sum")
-        self.add_state("fake_features_cov_sum", torch.zeros(mx_num_feats).double(), dist_reduce_fx="sum")
-        self.add_state("fake_features_num_samples", torch.tensor(0).long(), dist_reduce_fx="sum")
+        self.add_state(
+            "fake_features_sum",
+            torch.zeros(num_features).double(),
+            dist_reduce_fx="sum",
+        )
+        self.add_state(
+            "fake_features_cov_sum",
+            torch.zeros(mx_num_feats).double(),
+            dist_reduce_fx="sum",
+        )
+        self.add_state(
+            "fake_features_num_samples", torch.tensor(0).long(), dist_reduce_fx="sum"
+        )
 
     def get_representation(self, model, batch, device, normalized=False):
 
@@ -175,7 +203,7 @@ class FrechetDistance(Metric):
 
         batch = batch.to(device)
         batch = self.model.transform(batch)
-        
+
         with torch.no_grad():
             pred = model(batch)
 
@@ -192,12 +220,14 @@ class FrechetDistance(Metric):
 
         if normalized:
             pred = torch.nn.functional.normalize(pred, dim=-1)
-        
+
         return pred
 
     def store_features(self, imgs: Tensor, real: bool) -> None:
         """Store features in the correct state based on the real flag."""
-        features = self.get_representation(self.model, imgs, self.device_str, normalized=False)
+        features = self.get_representation(
+            self.model, imgs, self.device_str, normalized=False
+        )
         self.orig_dtype = features.dtype
         features = features.double()
 
@@ -211,7 +241,6 @@ class FrechetDistance(Metric):
             self.fake_features_sum += features.sum(dim=0)
             self.fake_features_cov_sum += features.t().mm(features)
             self.fake_features_num_samples += imgs.shape[0]
-            
 
     def update(self, imgs: Tensor, real: bool) -> None:
         """Update the state with extracted features.
@@ -223,31 +252,45 @@ class FrechetDistance(Metric):
 
         """
         if imgs.dim() < 4 or imgs.dim() > 5:
-            raise ValueError("Expected input to be a 4D or 5D tensor with shape (B, C, H, W) or (B, C, D, H, W)")
+            raise ValueError(
+                "Expected input to be a 4D or 5D tensor with shape (B, C, H, W) or (B, C, D, H, W)"
+            )
         if imgs.dim() == 5:
             # make batches of 2D images from 3D images
             # batch size is the product of the first two dimensions
             # TODO make smaller batches if too large for GPU
             B, C, D, H, W = imgs.shape
             imgs = imgs.permute(0, 2, 1, 3, 4).reshape(B * D, C, H, W)
-            self.store_features(imgs, real) 
+            self.store_features(imgs, real)
         else:
             self.store_features(imgs, real)
-            
-
 
     def compute(self) -> Tensor:
         """Calculate FID score based on accumulated extracted features from the two distributions."""
         if self.real_features_num_samples < 2 or self.fake_features_num_samples < 2:
-            raise RuntimeError("More than one sample is required for both the real and fake distributed to compute FID")
-        mean_real = (self.real_features_sum / self.real_features_num_samples).unsqueeze(0)
-        mean_fake = (self.fake_features_sum / self.fake_features_num_samples).unsqueeze(0)
+            raise RuntimeError(
+                "More than one sample is required for both the real and fake distributed to compute FID"
+            )
+        mean_real = (self.real_features_sum / self.real_features_num_samples).unsqueeze(
+            0
+        )
+        mean_fake = (self.fake_features_sum / self.fake_features_num_samples).unsqueeze(
+            0
+        )
 
-        cov_real_num = self.real_features_cov_sum - self.real_features_num_samples * mean_real.t().mm(mean_real)
+        cov_real_num = (
+            self.real_features_cov_sum
+            - self.real_features_num_samples * mean_real.t().mm(mean_real)
+        )
         cov_real = cov_real_num / (self.real_features_num_samples - 1)
-        cov_fake_num = self.fake_features_cov_sum - self.fake_features_num_samples * mean_fake.t().mm(mean_fake)
+        cov_fake_num = (
+            self.fake_features_cov_sum
+            - self.fake_features_num_samples * mean_fake.t().mm(mean_fake)
+        )
         cov_fake = cov_fake_num / (self.fake_features_num_samples - 1)
-        return _compute_fd(mean_real.squeeze(0), cov_real, mean_fake.squeeze(0), cov_fake).to(self.orig_dtype)
+        return _compute_fd(
+            mean_real.squeeze(0), cov_real, mean_fake.squeeze(0), cov_fake
+        ).to(self.orig_dtype)
 
     def reset(self) -> None:
         """Reset metric states."""
@@ -270,12 +313,12 @@ class FrechetDistance(Metric):
 
         """
         out = super().set_dtype(dst_type)
-        if isinstance(out.inception, NoTrainInceptionV3):
-            out.inception._dtype = dst_type
         return out
 
     def plot(
-        self, val: Optional[Union[Tensor, Sequence[Tensor]]] = None, ax: Optional[_AX_TYPE] = None
+        self,
+        val: Optional[Union[Tensor, Sequence[Tensor]]] = None,
+        ax: Optional[_AX_TYPE] = None,
     ) -> _PLOT_OUT_TYPE:
         """Plot a single or multiple values from the metric.
 
