@@ -158,7 +158,7 @@ class UNet(nn.Module):
         attn_args = {
             "n_heads": attn_n_heads,
             "head_dim": attn_head_dim,
-            "inter_channels": attn_gate_inter_channels,
+            "num_channels_inter": attn_gate_inter_channels,
         }
 
         self.conv_in = conv_cls(
@@ -252,7 +252,7 @@ class UNet(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, t: int | torch.Tensor | None = None
+        self, x: torch.Tensor, t: int | float | torch.Tensor | None = None
     ) -> torch.Tensor:
         """Forward pass through the UNet model."""
         if t is not None:

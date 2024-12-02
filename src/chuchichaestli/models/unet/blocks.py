@@ -52,7 +52,7 @@ class DownBlock(nn.Module):
             **res_args,
         )
 
-        match ATTENTION_MAP.get(attention, None):
+        match attention:
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
             case _:
@@ -88,7 +88,7 @@ class MidBlock(nn.Module):
             time_channels,
             **res_args,
         )
-        match ATTENTION_MAP.get(attention, None):
+        match attention:
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](channels, **attn_args)
             case _:
@@ -142,12 +142,12 @@ class UpBlock(nn.Module):
                 f"Invalid skip connection action: {skip_connection_action}"
             )
 
-        match ATTENTION_MAP.get(attention, None):
+        match attention:
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
             case "attention_gate":
                 self.attn = ATTENTION_MAP[attention](
-                    in_channels, out_channels, **attn_args
+                    dimensions, in_channels, out_channels, **attn_args
                 )
             case _:
                 self.attn = None
