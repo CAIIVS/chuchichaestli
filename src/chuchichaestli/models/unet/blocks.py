@@ -94,7 +94,7 @@ class MidBlock(nn.Module):
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](channels, **attn_args)
             case "conv_attention":
-                self.attn = ATTENTION_MAP[attention](dimensions, in_channels, **attn_args)
+                self.attn = ATTENTION_MAP[attention](dimensions, channels, **attn_args)
             case _:
                 self.attn = None
 
