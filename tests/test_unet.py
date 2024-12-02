@@ -133,6 +133,43 @@ def test_forward_pass(
     assert output.shape == input_dims  # Check output shape
 
 
+def test_info_conv_attn(
+    dimensions=2,
+    down_block_types=("ConvAttnDownBlock",)*2,
+    up_block_types=("ConvAttnUpBlock",)*2,
+    n_channels=64,
+    block_out_channel_mults=(1,) + (2,)*(2-1),
+    img_wh=128,
+):
+    """Test print a torchinfo pass of a UNet with Conv-Attention blocks."""
+    model = UNet(
+        dimensions=dimensions,
+        in_channels=1,
+        n_channels=n_channels,
+        out_channels=1,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        block_out_channel_mults=block_out_channel_mults,
+        time_embedding=False,
+        res_groups=8,
+        num_layers_per_block=2,
+        attn_groups=16,
+    )
+    print(f"\n# UNet({down_block_types=}, {up_block_types=})")
+    try:
+        from torchinfo import summary
+
+        summary(
+            model,
+            (2, 1) + (img_wh,) * dimensions,
+            col_names=["input_size", "output_size", "num_params"],
+            device=torch.device("cpu")
+        )
+    except ImportError:
+        print(model)
+    print()
+
+
 @pytest.mark.parametrize(
     "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
     [
