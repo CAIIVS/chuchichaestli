@@ -31,6 +31,9 @@ from chuchichaestli.models.unet.blocks import (
     AttnGateUpBlock,
     AttnMidBlock,
     AttnUpBlock,
+    ConvAttnDownBlock,
+    ConvAttnMidBlock,
+    ConvAttnUpBlock,
     DownBlock,
     MidBlock,
     UpBlock,
@@ -49,6 +52,9 @@ BLOCK_MAP = {
     "AttnDownBlock": AttnDownBlock,
     "AttnMidBlock": AttnMidBlock,
     "AttnUpBlock": AttnUpBlock,
+    "ConvAttnDownBlock": ConvAttnDownBlock,
+    "ConvAttnMidBlock": ConvAttnMidBlock,
+    "ConvAttnUpBlock": ConvAttnUpBlock,
     "AttnGateUpBlock": AttnGateUpBlock,
 }
 

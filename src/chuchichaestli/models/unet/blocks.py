@@ -186,4 +186,8 @@ class UpBlock(nn.Module):
 AttnDownBlock = partial(DownBlock, attention="self_attention")
 AttnMidBlock = partial(MidBlock, attention="self_attention")
 AttnUpBlock = partial(UpBlock, attention="self_attention")
+ConvAttnDownBlock = partial(DownBlock, attention="conv_attention")
+ConvAttnMidBlock = partial(MidBlock, attention="conv_attention")
+ConvAttnUpBlock = partial(UpBlock, attention="conv_attention")
+AttnUpBlock = partial(UpBlock, attention="conv_attention")
 AttnGateUpBlock = partial(UpBlock, attention="attention_gate")
