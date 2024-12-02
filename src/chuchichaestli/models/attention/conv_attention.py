@@ -36,14 +36,15 @@ class ConvAttention(nn.Module):
         dimensions: int,
         n_channels: int,
         norm_type: str = "group",
-        num_groups: int = 32,
+        groups: int = 32,
         kernel_size: int = 1,
         dropout_p: float = 0.0,
         **kwargs,
     ):
         """Convolutional attention block implementation."""
         super().__init__()
-        self.norm = Norm(dimensions, norm_type, n_channels, num_groups)
+        self.norm = Norm(dimensions, norm_type, n_channels, groups)
+        self.dropout_p = dropout_p
         conv_cls = DIM_TO_CONV_MAP[dimensions]
         self.q = conv_cls(n_channels, n_channels, kernel_size=kernel_size)
         self.k = conv_cls(n_channels, n_channels, kernel_size=kernel_size)
@@ -63,5 +64,5 @@ class ConvAttention(nn.Module):
         q = q.view(B, 1, C, -1).permute(0, 1, 3, 2).contiguous()
         k = k.view(B, 1, C, -1).permute(0, 1, 3, 2).contiguous()
         v = v.view(B, 1, C, -1).permute(0, 1, 3, 2).contiguous()
-        h = F.scaled_dot_product_attention(q, k, v)
+        h = F.scaled_dot_product_attention(q, k, v, dropout_p=self.dropout_p)
         return h.permute(0, 3, 1, 2).reshape(x.shape)
