@@ -55,6 +55,8 @@ class DownBlock(nn.Module):
         match ATTENTION_MAP.get(attention, None):
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
+            case "conv_attention":
+                self.attn = ATTENTION_MAP[attention](dimensions, in_channels, **attn_args)
             case _:
                 self.attn = None
 
@@ -91,6 +93,8 @@ class MidBlock(nn.Module):
         match ATTENTION_MAP.get(attention, None):
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](channels, **attn_args)
+            case "conv_attention":
+                self.attn = ATTENTION_MAP[attention](dimensions, in_channels, **attn_args)
             case _:
                 self.attn = None
 
@@ -145,6 +149,8 @@ class UpBlock(nn.Module):
         match ATTENTION_MAP.get(attention, None):
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
+            case "conv_attention":
+                self.attn = ATTENTION_MAP[attention](dimensions, in_channels, **attn_args)
             case "attention_gate":
                 self.attn = ATTENTION_MAP[attention](
                     in_channels, out_channels, **attn_args
