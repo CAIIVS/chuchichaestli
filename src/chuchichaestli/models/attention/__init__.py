@@ -19,10 +19,12 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 from chuchichaestli.models.attention.self_attention import SelfAttention
+from chuchichaestli.models.attention.conv_attention import ConvAttention
 from chuchichaestli.models.attention.attention_gate import AttentionGate
 
 ATTENTION_MAP = {
     "self_attention": SelfAttention,
+    "conv_attention": ConvAttention,
     "attention_gate": AttentionGate,
 }
 
