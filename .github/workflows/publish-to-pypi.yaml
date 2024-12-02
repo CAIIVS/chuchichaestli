@@ -153,6 +153,9 @@ jobs:
         NEW_VERSION=`hatch version`
         git add src/chuchichaestli/__about__.py
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
+    - name: Pull latest changes
+      run: |
+        git pull --rebase origin version-bump
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
