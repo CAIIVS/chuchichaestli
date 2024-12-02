@@ -31,3 +31,9 @@ DIM_TO_CONVT_MAP = {
     2: nn.ConvTranspose2d,
     3: nn.ConvTranspose3d,
 }
+
+UPSAMPLE_MODE = {
+    1: "linear",
+    2: "bilinear",
+    3: "trilinear",
+}
