@@ -34,6 +34,7 @@ from chuchichaestli.models.unet.blocks import (
     DownBlock,
     MidBlock,
     UpBlock,
+    GaussianNoiseBlock,
 )
 from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
@@ -92,7 +93,10 @@ class UNet(nn.Module):
         attn_n_heads: int = 1,
         attn_gate_inter_channels: int = 32,
         skip_connection_action: str = "concat",
-        skip_connection_between_levels: bool = None,
+        skip_connection_between_levels: bool | None = None,
+        add_noise: str | None = None,
+        noise_sigma: float = 0.1,
+        noise_detached: bool = True,
     ):
         """UNet model implementation.
 
@@ -121,7 +125,10 @@ class UNet(nn.Module):
             attn_n_heads: Number of attention heads.
             attn_gate_inter_channels: Number of intermediate channels for the attention gate.
             skip_connection_action: Action to take for the skip connection. Can be "concat", "avg", "add", or None (= do not use skip connections).
-            skip_connection_between_levels: Whether to use skip connections between levels (i.e. when channels are not equal). Default is True for concat and False for avg and add.
+            skip_connection_between_levels: Whether to use skip connections between levels (i.e. when channels are not equal). Default is True for "concat" and False for "avg" and "add".
+            add_noise: Add a Gaussian noise regularizer block in the bottleneck. Can be "up" (after the bottlenet) or "down" (before the bottleneck).
+            noise_sigma: Relative (to the magnitude of the input) standard deviation for the noise generation.
+            noise_detached: If True, the input is detached for the noise generation. Note, this should generally be set to True, otherwise the noise is treated as learnable parameter.
         """
         super().__init__()
 
@@ -245,6 +252,17 @@ class UNet(nn.Module):
             if i > 0:
                 self.up_blocks.append(Upsample(dimensions, outs))
 
+        match add_noise:
+            case "up":
+                self.up_blocks.insert(
+                    0,
+                    GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
+                )
+            case "down":
+                self.down_blocks.append(
+                    GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
+                )
+
         self.norm = Norm(dimensions, res_norm_type, outs, groups)
         self.act = ACTIVATION_FUNCTIONS[act]()
         self.conv_out = conv_cls(
@@ -267,12 +285,14 @@ class UNet(nn.Module):
 
         for down_block in self.down_blocks:
             x = down_block(x, t)
+            if isinstance(down_block, GaussianNoiseBlock):
+                continue
             hh.append(x)
 
         x = self.mid_block(x, t)
 
         for up_block in self.up_blocks:
-            if isinstance(up_block, Upsample):
+            if isinstance(up_block, Upsample | GaussianNoiseBlock):
                 x = up_block(x, t)
                 continue
             hs = hh.pop()
