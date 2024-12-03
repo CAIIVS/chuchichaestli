@@ -18,13 +18,12 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from functools import partial
-
 import torch
 from torch import nn
 
-from chuchichaestli.models.resnet import ResidualBlock
 from chuchichaestli.models.attention import ATTENTION_MAP
+from chuchichaestli.models.resnet import ResidualBlock
+from chuchichaestli.utils import partialclass
 
 
 class GaussianNoiseBlock(nn.Module):
@@ -95,6 +94,10 @@ class DownBlock(nn.Module):
         match attention:
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
+            case "conv_attention":
+                self.attn = ATTENTION_MAP[attention](
+                    dimensions, in_channels, **attn_args
+                )
             case _:
                 self.attn = None
 
@@ -131,6 +134,8 @@ class MidBlock(nn.Module):
         match attention:
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](channels, **attn_args)
+            case "conv_attention":
+                self.attn = ATTENTION_MAP[attention](dimensions, channels, **attn_args)
             case _:
                 self.attn = None
 
@@ -185,6 +190,10 @@ class UpBlock(nn.Module):
         match attention:
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
+            case "conv_attention":
+                self.attn = ATTENTION_MAP[attention](
+                    dimensions, in_channels, **attn_args
+                )
             case "attention_gate":
                 self.attn = ATTENTION_MAP[attention](
                     dimensions, in_channels, out_channels, **attn_args
@@ -217,7 +226,15 @@ class UpBlock(nn.Module):
         return x
 
 
-AttnDownBlock = partial(DownBlock, attention="self_attention")
-AttnMidBlock = partial(MidBlock, attention="self_attention")
-AttnUpBlock = partial(UpBlock, attention="self_attention")
-AttnGateUpBlock = partial(UpBlock, attention="attention_gate")
+AttnDownBlock = partialclass("AttnDownBlock", DownBlock, attention="self_attention")
+AttnMidBlock = partialclass("AttnMidBlock", MidBlock, attention="self_attention")
+AttnUpBlock = partialclass("AttnUpBlock", UpBlock, attention="self_attention")
+ConvAttnDownBlock = partialclass(
+    "ConvAttnDownBlock", DownBlock, attention="conv_attention"
+)
+ConvAttnMidBlock = partialclass(
+    "ConvAttnMidBlock", MidBlock, attention="conv_attention"
+)
+ConvAttnUpBlock = partialclass("ConvAttnUpBlock", UpBlock, attention="conv_attention")
+AttnUpBlock = partialclass("AttnUpBlock", UpBlock, attention="conv_attention")
+AttnGateUpBlock = partialclass("AttnGateUpBlock", UpBlock, attention="attention_gate")

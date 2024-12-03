@@ -133,15 +133,15 @@ def test_forward_pass(
     assert output.shape == input_dims  # Check output shape
 
 
-def test_info_attn(
+def test_info_conv_attn(
     dimensions=2,
-    down_block_types=("AttnDownBlock",)*4,
-    up_block_types=("AttnUpBlock",)*4,
+    down_block_types=("ConvAttnDownBlock",) * 2,
+    up_block_types=("ConvAttnUpBlock",) * 2,
     n_channels=64,
-    block_out_channel_mults=(1,) + (2,)*(4-1),
-    img_wh=256,
+    block_out_channel_mults=(1,) + (2,) * (2 - 1),
+    img_wh=128,
 ):
-    """Test print a torchinfo pass of a UNet with Self-Attention blocks."""
+    """Test print a torchinfo pass of a UNet with Conv-Attention blocks."""
     model = UNet(
         dimensions=dimensions,
         in_channels=1,
@@ -151,9 +151,9 @@ def test_info_attn(
         up_block_types=up_block_types,
         block_out_channel_mults=block_out_channel_mults,
         time_embedding=False,
-        res_groups=4,
-        num_layers_per_block=1,
-        attn_n_heads=1,
+        res_groups=8,
+        num_layers_per_block=2,
+        attn_groups=16,
     )
     print(f"\n# UNet({down_block_types=}, {up_block_types=})")
     try:
@@ -163,39 +163,7 @@ def test_info_attn(
             model,
             (2, 1) + (img_wh,) * dimensions,
             col_names=["input_size", "output_size", "num_params"],
-            device=torch.device("cpu")
-        )
-    except ImportError:
-        print(model)
-    print()
-
-
-def test_info_gated_attn(
-    dimensions=2,
-    down_block_types=("DownBlock", "DownBlock"),
-    up_block_types=("AttnGateUpBlock", "AttnGateUpBlock"),
-    n_channels=32,
-    block_out_channel_mults=(1, 2),
-):
-    """Test print a torchinfo pass of a UNet with gated Attention blocks."""
-    model = UNet(
-        dimensions=dimensions,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
-        block_out_channel_mults=block_out_channel_mults,
-        n_channels=n_channels,
-        time_embedding=False,
-        res_groups=4,
-        num_layers_per_block=1,
-    )
-    print(f"\n# UNet({up_block_types=})")
-    try:
-        from torchinfo import summary
-
-        summary(
-            model,
-            (2, 1) + (128,) * dimensions,
-            col_names=["input_size", "output_size", "num_params"],
+            device=torch.device("mps"),
         )
     except ImportError:
         print(model)
@@ -205,9 +173,9 @@ def test_info_gated_attn(
 @pytest.mark.parametrize(
     "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
     [
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2)),
-        (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 8, (1, 2)),
-        (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 8, (1, 2)),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+        (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
     ],
 )
 def test_no_timestep(
@@ -376,6 +344,7 @@ def test_skip_connection_action(
         block_out_channel_mults=block_out_channel_mults,
         time_embedding=False,
         res_groups=8,
+        attn_groups=8,
         skip_connection_action=skip_connection_action,
     )
     input_dims = (1, 1) + (64,) * dimensions
@@ -588,6 +557,7 @@ def test_forward_pass_with_noise_at_inference(
     add_noise="up",
     noise_sigma=0.1,
 ):
+    """Test the forward pass of the UNet model with noise at inference."""
     model = UNet(
         dimensions=dimensions,
         down_block_types=down_block_types,

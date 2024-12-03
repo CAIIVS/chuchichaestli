@@ -21,7 +21,6 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 import pytest
 import torch
 from chuchichaestli.models.adversarial.blocks import BaseConvBlock
-from chuchichaestli.models.resnet import ResidualBlock
 from chuchichaestli.models.adversarial.discriminator import (
     BlockDiscriminator,
     PixelDiscriminator,
@@ -425,6 +424,7 @@ def test_BlockDiscriminator_with_ResidualBlock_forward(
     assert list(model.modules())[3].__class__.__name__ == "ResidualBlock"
     print()
 
+
 def test_PixelDiscriminator_info(
     dimensions=2,
     in_channels=1,
@@ -453,7 +453,7 @@ def test_PixelDiscriminator_info(
         assert len(out.shape[2:]) == dimensions
         assert out.shape[1] == 1
         print(model)
-        
+
     print()
 
 

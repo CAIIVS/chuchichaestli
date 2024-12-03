@@ -31,6 +31,9 @@ from chuchichaestli.models.unet.blocks import (
     AttnGateUpBlock,
     AttnMidBlock,
     AttnUpBlock,
+    ConvAttnDownBlock,
+    ConvAttnMidBlock,
+    ConvAttnUpBlock,
     DownBlock,
     MidBlock,
     UpBlock,
@@ -50,6 +53,9 @@ BLOCK_MAP = {
     "AttnDownBlock": AttnDownBlock,
     "AttnMidBlock": AttnMidBlock,
     "AttnUpBlock": AttnUpBlock,
+    "ConvAttnDownBlock": ConvAttnDownBlock,
+    "ConvAttnMidBlock": ConvAttnMidBlock,
+    "ConvAttnUpBlock": ConvAttnUpBlock,
     "AttnGateUpBlock": AttnGateUpBlock,
 }
 
@@ -91,6 +97,10 @@ class UNet(nn.Module):
         res_kernel_size: int = 3,
         attn_head_dim: int = 32,
         attn_n_heads: int = 1,
+        attn_dropout_p: float = 0.0,
+        attn_norm_type: str = "group",
+        attn_groups: int = 32,
+        attn_kernel_size: int = 1,
         attn_gate_inter_channels: int = 32,
         skip_connection_action: str = "concat",
         skip_connection_between_levels: bool | None = None,
@@ -123,6 +133,10 @@ class UNet(nn.Module):
             res_kernel_size: Kernel size for the residual block.
             attn_head_dim: Dimension of the attention head.
             attn_n_heads: Number of attention heads.
+            attn_dropout_p: Dropout probability of the scaled dot product attention.
+            attn_norm_type: Normalization type for the convolutional attention block.
+            attn_groups: Number of groups for the convolutional attention block normalization (if group norm).
+            attn_kernel_size: Kernel size for the convolutional attention block.
             attn_gate_inter_channels: Number of intermediate channels for the attention gate.
             skip_connection_action: Action to take for the skip connection. Can be "concat", "avg", "add", or None (= do not use skip connections).
             skip_connection_between_levels: Whether to use skip connections between levels (i.e. when channels are not equal). Default is True for "concat" and False for "avg" and "add".
@@ -165,7 +179,11 @@ class UNet(nn.Module):
         attn_args = {
             "n_heads": attn_n_heads,
             "head_dim": attn_head_dim,
-            "num_channels_inter": attn_gate_inter_channels,
+            "dropout_p": attn_dropout_p,
+            "norm_type": attn_norm_type,
+            "groups": attn_groups,
+            "kernel_size": attn_kernel_size,
+            "inter_channels": attn_gate_inter_channels,
         }
 
         self.conv_in = conv_cls(
