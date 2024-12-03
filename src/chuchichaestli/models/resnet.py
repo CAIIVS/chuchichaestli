@@ -48,7 +48,7 @@ class Norm(nn.Module):
             case "batch" if dimensions == 3:
                 self.norm = nn.BatchNorm3d(channels)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         """Forward pass through the normalization layer."""
         return self.norm(x)
 
