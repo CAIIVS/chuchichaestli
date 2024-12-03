@@ -1,4 +1,4 @@
-"""Dim-to-Layer maps for different dimensions.
+"""Various utility functions for chuchichaestli.
 
 This file is part of Chuchichaestli.
 
@@ -18,22 +18,17 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from torch import nn
+import sys
+from functools import partialmethod
 
-DIM_TO_CONV_MAP = {
-    1: nn.Conv1d,
-    2: nn.Conv2d,
-    3: nn.Conv3d,
-}
 
-DIM_TO_CONVT_MAP = {
-    1: nn.ConvTranspose1d,
-    2: nn.ConvTranspose2d,
-    3: nn.ConvTranspose3d,
-}
-
-UPSAMPLE_MODE = {
-    1: "linear",
-    2: "bilinear",
-    3: "trilinear",
-}
+def partialclass(name: str, cls: type[object], *args, **kwargs):
+    """Partial for __init__ class constructors."""
+    part_cls = type(
+        name, (cls,), {"__init__": partialmethod(cls.__init__, *args, **kwargs)}
+    )
+    try:
+        part_cls.__module__ = sys._getframe(1).f_globals.get("__name__", "__main__")
+    except (AttributeError, ValueError):
+        pass
+    return part_cls

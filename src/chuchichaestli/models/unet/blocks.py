@@ -18,13 +18,52 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from functools import partial
-
 import torch
 from torch import nn
 
-from chuchichaestli.models.resnet import ResidualBlock
 from chuchichaestli.models.attention import ATTENTION_MAP
+from chuchichaestli.models.resnet import ResidualBlock
+from chuchichaestli.utils import partialclass
+
+
+class GaussianNoiseBlock(nn.Module):
+    """Gaussian noise regularizer."""
+
+    def __init__(
+        self,
+        sigma: float = 0.1,
+        mu: float = 0.0,
+        detached: bool = True,
+        device: torch.device | str | None = None,
+    ):
+        """Constructor.
+
+        Args:
+          sigma: Relative (to the magnitude of the input) standard deviation for noise generation.
+          mu: Mean for the noise generation.
+          detached: If True, the input is detached for the noise generation.
+          device: Compute device where to pass the noise.
+
+        Note: If detached=False, the network sees the noise as a trainable parameter
+          (no reparametrization trick) and introduce a bias to generate vectors closer
+          to the noise level.
+        """
+        super().__init__()
+        self.sigma = sigma
+        self.detached = detached
+        self.noise = torch.tensor(mu)
+        if device is not None:
+            self.noise = self.noise.to(device)
+
+    def forward(
+        self, x: torch.Tensor, *args, noise_at_inference: bool = False
+    ) -> torch.Tensor:
+        """Forward pass using the reparametrization trick."""
+        if (self.training or noise_at_inference) and self.sigma != 0:
+            scale = self.sigma * x.detach() if self.detached else self.sigma * x
+            sampled_noise = self.noise.repeat(*x.size()).normal_() * scale
+            x = x + sampled_noise
+        return x
 
 
 class DownBlock(nn.Module):
@@ -52,15 +91,17 @@ class DownBlock(nn.Module):
             **res_args,
         )
 
-        match ATTENTION_MAP.get(attention, None):
+        match attention:
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
             case "conv_attention":
-                self.attn = ATTENTION_MAP[attention](dimensions, in_channels, **attn_args)
+                self.attn = ATTENTION_MAP[attention](
+                    dimensions, in_channels, **attn_args
+                )
             case _:
                 self.attn = None
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor = None) -> torch.Tensor:
         """Forward pass through the down block."""
         x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
@@ -90,7 +131,7 @@ class MidBlock(nn.Module):
             time_channels,
             **res_args,
         )
-        match ATTENTION_MAP.get(attention, None):
+        match attention:
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](channels, **attn_args)
             case "conv_attention":
@@ -118,7 +159,7 @@ class UpBlock(nn.Module):
         res_args: dict = {},
         attention: str | None = None,
         attn_args: dict = {},
-        skip_connection_action: str = None,
+        skip_connection_action: str | None = None,
     ):
         """Initialize the up block."""
         super().__init__()
@@ -146,14 +187,16 @@ class UpBlock(nn.Module):
                 f"Invalid skip connection action: {skip_connection_action}"
             )
 
-        match ATTENTION_MAP.get(attention, None):
+        match attention:
             case "self_attention":
                 self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
             case "conv_attention":
-                self.attn = ATTENTION_MAP[attention](dimensions, in_channels, **attn_args)
+                self.attn = ATTENTION_MAP[attention](
+                    dimensions, in_channels, **attn_args
+                )
             case "attention_gate":
                 self.attn = ATTENTION_MAP[attention](
-                    in_channels, out_channels, **attn_args
+                    dimensions, in_channels, out_channels, **attn_args
                 )
             case _:
                 self.attn = None
@@ -183,11 +226,15 @@ class UpBlock(nn.Module):
         return x
 
 
-AttnDownBlock = partial(DownBlock, attention="self_attention")
-AttnMidBlock = partial(MidBlock, attention="self_attention")
-AttnUpBlock = partial(UpBlock, attention="self_attention")
-ConvAttnDownBlock = partial(DownBlock, attention="conv_attention")
-ConvAttnMidBlock = partial(MidBlock, attention="conv_attention")
-ConvAttnUpBlock = partial(UpBlock, attention="conv_attention")
-AttnUpBlock = partial(UpBlock, attention="conv_attention")
-AttnGateUpBlock = partial(UpBlock, attention="attention_gate")
+AttnDownBlock = partialclass("AttnDownBlock", DownBlock, attention="self_attention")
+AttnMidBlock = partialclass("AttnMidBlock", MidBlock, attention="self_attention")
+AttnUpBlock = partialclass("AttnUpBlock", UpBlock, attention="self_attention")
+ConvAttnDownBlock = partialclass(
+    "ConvAttnDownBlock", DownBlock, attention="conv_attention"
+)
+ConvAttnMidBlock = partialclass(
+    "ConvAttnMidBlock", MidBlock, attention="conv_attention"
+)
+ConvAttnUpBlock = partialclass("ConvAttnUpBlock", UpBlock, attention="conv_attention")
+AttnUpBlock = partialclass("AttnUpBlock", UpBlock, attention="conv_attention")
+AttnGateUpBlock = partialclass("AttnGateUpBlock", UpBlock, attention="attention_gate")
