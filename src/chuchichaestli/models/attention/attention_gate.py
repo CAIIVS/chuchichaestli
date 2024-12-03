@@ -21,6 +21,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 import torch
 from torch import nn
 from torch.nn import functional as F
+from chuchichaestli.models.maps import DIM_TO_CONV_MAP, UPSAMPLE_MODE
 
 
 class AttentionGate(nn.Module):
@@ -35,23 +36,16 @@ class AttentionGate(nn.Module):
         num_channels_x: int = 1,
         num_channels_g: int = 1,
         num_channels_inter: int = 1,
-        subsample_factor: tuple[int, ...] = 2,
+        subsample_factor: int | tuple[int, ...] = 2,
         **kwargs,
     ):
         """Initialize the AttentionGate."""
         super().__init__()
 
-        if dimension == 1:
-            conv_cls = nn.Conv1d
-            self.upsample_mode = "linear"
-        elif dimension == 2:
-            conv_cls = nn.Conv2d
-            self.upsample_mode = "bilinear"
-        elif dimension == 3:
-            conv_cls = nn.Conv3d
-            self.upsample_mode = "trilinear"
-        else:
+        if dimension not in DIM_TO_CONV_MAP:
             raise ValueError(f"Invalid dimension: {dimension}")
+        conv_cls = DIM_TO_CONV_MAP[dimension]
+        self.upsample_mode = UPSAMPLE_MODE[dimension]
 
         # TODO: What about a "multi-scale attention gate"?
 
@@ -101,6 +95,7 @@ class AttentionGate(nn.Module):
 
         theta_x = self.W_x(x)
         phi_g = self.W_g(g)
+
         phi_g = F.interpolate(phi_g, size=theta_x.size()[2:], mode=self.upsample_mode)
         q = self.psi(self.sigma1(theta_x + phi_g))
         alpha = F.interpolate(
