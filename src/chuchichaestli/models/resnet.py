@@ -31,6 +31,7 @@ class Norm(nn.Module):
     def __init__(self, dimensions: int, norm_type: str, channels: int, num_groups: int):
         """Initialize the normalization layer."""
         super().__init__()
+        self.norm: nn.Module
         match norm_type:
             case "group":
                 self.norm = nn.GroupNorm(num_groups, channels)

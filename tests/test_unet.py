@@ -383,3 +383,227 @@ def test_skip_connection_action(
 
     output = model(sample)
     assert output.shape == input_dims
+
+
+@pytest.mark.parametrize(
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults,add_noise,noise_sigma",
+    [
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2), "up", 0.1),
+        (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2), "up", 0.1),
+        (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2), "up", 0.1),
+        # Attention test cases in 2D
+        (
+            2,
+            ("AttnDownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            32,
+            (1, 2),
+            "up",
+            0.1,
+        ),
+        (
+            2,
+            ("DownBlock", "DownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            32,
+            (1, 2),
+            "up",
+            0.2,
+        ),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock"),
+            ("UpBlock", "UpBlock"),
+            32,
+            (1, 2),
+            "down",
+            0.1,
+        ),
+        (
+            2,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "AttnUpBlock"),
+            32,
+            (1, 2),
+            "down",
+            0.2,
+        ),
+        (
+            2,
+            ("AttnDownBlock", "DownBlock"),
+            ("UpBlock", "AttnUpBlock"),
+            32,
+            (1, 2),
+            "down",
+            0.1,
+        ),
+        (
+            2,
+            ("AttnDownBlock", "DownBlock"),
+            ("UpBlock", "AttnUpBlock"),
+            32,
+            (1, 2),
+            "down",
+            0.1,
+        ),
+        # Attention test cases in 3D
+        (
+            3,
+            ("AttnDownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            32,
+            (1, 2),
+            "up",
+            0.1,
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            32,
+            (1, 2),
+            "up",
+            0.1,
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("UpBlock", "UpBlock"),
+            32,
+            (1, 2),
+            "down",
+            0.1,
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "AttnUpBlock"),
+            32,
+            (1, 2),
+            "down",
+            0.1,
+        ),
+        (
+            3,
+            ("AttnDownBlock", "DownBlock"),
+            ("UpBlock", "AttnUpBlock"),
+            32,
+            (1, 2),
+            "up",
+            0.1,
+        ),
+        (
+            2,
+            ("DownBlock", "DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock", "UpBlock"),
+            16,
+            (1, 2, 2),
+            "up",
+            0.1,
+        ),
+        (
+            2,
+            ("DownBlock", "DownBlock", "DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock", "UpBlock", "UpBlock"),
+            16,
+            (1, 2, 2, 4),
+            "up",
+            0.1,
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock", "UpBlock"),
+            16,
+            (1, 2, 2),
+            "down",
+            0.1,
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock", "DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock", "UpBlock", "UpBlock"),
+            16,
+            (1, 2, 2, 4),
+            "down",
+            0.1,
+        ),
+        # AttentionGate test cases
+        (
+            2,
+            ("DownBlock", "DownBlock"),
+            ("AttnGateUpBlock", "AttnGateUpBlock"),
+            32,
+            (1, 2),
+            "up",
+            0.1,
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock"),
+            ("AttnGateUpBlock", "AttnGateUpBlock"),
+            32,
+            (1, 2),
+            "up",
+            0.1,
+        ),
+    ],
+)
+def test_forward_pass_with_noise(
+    dimensions,
+    down_block_types,
+    up_block_types,
+    n_channels,
+    block_out_channel_mults,
+    add_noise,
+    noise_sigma,
+):
+    """Test the forward pass of the UNet model."""
+    model = UNet(
+        dimensions=dimensions,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        block_out_channel_mults=block_out_channel_mults,
+        n_channels=n_channels,
+        res_groups=4,
+        num_layers_per_block=1,
+        add_noise=add_noise,
+        noise_sigma=noise_sigma,
+    )
+    input_dims = (1, 1) + (64,) * dimensions
+    sample = torch.randn(*input_dims)  # Example input
+    timestep = 0.5  # Example timestep
+    output1 = model(sample, timestep)
+    output2 = model(sample, timestep)
+    assert output1.shape == input_dims  # Check output shape
+    assert not torch.equal(output1, output2)
+
+
+def test_forward_pass_with_noise_at_inference(
+    dimensions=2,
+    down_block_types=("DownBlock", "DownBlock"),
+    up_block_types=("UpBlock", "UpBlock"),
+    n_channels=64,
+    block_out_channel_mults=(2, 2),
+    add_noise="up",
+    noise_sigma=0.1,
+):
+    model = UNet(
+        dimensions=dimensions,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        block_out_channel_mults=block_out_channel_mults,
+        n_channels=n_channels,
+        res_groups=4,
+        num_layers_per_block=1,
+        add_noise=add_noise,
+        noise_sigma=noise_sigma,
+    )
+    model.eval()
+    input_dims = (1, 1) + (64,) * dimensions
+    sample = torch.randn(*input_dims)  # Example input
+    timestep = 0.5  # Example timestep
+    output1 = model(sample, timestep)
+    output2 = model(sample, timestep)
+    assert output1.shape == input_dims  # Check output shape
+    assert torch.equal(output1, output2)

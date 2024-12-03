@@ -27,6 +27,46 @@ from chuchichaestli.models.resnet import ResidualBlock
 from chuchichaestli.models.attention import ATTENTION_MAP
 
 
+class GaussianNoiseBlock(nn.Module):
+    """Gaussian noise regularizer."""
+
+    def __init__(
+        self,
+        sigma: float = 0.1,
+        mu: float = 0.0,
+        detached: bool = True,
+        device: torch.device | str | None = None,
+    ):
+        """Constructor.
+
+        Args:
+          sigma: Relative (to the magnitude of the input) standard deviation for noise generation.
+          mu: Mean for the noise generation.
+          detached: If True, the input is detached for the noise generation.
+          device: Compute device where to pass the noise.
+
+        Note: If detached=False, the network sees the noise as a trainable parameter
+          (no reparametrization trick) and introduce a bias to generate vectors closer
+          to the noise level.
+        """
+        super().__init__()
+        self.sigma = sigma
+        self.detached = detached
+        self.noise = torch.tensor(mu)
+        if device is not None:
+            self.noise = self.noise.to(device)
+
+    def forward(
+        self, x: torch.Tensor, *args, noise_at_inference: bool = False
+    ) -> torch.Tensor:
+        """Forward pass using the reparametrization trick."""
+        if (self.training or noise_at_inference) and self.sigma != 0:
+            scale = self.sigma * x.detach() if self.detached else self.sigma * x
+            sampled_noise = self.noise.repeat(*x.size()).normal_() * scale
+            x = x + sampled_noise
+        return x
+
+
 class DownBlock(nn.Module):
     """Down block for UNet."""
 
@@ -58,7 +98,7 @@ class DownBlock(nn.Module):
             case _:
                 self.attn = None
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor = None) -> torch.Tensor:
         """Forward pass through the down block."""
         x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
@@ -114,7 +154,7 @@ class UpBlock(nn.Module):
         res_args: dict = {},
         attention: str | None = None,
         attn_args: dict = {},
-        skip_connection_action: str = None,
+        skip_connection_action: str | None = None,
     ):
         """Initialize the up block."""
         super().__init__()
