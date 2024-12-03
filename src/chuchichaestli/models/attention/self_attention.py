@@ -30,7 +30,7 @@ class SelfAttention(nn.Module):
         self,
         n_channels: int,
         n_heads: int = 1,
-        head_dim: int = None,
+        head_dim: int | None = None,
         dropout_p: float = 0.0,
         **kwargs,
     ):
