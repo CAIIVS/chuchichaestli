@@ -98,7 +98,7 @@ class DownBlock(nn.Module):
             case _:
                 self.attn = None
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor = None) -> torch.Tensor:
         """Forward pass through the down block."""
         x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
@@ -154,7 +154,7 @@ class UpBlock(nn.Module):
         res_args: dict = {},
         attention: str | None = None,
         attn_args: dict = {},
-        skip_connection_action: str = None,
+        skip_connection_action: str | None = None,
     ):
         """Initialize the up block."""
         super().__init__()
