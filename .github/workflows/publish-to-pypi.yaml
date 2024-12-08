@@ -157,8 +157,9 @@ jobs:
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
-        github_token: ${{ secrets.READ_WRITE_PAT }}
         branch: ${{ github.head_ref }}
+        force_with_lease: true
+    #     github_token: ${{ secrets.READ_WRITE_PAT }}
     # - name: Create Pull Request
     #   uses: peter-evans/create-pull-request@v7
     #   with:
