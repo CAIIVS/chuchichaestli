@@ -139,8 +139,6 @@ jobs:
       with:
         ref: ${{ github.head_ref }}
         fetch-depth: 0
-    #    persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
-    #    token: ${{ secrets.READ_WRITE_PAT }}
     - name: Install hatch
       run: |
         python3 -m pip install hatch --user
@@ -153,21 +151,11 @@ jobs:
         NEW_VERSION=`hatch version`
         git add src/chuchichaestli/__about__.py
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
-        git branch
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
         branch: ${{ github.head_ref }}
         force_with_lease: true
-    #     github_token: ${{ secrets.READ_WRITE_PAT }}
-    # - name: Create Pull Request
-    #   uses: peter-evans/create-pull-request@v7
-    #   with:
-    #     branch: ${{ steps.bump-version.outputs.BRANCH_NAME }}
-    #     title: 'Dev Version Bump'
-    #     body: 'Automated dev version bump'
-    #     base: main
-
 
   version-bump-release:
     name: Release version bump ⬆️
@@ -186,13 +174,15 @@ jobs:
       if: github.event_name == 'pull_request'
       with:
         fetch-depth: 0
-        ref: ${{ github.event.pull_request.head.ref }}
+        ref: ${{ github.head_ref }}
         persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
         token: ${{ secrets.READ_WRITE_PAT }}
     - uses: actions/checkout@v4
       if: github.event_name == 'push'
       with:
         fetch-depth: 0
+        persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
+        token: ${{ secrets.READ_WRITE_PAT }}
     - name: Install hatch
       run: |
         python3 -m pip install hatch --user
@@ -209,12 +199,12 @@ jobs:
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{ secrets.READ_WRITE_PAT }}
-        branch: version-bump
-    - name: Create Pull Request
-      uses: peter-evans/create-pull-request@v7
-      with:
-        branch: version-bump
-        title: 'Release Version Bump'
-        body: 'Automated version bump for release'
-        base: main
-        head: version-bump
+        branch: main
+    # - name: Create Pull Request
+    #   uses: peter-evans/create-pull-request@v7
+    #   with:
+    #     branch: version-bump
+    #     title: 'Release Version Bump'
+    #     body: 'Automated version bump for release'
+    #     base: main
+    #     head: version-bump
