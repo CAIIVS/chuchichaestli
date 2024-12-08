@@ -148,27 +148,27 @@ jobs:
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@chuchichaestli.dev'
-        BRANCH_NAME="bump-version-$(date +'%Y%m%d%H%M%S')"
         VERSION=`hatch version`
         hatch version dev
         NEW_VERSION=`hatch version`
-        git checkout -b $BRANCH_NAME
         git add src/chuchichaestli/__about__.py
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
-        echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+    - name: Pull latest changes
+      run: |
+        git pull --rebase origin version-bump
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{ secrets.READ_WRITE_PAT }}
-        branch: ${{ steps.bump-version.outputs.BRANCH_NAME }}
+        branch: version-bump
     - name: Create Pull Request
       uses: peter-evans/create-pull-request@v4
       with:
-        branch: ${{ steps.bump-version.outputs.BRANCH_NAME }}
+        branch: version-bump
         title: 'Dev Version Bump'
         body: 'Automated dev version bump'
         base: main
-        head: ${{ steps.bump-version.outputs.BRANCH_NAME }}
+        head: version-bump
 
 
   version-bump-release:
