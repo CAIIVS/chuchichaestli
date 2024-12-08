@@ -153,10 +153,11 @@ jobs:
         NEW_VERSION=`hatch version`
         git add src/chuchichaestli/__about__.py
         git commit -m "Bump version: $VERSION → $NEW_VERSION"
+        git branch
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
-    #    github_token: ${{ secrets.READ_WRITE_PAT }}
+        github_token: ${{ secrets.READ_WRITE_PAT }}
         branch: ${{ github.head_ref }}
     # - name: Create Pull Request
     #   uses: peter-evans/create-pull-request@v7
