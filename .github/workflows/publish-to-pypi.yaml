@@ -24,7 +24,6 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         python -m pip install build --user
-        python -m pip install .
     - name: Build a binary wheel and a source tarball
       run: |
         python -m build
@@ -59,7 +58,7 @@ jobs:
 
   github-release:
     name: |
-      Sign the 🐍 📦 with Sigstore and upload them to GitHub Release
+      Upload GitHub Release signed with Sigstore
     needs:
     - publish-to-pypi
     runs-on: ubuntu-latest
@@ -158,15 +157,14 @@ jobs:
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{ secrets.READ_WRITE_PAT }}
-        branch: version-bump
-    - name: Create Pull Request
-      uses: peter-evans/create-pull-request@v4
-      with:
-        branch: version-bump
-        title: 'Dev Version Bump'
-        body: 'Automated dev version bump'
-        base: main
-        head: version-bump
+        branch: ${{ github.event.pull_request.head.ref }}
+    # - name: Create Pull Request
+    #   uses: peter-evans/create-pull-request@v7
+    #   with:
+    #     branch: ${{ steps.bump-version.outputs.BRANCH_NAME }}
+    #     title: 'Dev Version Bump'
+    #     body: 'Automated dev version bump'
+    #     base: main
 
 
   version-bump-release:
@@ -211,7 +209,7 @@ jobs:
         github_token: ${{ secrets.READ_WRITE_PAT }}
         branch: version-bump
     - name: Create Pull Request
-      uses: peter-evans/create-pull-request@v4
+      uses: peter-evans/create-pull-request@v7
       with:
         branch: version-bump
         title: 'Release Version Bump'
