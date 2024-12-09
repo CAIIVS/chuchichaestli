@@ -368,8 +368,15 @@ class HDF5Dataset(Dataset):
 
 
 if __name__ == "__main__":
+    from chuchichaestli.data.cache import estimate_byte_size, nbytes
     data_dir = Path(__file__).parents[3] / "data"
     file_key = "240818_tng50-1_dm_50_*"
     ds = HDF5Dataset(data_dir, file_key, meta_groups="**/metadata/*")
-    metadata = ds[0][1]
-    print(len(ds), metadata)
+    print(len(ds.frame))
+    sizes = []
+    for i in range(10): # range(len(ds)):
+        metadata = ds[i][1]
+        sizes.append(estimate_byte_size(metadata))
+        if i % 250 == 0:
+            print(sizes[-1])
+    print(nbytes(650) * 12000 * 6)
