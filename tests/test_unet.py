@@ -126,7 +126,7 @@ def test_forward_pass(
         res_groups=4,
         num_layers_per_block=1,
     )
-    input_dims = (1, 1) + (64,) * dimensions
+    input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
     timestep = 0.5  # Example timestep
     output = model(sample, timestep)
@@ -163,7 +163,7 @@ def test_info_conv_attn(
             model,
             (2, 1) + (img_wh,) * dimensions,
             col_names=["input_size", "output_size", "num_params"],
-            device=torch.device("mps"),
+            # device=torch.device("cpu"),
         )
     except ImportError:
         print(model)
@@ -191,7 +191,7 @@ def test_no_timestep(
         time_embedding=False,
         res_groups=8,
     )
-    input_dims = (1, 1) + (64,) * dimensions
+    input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
 
     output = model(sample)
@@ -229,11 +229,11 @@ def test_out_channels(
         out_channels=out_channels,
         res_groups=16,
     )
-    input_dims = (1, in_channels) + (64,) * dimensions
+    input_dims = (1, in_channels) + (32,) * dimensions
     sample = torch.randn(*input_dims)
     timestep = 0.5
     output = model(sample, timestep)
-    assert output.shape == (1, out_channels) + (64,) * dimensions
+    assert output.shape == (1, out_channels) + (32,) * dimensions
 
 
 @pytest.mark.parametrize(
@@ -347,7 +347,7 @@ def test_skip_connection_action(
         attn_groups=8,
         skip_connection_action=skip_connection_action,
     )
-    input_dims = (1, 1) + (64,) * dimensions
+    input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
 
     output = model(sample)
@@ -539,7 +539,7 @@ def test_forward_pass_with_noise(
         add_noise=add_noise,
         noise_sigma=noise_sigma,
     )
-    input_dims = (1, 1) + (64,) * dimensions
+    input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
     timestep = 0.5  # Example timestep
     output1 = model(sample, timestep)
@@ -570,7 +570,7 @@ def test_forward_pass_with_noise_at_inference(
         noise_sigma=noise_sigma,
     )
     model.eval()
-    input_dims = (1, 1) + (64,) * dimensions
+    input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
     timestep = 0.5  # Example timestep
     output1 = model(sample, timestep)
