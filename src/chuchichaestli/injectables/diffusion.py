@@ -39,15 +39,15 @@ class CondBase(L.LightningModule):
         model: nn.Module,
         scheduler: DiffusionProcess,
         train_loss: nn.modules.loss._Loss,
-        valid_loss: nn.modules.loss._Loss,
-        train_fätch: Fätch | None,
-        valid_fätch: Fätch | None,
+        valid_loss: nn.modules.loss._Loss | None = None,
+        train_fätch: Fätch | None = None,
+        valid_fätch: Fätch | None = None,
     ):
         super().__init__()
         self.model = model
         self.scheduler = scheduler
         self.valid_loss = train_loss
-        self.valid_loss = valid_loss
+        self.valid_loss = valid_loss or train_loss
         self.train_fätch = train_fätch or Identity()
         self.valid_fätch = valid_fätch or Identity()
 
