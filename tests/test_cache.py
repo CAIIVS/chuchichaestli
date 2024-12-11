@@ -32,9 +32,7 @@ from chuchichaestli.data.cache import (
 )
 
 
-@pytest.mark.parametrize(
-    "x", ["2.0G", "2.0GB", "2.0 GB", 2147483648.0, 2147483648]
-)
+@pytest.mark.parametrize("x", ["2.0G", "2.0GB", "2.0 GB", 2147483648.0, 2147483648])
 def test_nbytes_2G(x):
     """Test the nbytes class."""
     b = nbytes(x)
@@ -48,9 +46,7 @@ def test_nbytes_2G(x):
     assert isinstance(b.to("G"), float)
 
 
-@pytest.mark.parametrize(
-    "x", [None, 0.0, 0, "GB"]
-)
+@pytest.mark.parametrize("x", [None, 0.0, 0, "GB"])
 def test_nbytes_null(x):
     """Test the nbytes class in edge cases."""
     b = nbytes(x)
@@ -105,19 +101,17 @@ def test_estimate_byte_size_empty():
         ((100, 1, 64, 64), torch.float32, 1.0),
         ((200, 1, 32, 32), torch.float64, "4G"),
         ((300, 1, 32, 32), torch.int8, 4),
-    ]
+    ],
 )
-def test_SharedArray_init(
-    shape,
-    dtype,
-    cache_size
-):
+def test_SharedArray_init(shape, dtype, cache_size):
     """Test the SharedArray module."""
-    cache = SharedArray(shape, size=cache_size, dtype=dtype, verbose=True)
+    cache = SharedArray(
+        shape, size=cache_size, dtype=dtype, allow_overwrite=True, verbose=True
+    )
     assert isinstance(cache.array, torch.Tensor)
     assert isinstance(cache.states, torch.Tensor)
     assert len(cache) == shape[0]
-    assert cache.get_state(0).value == 0
+    assert cache.get_state(0)[0].value == 0
 
 
 @pytest.mark.parametrize(
@@ -125,20 +119,18 @@ def test_SharedArray_init(
     [
         ((300, 1, 32, 32), torch.int16, "40KB"),
         ((200, 1, 32, 32), torch.float32, "4B"),
-    ]
+    ],
 )
-def test_SharedArray_ooc(
-    shape,
-    dtype,
-    cache_size
-):
+def test_SharedArray_ooc(shape, dtype, cache_size):
     """Test the SharedArray module with out-of-cache values."""
     print()
-    cache = SharedArray(shape, size=cache_size, dtype=dtype, verbose=True)
+    cache = SharedArray(
+        shape, size=cache_size, dtype=dtype, allow_overwrite=True, verbose=True
+    )
     assert isinstance(cache.array, torch.Tensor)
     assert isinstance(cache.states, torch.Tensor)
     assert len(cache) < shape[0]
-    assert cache.get_state(-1).value == 2
+    assert cache.get_state(-1)[0].value == 2
 
 
 @pytest.mark.parametrize(
@@ -146,7 +138,7 @@ def test_SharedArray_ooc(
     [
         ((100, 1, 64, 64), torch.float32, 1.0, 10, 10),
         ((100, 1, 64, 64), torch.float32, 1.0, 10, 12),
-    ]
+    ],
 )
 def test_SharedArray_setitem_and_getitem(
     shape,
@@ -157,7 +149,9 @@ def test_SharedArray_setitem_and_getitem(
 ):
     """Test the SharedArray module's setitem method."""
     print()
-    cache = SharedArray(shape, size=cache_size, dtype=dtype, verbose=True)
+    cache = SharedArray(
+        shape, size=cache_size, dtype=dtype, allow_overwrite=True, verbose=True
+    )
     cache[setindex] = torch.randn(*shape[1:])
     if getindex == setindex:
         assert cache[getindex] is not None
@@ -174,7 +168,9 @@ def test_SharedArray_clear_index(
 ):
     """Test the SharedArray module's setitem method."""
     print()
-    cache = SharedArray(shape, size=cache_size, dtype=dtype, verbose=True)
+    cache = SharedArray(
+        shape, size=cache_size, dtype=dtype, allow_overwrite=True, verbose=True
+    )
     cache[index] = torch.randn(*shape[1:])
     assert cache[index] is not None
     cache.clear(index)
@@ -188,27 +184,40 @@ def test_SharedArray_clear_all(
 ):
     """Test the SharedArray module's setitem method."""
     print()
-    cache = SharedArray(shape, size=cache_size, dtype=dtype, verbose=True)
+    cache = SharedArray(
+        shape, size=cache_size, dtype=dtype, allow_overwrite=True, verbose=True
+    )
     cache[0] = torch.randn(*shape[1:])
-    cache[shape[0]//2] = torch.randn(*shape[1:])
+    cache[shape[0] // 2] = torch.randn(*shape[1:])
     assert cache[0] is not None
-    assert cache[shape[0]//2] is not None
+    assert cache[shape[0] // 2] is not None
     cache.clear()
     assert cache[0] is None
-    assert cache[shape[0]//2] is None
+    assert cache[shape[0] // 2] is None
+
+
+def test_SharedArray_str(
+    shape=(2000, 1, 128, 128),
+    dtype=torch.float32,
+    cache_size=0.1,
+    setindex=10,
+):
+    """Test the SharedArray module's str method."""
+    cache = SharedArray(
+        shape, size=cache_size, dtype=dtype, allow_overwrite=True, verbose=True
+    )
+    cache[setindex] = torch.randn(*shape[1:])
+    print(cache)
 
 
 @pytest.mark.parametrize(
     "descr,cache_size",
     [
-        ("metadata_cache", 16),
-        ("metadata_cache", 32),
-    ]
+        ("metadata_cache_test", 16),
+        ("metadata_cache_test", 32),
+    ],
 )
-def test_SharedDict_init(
-    descr,
-    cache_size
-):
+def test_SharedDict_init(descr, cache_size):
     """Test the SharedArray module."""
     cache_dict = SharedDict(descr=descr, size=cache_size, verbose=True)
     assert hasattr(cache_dict, "shm")
@@ -219,14 +228,11 @@ def test_SharedDict_init(
 @pytest.mark.parametrize(
     "descr,cache_size",
     [
-        ("metadata_cache", 16),
-        ("metadata_cache", 32),
-    ]
+        ("metadata_cache_test", 16),
+        ("metadata_cache_test", 32),
+    ],
 )
-def test_SharedDict_write(
-    descr,
-    cache_size
-):
+def test_SharedDict_write(descr, cache_size):
     """Test the SharedArray module."""
     sample_dict = {
         "numbers": [1, 2, 3, 4, 5],
@@ -251,14 +257,11 @@ def test_SharedDict_write(
 @pytest.mark.parametrize(
     "descr,cache_size",
     [
-        ("metadata_cache", "1b"),
-        ("metadata_cache", "5b"),
-    ]
+        ("metadata_cache_test", "1b"),
+        ("metadata_cache_test", "5b"),
+    ],
 )
-def test_SharedDict_buffer_too_small(
-    descr,
-    cache_size
-):
+def test_SharedDict_buffer_too_small(descr, cache_size):
     """Test the SharedArray module."""
     sample_dict = {
         "numbers": [1, 2, 3, 4, 5],
@@ -275,14 +278,11 @@ def test_SharedDict_buffer_too_small(
 @pytest.mark.parametrize(
     "descr,cache_size",
     [
-        ("metadata_cache", "10b"),
-        ("metadata_cache", "80b"),
-    ]
+        ("metadata_cache_test", "6b"),
+        ("metadata_cache_test", "10b"),
+    ],
 )
-def test_SharedDict_write_too_big(
-    descr,
-    cache_size
-):
+def test_SharedDict_write_too_big(descr, cache_size):
     """Test the SharedArray module."""
     sample_dict = {
         "numbers": [1, 2, 3, 4, 5],
@@ -300,13 +300,10 @@ def test_SharedDict_write_too_big(
 @pytest.mark.parametrize(
     "descr,cache_size",
     [
-        ("metadata_cache", "10M"),
-    ]
+        ("metadata_cache_test", "10M"),
+    ],
 )
-def test_SharedDict_open_buffer_context(
-    descr,
-    cache_size
-):
+def test_SharedDict_open_buffer_context(descr, cache_size):
     """Test the SharedArray module."""
     sample_dict = {
         "numbers": [1, 2, 3, 4, 5],
@@ -328,18 +325,14 @@ def test_SharedDict_open_buffer_context(
 @pytest.mark.parametrize(
     "n,descr,slot_size,cache_size",
     [
-        (12000, "metadata_cache", "150b", "16M"),
-        (12000, "metadata_cache", "650b", "16M"),
-        (12000, "metadata_cache", "850b", "16M"),
-    ]
+        (120, "metadata_cache_test", "150b", "16M"),
+        (120, "metadata_cache_test", "650b", "16M"),
+        (120, "metadata_cache_test", "850b", "16M"),
+    ],
 )
-def test_SharedDictList_init(
-    n,
-    descr,
-    slot_size,
-    cache_size
-):
+def test_SharedDictList_init(n, descr, slot_size, cache_size):
     """Test the SharedArray module."""
+
     def gen_data(n):
         return {
             "numbers": np.random.randn(4).tolist(),
@@ -348,7 +341,9 @@ def test_SharedDictList_init(
             "ratio": np.random.rand(1)[0],
             "foo": "bar",
         }
-    cache_list = SharedDictList(
+
+    print(estimate_byte_size(gen_data(2)) * 120)
+    meta_cache = SharedDictList(
         n,
         gen_data(1),
         gen_data(2),
@@ -356,24 +351,25 @@ def test_SharedDictList_init(
         descr=descr,
         slot_size=slot_size,
         size=cache_size,
-        verbose=True
+        verbose=True,
     )
-    cache_list.clear_allocation()
+    assert isinstance(meta_cache, SharedDictList)
+    assert hasattr(meta_cache, "_slots")
+    assert hasattr(meta_cache, "_shm_states")
+    assert len(meta_cache._slots) == len(meta_cache._shm_states)
+    meta_cache.clear_allocation()
+
 
 @pytest.mark.parametrize(
     "n,descr,slot_size,cache_size",
     [
-        (12000, "metadata_cache", "650b", "16M"),
-        (12000, "metadata_cache", "850b", "16M"),
-    ]
+        (12000, "metadata_cache_test", "650b", "16M"),
+        (12000, "metadata_cache_test", "850b", "16M"),
+    ],
 )
-def test_SharedDictList_init_no_seq(
-    n,
-    descr,
-    slot_size,
-    cache_size
-):
+def test_SharedDictList_init_no_seq(n, descr, slot_size, cache_size):
     """Test the SharedArray module."""
+
     def gen_data(n):
         return {
             "numbers": np.random.randn(4).tolist(),
@@ -382,45 +378,73 @@ def test_SharedDictList_init_no_seq(
             "ratio": np.random.rand(1)[0],
             "foo": "bar",
         }
-    cache_list = SharedDictList(
-        n,
-        descr=descr,
-        slot_size=slot_size,
-        size=cache_size,
-        verbose=True
-    )
-    cache_list.clear_allocation()
 
-@pytest.mark.parametrize(
-    "n,descr,slot_size,cache_size",
-    [
-        (12000, "metadata_cache", "650b", "16K"),
-        (12000, "metadata_cache", "850b", "16K"),
-    ]
-)
-def test_SharedDictList_init_smaller_cache(
-    n,
-    descr,
-    slot_size,
-    cache_size
-):
-    """Test the SharedArray module."""
-    def gen_data(n):
-        return {
-            "numbers": np.random.randn(4).tolist(),
-            "index": n,
-            "bool": False,
-            "ratio": np.random.rand(1)[0],
-            "foo": "bar",
-        }
     meta_cache = SharedDictList(
-        n,
-        descr=descr,
-        slot_size=slot_size,
-        size=cache_size,
-        verbose=True
+        n, descr=descr, slot_size=slot_size, size=cache_size, verbose=True
     )
-    meta_cache.slots[0] = 1
-    print(meta_cache.slots)
-    print(meta_cache._shm_states)
+    assert isinstance(meta_cache, SharedDictList)
+    assert hasattr(meta_cache, "_slots")
+    assert hasattr(meta_cache, "_shm_states")
+    assert len(meta_cache._slots) == len(meta_cache._shm_states)
+    meta_cache.clear_allocation()
+
+
+@pytest.mark.parametrize(
+    "n,descr,slot_size,cache_size",
+    [
+        (12000, "metadata_cache_test", "650b", "16K"),
+        (12000, "metadata_cache_test", "850b", "16K"),
+    ],
+)
+def test_SharedDictList_init_smaller_cache(n, descr, slot_size, cache_size):
+    """Test the SharedArray module."""
+
+    def gen_data(n):
+        return {
+            "numbers": np.random.randn(4).tolist(),
+            "index": n,
+            "bool": False,
+            "ratio": np.random.rand(1)[0],
+            "foo": "bar",
+        }
+
+    meta_cache = SharedDictList(
+        n, descr=descr, slot_size=slot_size, size=cache_size, verbose=True
+    )
+    assert isinstance(meta_cache, SharedDictList)
+    assert hasattr(meta_cache, "_slots")
+    assert hasattr(meta_cache, "_shm_states")
+    assert len(meta_cache._slots) < len(meta_cache._shm_states)
+    meta_cache.clear_allocation()
+
+
+@pytest.mark.parametrize(
+    "n,descr,slot_size,cache_size",
+    [
+        (12000, "metadata_cache_test", "650b", "16K"),
+        (12000, "metadata_cache_test", "850b", "16K"),
+    ],
+)
+def test_SharedDictList_setitem_and_getitem(n, descr, slot_size, cache_size):
+    """Test the SharedArray module."""
+
+    def gen_data(n):
+        return {
+            "numbers": np.random.randn(4).tolist(),
+            "index": n,
+            "bool": False,
+            "ratio": np.random.rand(1)[0],
+            "foo": "bar",
+        }
+
+    meta_cache = SharedDictList(
+        n, descr=descr, slot_size=slot_size, size=cache_size, verbose=True
+    )
+    data = gen_data(0)
+    meta_cache[0] = data
+    cached_data = meta_cache[0]
+    assert data == cached_data
+    assert meta_cache.get_state(0)[0].value == 1
+    assert meta_cache.get_state(1)[0].value == 0
+    assert meta_cache.get_state(3)[0].value == 0
     meta_cache.clear_allocation()
