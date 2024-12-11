@@ -93,6 +93,7 @@ def test_HDF5Dataset_getitem(dimensions, index, meta_groups, scheme):
         (0, "**/metadata/*", "surjective"),
         (100, "**/metadata/*", "surjective"),
         (150, "**/metadata/*", "surjective"),
+        (150, None, None)
     ],
 )
 def test_HDF5Dataset_getitem_no_collate(index, meta_groups, scheme):
@@ -103,19 +104,19 @@ def test_HDF5Dataset_getitem_no_collate(index, meta_groups, scheme):
         meta_groups=meta_groups,
         scheme=scheme,
         collate=False,
-        cache=True,
+        cache=False,
     )
     item = ds[index]
     assert len(item[0]) == 3
-    assert len(item[1]) == 3
     assert isinstance(item[0][0], torch.Tensor)
+    assert len(item[1]) == 3
     assert isinstance(item[1][0], dict)
     if scheme:
         assert ds.scheme == scheme
     elif meta_groups is None:
         assert ds.scheme == "analog"
     if meta_groups is None:
-        assert item[1] == {}
+        assert item[1] == ({}, {}, {})
     ds.purge_cache()
 
 
@@ -125,6 +126,7 @@ def test_HDF5Dataset_getitem_no_collate(index, meta_groups, scheme):
         (1, "**/metadata/*", "surjective"),
         (100, "**/metadata/*", "surjective"),
         (150, "**/metadata/*", "surjective"),
+        (150, None, None)
     ],
 )
 def test_HDF5Dataset_caching(index, meta_groups, scheme):
@@ -152,6 +154,7 @@ def test_HDF5Dataset_caching(index, meta_groups, scheme):
         (100, "**/metadata/*", "surjective"),
         (150, "**/metadata/*", "surjective"),
         (197, "**/metadata/*", "surjective"),
+        (150, None, None)
     ],
 )
 def test_HDF5Dataset_no_collate_caching(index, meta_groups, scheme):
