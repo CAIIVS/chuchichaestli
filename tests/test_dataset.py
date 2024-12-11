@@ -24,7 +24,7 @@ import torch
 from chuchichaestli.data.dataset import HDF5Dataset
 
 
-# Always 3 files are generated at the beginning of the pytest session (see conftest.py)
+# At the beginning of each pytest session 3 files test_{1,2,3}D.hdf5 are generated (see conftest.py)
 
 
 @pytest.mark.parametrize("dimensions", [1, 2, 3])
@@ -34,6 +34,7 @@ def test_HDF5Dataset_init(dimensions):
     ds = HDF5Dataset(f)
     assert len(ds) > 0
     assert hasattr(ds, "index")
+    ds.purge_cache()
 
 
 @pytest.mark.parametrize(
@@ -51,7 +52,8 @@ def test_HDF5Dataset_NotImplementedYet(dimensions, index, meta_groups, scheme):
     """Test the HDF5Dataset module."""
     f = Path(f"test_{dimensions}D.hdf5")
     with pytest.raises(NotImplementedError):
-        HDF5Dataset(f, meta_groups=meta_groups, scheme=scheme)
+        ds = HDF5Dataset(f, meta_groups=meta_groups, scheme=scheme)
+        ds.purge_cache()
 
 
 @pytest.mark.parametrize(
@@ -82,6 +84,7 @@ def test_HDF5Dataset_getitem(dimensions, index, meta_groups, scheme):
         assert ds.scheme == "analog"
     if meta_groups is None:
         assert item[1] == {}
+    ds.purge_cache()
 
 
 @pytest.mark.parametrize(
@@ -94,7 +97,14 @@ def test_HDF5Dataset_getitem(dimensions, index, meta_groups, scheme):
 )
 def test_HDF5Dataset_getitem_no_collate(index, meta_groups, scheme):
     """Test the HDF5Dataset module."""
-    ds = HDF5Dataset(Path("."), file_key="**/*.hdf5", meta_groups=meta_groups, scheme=scheme, collate=False)
+    ds = HDF5Dataset(
+        Path("."),
+        file_key="test_*.hdf5",
+        meta_groups=meta_groups,
+        scheme=scheme,
+        collate=False,
+        cache=True,
+    )
     item = ds[index]
     assert len(item[0]) == 3
     assert len(item[1]) == 3
@@ -106,3 +116,86 @@ def test_HDF5Dataset_getitem_no_collate(index, meta_groups, scheme):
         assert ds.scheme == "analog"
     if meta_groups is None:
         assert item[1] == {}
+    ds.purge_cache()
+
+
+@pytest.mark.parametrize(
+    "index,meta_groups,scheme",
+    [
+        (1, "**/metadata/*", "surjective"),
+        (100, "**/metadata/*", "surjective"),
+        (150, "**/metadata/*", "surjective"),
+    ],
+)
+def test_HDF5Dataset_caching(index, meta_groups, scheme):
+    """Test the HDF5Dataset module."""
+    ds = HDF5Dataset(
+        Path("."),
+        file_key="test_*.hdf5",
+        meta_groups=meta_groups,
+        scheme=scheme,
+        cache=4,
+    )
+    cache_sets = sum(s == 1 for s in ds.cache[0].states)
+    ds[index]
+    ds[index + 1]
+    ds[index + 2]
+    ds[index]
+    assert cache_sets + 3 == sum(s == 1 for s in ds.cache[0].states)
+    ds.purge_cache()
+
+
+@pytest.mark.parametrize(
+    "index,meta_groups,scheme",
+    [
+        (1, "**/metadata/*", "surjective"),
+        (100, "**/metadata/*", "surjective"),
+        (150, "**/metadata/*", "surjective"),
+        (197, "**/metadata/*", "surjective"),
+    ],
+)
+def test_HDF5Dataset_no_collate_caching(index, meta_groups, scheme):
+    """Test the HDF5Dataset module."""
+    ds = HDF5Dataset(
+        Path("."),
+        file_key="test_*.hdf5",
+        meta_groups=meta_groups,
+        scheme=scheme,
+        cache=4,
+        collate=False,
+    )
+    cache_sets = sum(s == 1 for s in ds.cache[0].states)
+    ds[index]
+    ds[index + 1]
+    ds[index + 2]
+    ds[index]
+    assert cache_sets + 9 == sum(s == 1 for s in ds.cache[0].states)
+    ds.purge_cache()
+
+
+@pytest.mark.parametrize(
+    "preload,meta_groups,scheme",
+    [
+        (False, "**/metadata/*", "surjective"),
+        (True, "**/metadata/*", "surjective"),
+    ],
+)
+def test_HDF5Dataset_preload_timing(preload, meta_groups, scheme):
+    """Test the HDF5Dataset module."""
+    import time
+
+    ds = HDF5Dataset(
+        Path("."),
+        file_key="test_*.hdf5",
+        meta_groups=meta_groups,
+        scheme=scheme,
+        cache=4,
+        collate=True,
+        preload=preload,
+    )
+    t_ini = time.time()
+    for i in range(len(ds)):
+        ds[i]
+    t_fin = time.time()
+    print(f"Dataset iteration timing {preload=}: {t_fin - t_ini} s")
+    ds.purge_cache()
