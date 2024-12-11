@@ -199,7 +199,8 @@ class HDF5Dataset(Dataset):
         for key in keys:
             group = self.frame[frame_index][key]
             if isinstance(group, h5py._hl.dataset.Dataset):
-                if len(group.shape) == 2:
+                # assume single images if shpae ~ (N, N)
+                if len(group.shape) == 2 and group.shape[0] == group.shape[1]:
                     iN = 1
                 else:
                     iN = group.shape[dim]
