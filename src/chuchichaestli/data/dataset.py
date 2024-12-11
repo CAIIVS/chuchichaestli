@@ -21,9 +21,11 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 from pathlib import Path
 import fnmatch
 import h5py
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 from chuchichaestli.data.cache import (
+    estimate_byte_size,
     SharedArray,
     SharedDictList,
 )
@@ -32,11 +34,11 @@ from collections.abc import Callable
 
 
 class HDF5Dataset(Dataset):
-    """Dataset for loading HDF5 frames."""
+    """Dataset for loading HDF5 frames (with optional shared memory caching)."""
 
     def __init__(
         self,
-        path: str | Path,
+        path: str | Path | list[str | Path],
         file_key: str = "**/*.hdf5",
         groups: str | tuple[str, ...] | None = None,
         sort_key: Callable | None = None,
@@ -47,14 +49,15 @@ class HDF5Dataset(Dataset):
         dtype: torch.dtype = torch.float32,
         collate: bool = True,
         preload: bool = False,
-        cache_size: int | float | str | None = "2G",
+        cache: int | float | str | bool | None = "4G",
+        meta_cache: int | float | str | bool | None = "64M",
         **kwargs,
     ):
         """Constructor.
 
         Args:
-          path: Path to a file or data directory containing the HDF5 files
-          file_key: Key to filter particular files
+          path: Path to a file, files, or data directory which contains the HDF5 files (recursively)
+          file_key: Key to filter particular files (if path is a directory)
           groups: Filter pattern for HDF5 groups containing datasets
           sort_key: Sorting key function for the list of HDF5 groups
           meta_groups: Filter pattern for HDF5 attributes containing metadata
@@ -70,15 +73,17 @@ class HDF5Dataset(Dataset):
           collate: Collate multiple files into a single continuous dataset,
             otherwise __getitem__ pulls samples from each file.
           preload: Preload and cache the dataset.
-          cache_size: If not None, a cache is allocated for stochastic caching.
+          cache: If not None or False, memory is allocated for stochastic caching of the tensors.
+          meta_cache: If not None or False, memory is allocated for stochastic caching of the metadata.
           kwargs: Keyword arguments for h5py.File.
             See https://docs.h5py.org/en/stable/high/file.html#h5py.File
         """
-        self.path = Path(path)
-        if self.path.is_file() and self.path.suffix == ".hdf5":
-            self.files = [self.path]
+        if isinstance(path, str | Path) and Path(path).is_file() and Path(path).suffix == ".hdf5":
+            self.files = [Path(path)]
+        elif isinstance(path, list | tuple):
+            self.files = [Path(p) for p in path]
         else:
-            self.files = sorted([f for f in self.path.rglob(file_key) if f.is_file()])
+            self.files = sorted([f for f in Path(path).rglob(file_key) if f.is_file()])
         self.frame_args = kwargs
 
         self.groups: tuple[str, ...]
@@ -105,18 +110,27 @@ class HDF5Dataset(Dataset):
         self.collate = collate
         self.preload = preload
 
+        # Temporary error warning...
         if self.scheme in ["bijective", "collective"]:
             raise NotImplementedError(f"{self.scheme} is not implemented yet.")
 
         self.load_frame(**self.frame_args)
         self.make_index(dim=self.dim, scheme=self.scheme, collate=self.collate)
-        # TODO: add shared cache for data and metadata
-        if cache_size is None:
-            self.cache = [None, None]
-        else:
-            self.cache_push(self[0])
-        if self.preload:
-            pass
+        self.cache: tuple[SharedArray | None, SharedDictList | None] = (None, None)
+        if cache and cache is not None:
+            if isinstance(cache, bool):
+                cache = "4G"
+            if isinstance(cache, bool):
+                meta_cache = "64M"
+            self.cache = (
+                SharedArray(shape=self.shape, size=cache, dtype=self.dtype),
+                SharedDictList(
+                    n=self.shape[0], slot_size=self.byte_size[1], size=meta_cache
+                ),
+            )
+        if self.preload and self.cache[0] is not None:
+            for i in range(len(self)):
+                self[i]
 
     @staticmethod
     def default_sort_key(x: Any) -> int:
@@ -140,8 +154,15 @@ class HDF5Dataset(Dataset):
         return self._frame
 
     @property
+    def frame_size(self) -> list[int]:
+        """Dataset sizes per frame and group"""
+        if not hasattr(self, "_frame_size"):
+            self.make_index(dim=self.dim, scheme=self.scheme, collate=self.collate)
+        return self._frame_size
+
+    @property
     def frame_structure(self) -> dict[int, list[str]]:
-        """Fetch unfiltered frame structure (HDF5 Groups) of each frame."""
+        """Fetch unfiltered frame structure (HDF5 Groups) of each frame (HDF5 File instance)."""
         sort_key = self.sort_key
         if not hasattr(self, "_frame_structure"):
             tree: dict[int, list[str]] = {}
@@ -182,6 +203,7 @@ class HDF5Dataset(Dataset):
                     iN = 1
                 else:
                     iN = group.shape[dim]
+                self._frame_size[frame_index] += iN
                 total_samples += iN
                 for i in range(total_samples - iN, total_samples):
                     mapping[i] = (key, key)
@@ -221,6 +243,7 @@ class HDF5Dataset(Dataset):
                     iN = 1
                 else:
                     iN = group.shape[dim]
+                self._frame_size[frame_index] += iN
                 total_samples += iN
                 if len(attr_keys) != iN:
                     raise ValueError(
@@ -240,16 +263,10 @@ class HDF5Dataset(Dataset):
     def make_index(
         self, dim: int = 0, scheme: str | None = None, collate: bool | None = None
     ):
-        """Index the frames for individual samples.
+        """Index the frames (HDF5 File objects) for individual samples.
 
-        The index map has the shape:
-          [frame index, group index, dataset index]
-            or
-          [frame index, group index, attribute key]
-
-        Possible scenarios:
-          1 frame, 1 group index, 1 dataset
-          1 frame, multiple group indices for multiple datasets
+        The index map keys (indices) point to a list of tuples as follows:
+          index -> [(frame index, group index, attribute key), ...]
 
         Args:
           dim: Dimension across which the datasets are stacked
@@ -279,6 +296,7 @@ class HDF5Dataset(Dataset):
                 meta_groups[i_frame] = meta_keys
         # map out dataset(s) and metadata
         loc: dict[int, dict] = {}
+        self._frame_size: list[int] = [0 for i_frame in groups.keys()]
         for i_frame, data_keys in groups.items():
             if i_frame in meta_groups:
                 meta_keys = meta_groups[i_frame]
@@ -321,27 +339,75 @@ class HDF5Dataset(Dataset):
                     else:
                         index[j] = [(i_frame,) + mapping[j]]
         self.index = index
-        self.length = max(index.keys()) + 1
         return self.index
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Number of samples in the dataset."""
-        return self.length
+        return max(self.index.keys()) + 1
 
-    def __getitem__(
-        self,
-        item: int,
-    ) -> tuple[torch.Tensor, dict] | tuple[tuple[torch.Tensor, ...], tuple[dict, ...]]:
-        """Get samples and metadata at specified index."""
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Dataset shape.
+
+        Note: If the dataset from different frames have different shape, the one
+          with maximal number of elements is chosen.
+        """
+        if self.collate:
+            n_samples = len(self)
+            sample = self[0][0]
+            samples = [
+                self[sum(self.frame_size[:i])][0] for i in range(len(self.frame_size))
+            ]
+        else:
+            n_samples = len(self) * len(self.frame)
+            samples = self[0][0]
+        dim = 0
+        for i, s in enumerate(samples):
+            if dim < np.prod(s.shape):
+                dim = np.prod(s.shape)
+                sample = s
+        return (n_samples, *sample.shape)
+
+    @property
+    def byte_size(self):
+        """Size of a sample (tensor and metadata) in bytes."""
+        if self.collate:
+            sample, metadata = self[0]
+        else:
+            sample, metadata = self[0][0][-1], self[0][1][-1]
+        sample_bytes = estimate_byte_size(sample)
+        metadata_bytes = estimate_byte_size(metadata)
+        return sample_bytes, metadata_bytes
+
+    def __getitem__(self, idx: int) -> tuple:
+        """Get sample tensors and metadata dictionaries at specified index.
+
+        Returns:
+          (torch.Tensor, dict) if collate=True, otherwise
+          (tuple[torch.Tensor, ...], tuple[dict, ...])
+        """
+        # cache lookup
+        if self.collate:
+            if self.cache[0] is not None and idx in self.cache[0]:
+                return self.cache[0][idx], self.cache[1][idx]
+        elif self.cache[0] is not None and idx * len(self.frame) in self.cache[0]:
+            idcs_across = range(idx * len(self.frame), (idx + 1) * len(self.frame))
+            return (
+                tuple(self.cache[0][i] for i in idcs_across),
+                tuple(self.cache[1][i] for i in idcs_across),
+            )
+
+        # create index map if necessary
         if not hasattr(self, "index"):
             self.make_index(dim=self.dim, scheme=self.scheme, collate=self.collate)
-        if item not in self.index:
-            raise IndexError(f"{item} not found in index.")
+        if idx not in self.index:
+            raise IndexError(f"{idx} not found in index.")
 
+        # use index map to read samples from frame
         samples: tuple[torch.Tensor, ...] = ()
         metadata: tuple[dict, ...] = ()
-        for loc in self.index[item]:
-            # fetch sample
+        for loc in self.index[idx]:
+            # fetch sample(s)
             frame_index, key, attr_key = loc
             sample_arr = self.frame[frame_index][key][frame_index]
             sample = torch.Tensor(sample_arr)
@@ -355,28 +421,25 @@ class HDF5Dataset(Dataset):
             # fetch sample metadata
             info = dict(self.frame[frame_index][attr_key].attrs)
             metadata += (info,)
+
+        # cache samples and metadata
+        if self.cache[0] is not None and self.cache[1] is not None:
+            if self.collate:
+                for i, sample in enumerate(samples):
+                    self.cache[0][idx + i] = sample
+                    self.cache[1][idx + i] = metadata[i]
+            else:
+                for i, sample in enumerate(samples):
+                    self.cache[0][idx * len(self.frame) + i] = sample
+                    self.cache[1][idx * len(self.frame) + i] = metadata[i]
+
         if len(samples) > 1:
             return samples, metadata
         else:
             return samples[0], metadata[0]
 
-    def cache_push(self, index):
-        """Fetch an index and cache it."""
-        # TODO
-        pass
-
-
-
-if __name__ == "__main__":
-    from chuchichaestli.data.cache import estimate_byte_size, nbytes
-    data_dir = Path(__file__).parents[3] / "data"
-    file_key = "240818_tng50-1_dm_50_*"
-    ds = HDF5Dataset(data_dir, file_key, meta_groups="**/metadata/*")
-    print(len(ds.frame))
-    sizes = []
-    for i in range(10): # range(len(ds)):
-        metadata = ds[i][1]
-        sizes.append(estimate_byte_size(metadata))
-        if i % 250 == 0:
-            print(sizes[-1])
-    print(nbytes(650) * 12000 * 6)
+    def purge_cache(self):
+        """Purge cache."""
+        for c in self.cache:
+            if c is not None:
+                c.clear_allocation()
