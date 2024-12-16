@@ -1,4 +1,4 @@
-"""Attention mechanism implementations.
+"""Various utility functions for chuchichaestli.
 
 This file is part of Chuchichaestli.
 
@@ -18,14 +18,17 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from chuchichaestli.models.attention.self_attention import SelfAttention
-from chuchichaestli.models.attention.conv_attention import ConvAttention
-from chuchichaestli.models.attention.attention_gate import AttentionGate
+import sys
+from functools import partialmethod
 
-ATTENTION_MAP = {
-    "self_attention": SelfAttention,
-    "conv_attention": ConvAttention,
-    "attention_gate": AttentionGate,
-}
 
-__all__ = ["ATTENTION_MAP"]
+def partialclass(name: str, cls: type[object], *args, **kwargs):
+    """Partial for __init__ class constructors."""
+    part_cls = type(
+        name, (cls,), {"__init__": partialmethod(cls.__init__, *args, **kwargs)}
+    )
+    try:
+        part_cls.__module__ = sys._getframe(1).f_globals.get("__name__", "__main__")
+    except (AttributeError, ValueError):
+        pass
+    return part_cls

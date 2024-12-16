@@ -31,6 +31,7 @@ class Norm(nn.Module):
     def __init__(self, dimensions: int, norm_type: str, channels: int, num_groups: int):
         """Initialize the normalization layer."""
         super().__init__()
+        self.norm: nn.Module
         match norm_type:
             case "group":
                 self.norm = nn.GroupNorm(num_groups, channels)
@@ -47,7 +48,7 @@ class Norm(nn.Module):
             case "batch" if dimensions == 3:
                 self.norm = nn.BatchNorm3d(channels)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         """Forward pass through the normalization layer."""
         return self.norm(x)
 

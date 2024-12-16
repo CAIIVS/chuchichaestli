@@ -1,4 +1,4 @@
-"""Tests for the attention module.
+"""Tests for the conv_attention module.
 
 This file is part of Chuchichaestli.
 
@@ -20,21 +20,19 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 
 import pytest
 import torch
-from chuchichaestli.models.attention.self_attention import SelfAttention
+from chuchichaestli.models.attention.conv_attention import ConvAttention
 
 
 @pytest.mark.parametrize("dimensions", [1, 2, 3])
-def test_self_attention_1d(dimensions):
-    """Test the SelfAttention1D module."""
-    # Create an instance of SelfAttention1D
-    n_channels = 64
-    n_heads = 4
-    head_dim = 32
-    attention = SelfAttention(n_channels, n_heads, head_dim)
+def test_conv_attention_forward(dimensions):
+    """Test the ConvAttention module."""
+    # Create an instance of ConvAttention
+    n_channels = 32
+    attention = ConvAttention(dimensions, n_channels)
 
     # Create a random input tensor
-    batch_size = 8
-    shape = (batch_size, n_channels) + (64,) * dimensions
+    batch_size = 2
+    shape = (batch_size, n_channels) + (32,) * dimensions
     x = torch.randn(shape)
 
     # Perform forward pass
@@ -53,11 +51,11 @@ def test_self_attention_1d(dimensions):
     assert not torch.isnan(output).any()
 
 
-@pytest.mark.parametrize("dimensions,n_channels,img_wh", [(2, 512, 128), (2, 64, 128), (2, 32, 512)])
-def test_self_attention_different_sizes(dimensions, n_channels, img_wh):
-    """Test the SelfAttention module."""
-    # Create an instance of Attention
-    attention = SelfAttention(n_channels, n_heads=1)
+@pytest.mark.parametrize("dimensions,n_channels,img_wh", [(2, 32, 256), (2, 64, 128), (2, 512, 128)])
+def test_conv_attention_different_sizes(dimensions, n_channels, img_wh):
+    """Test the ConvAttention module."""
+    # Create an instance of ConvAttention
+    attention = ConvAttention(dimensions, n_channels)
 
     # Create a random input tensor
     batch_size = 2

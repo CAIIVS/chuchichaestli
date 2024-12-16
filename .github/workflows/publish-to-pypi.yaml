@@ -3,7 +3,6 @@
 
 name: Release 🐍 📦 on PyPI
 
-
 on:
   push:
     paths-ignore:
@@ -23,12 +22,13 @@ jobs:
         python-version: "3.x"
     - name: Install pypa/build
       run: |
-        python3 -m pip install build --user
+        python -m pip install --upgrade pip
+        python -m pip install build --user
     - name: Build a binary wheel and a source tarball
       run: |
-        python3 -m build
+        python -m build
     - name: Store the distribution packages
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -48,7 +48,7 @@ jobs:
 
     steps:
     - name: Download 📦
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -58,7 +58,7 @@ jobs:
 
   github-release:
     name: |
-      Sign the 🐍 📦 with Sigstore and upload them to GitHub Release
+      Upload GitHub Release signed with Sigstore
     needs:
     - publish-to-pypi
     runs-on: ubuntu-latest
@@ -69,20 +69,20 @@ jobs:
 
     steps:
     - name: Download 📦
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
     - name: Sign 📦 with Sigstore
-      uses: sigstore/gh-action-sigstore-python@v2.1.1
+      uses: sigstore/gh-action-sigstore-python@v3.0.0
       with:
-        inputs: |-
+        inputs: >-
           ./dist/*.tar.gz
           ./dist/*.whl
     - name: Create GitHub Release
       env:
         GITHUB_TOKEN: ${{ github.token }}
-      run: |-
+      run: >-
         gh release create '${{ github.ref_name }}'
         --repo '${{ github.repository }}'
         --notes ""
@@ -92,7 +92,7 @@ jobs:
       # Upload to GitHub Release using the `gh` CLI.
       # `dist/` contains the built packages, and the
       # sigstore-produced signatures and certificates.
-      run: |-
+      run: >-
         gh release upload '${{ github.ref_name }}' dist/**
         --repo '${{ github.repository }}'
 
@@ -113,7 +113,7 @@ jobs:
 
     steps:
     - name: Download 📦
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -132,6 +132,7 @@ jobs:
 
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
     - uses: actions/checkout@v4
@@ -145,14 +146,15 @@ jobs:
     - uses: actions/checkout@v4
       if: github.event_name == 'push'
       with:
+        ref: ${{ github.head_ref }}
         fetch-depth: 0
     - name: Install hatch
       run: |
         python3 -m pip install hatch --user
     - name: Bump version
       run: |
-        git config --global user.name 'github-actions[bot]'
-        git config --global user.email 'github-actions[bot]@chuchichaestli.dev'
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@chuchichaestli.dev"
         VERSION=`hatch version`
         hatch version dev
         NEW_VERSION=`hatch version`
@@ -164,7 +166,6 @@ jobs:
         github_token: ${{ secrets.READ_WRITE_PAT }}
         branch: ${{ github.ref }}
 
-
   version-bump-release:
     name: Release version bump ⬆️
     # Only run this job on the master branch
@@ -175,6 +176,7 @@ jobs:
 
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
     - uses: actions/checkout@v4
@@ -188,6 +190,8 @@ jobs:
       if: github.event_name == 'push'
       with:
         fetch-depth: 0
+        persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
+        token: ${{ secrets.READ_WRITE_PAT }}
     - name: Install hatch
       run: |
         python3 -m pip install hatch --user

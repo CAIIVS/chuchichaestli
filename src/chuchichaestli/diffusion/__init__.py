@@ -1,4 +1,4 @@
-"""Attention mechanism implementations.
+"""Diffusion schedulers sub-module.
 
 This file is part of Chuchichaestli.
 
@@ -18,14 +18,6 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from chuchichaestli.models.attention.self_attention import SelfAttention
-from chuchichaestli.models.attention.conv_attention import ConvAttention
-from chuchichaestli.models.attention.attention_gate import AttentionGate
+from chuchichaestli.diffusion.ddpm import DDPM, InDI, PriorGrad, CFGDDPM, BBDM, DDIM
 
-ATTENTION_MAP = {
-    "self_attention": SelfAttention,
-    "conv_attention": ConvAttention,
-    "attention_gate": AttentionGate,
-}
-
-__all__ = ["ATTENTION_MAP"]
+__all__ = ["DDPM", "InDI", "PriorGrad", "CFGDDPM", "BBDM", "DDIM"]

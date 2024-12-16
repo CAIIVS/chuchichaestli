@@ -18,13 +18,19 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
+from functools import partial
 from torch import nn
+from collections.abc import Callable
 
 
-ACTIVATION_FUNCTIONS = {
+ACTIVATION_FUNCTIONS: dict[str, Callable] = {
     "swish": nn.SiLU,
     "silu": nn.SiLU,
     "mish": nn.Mish,
     "gelu": nn.GELU,
     "relu": nn.ReLU,
+    "prelu": nn.PReLU,
+    "leakyrelu": nn.LeakyReLU,
+    "leakyrelu,0.1": partial(nn.LeakyReLU, negative_slope=0.1),
+    "leakyrelu,0.2": partial(nn.LeakyReLU, negative_slope=0.2),
 }
