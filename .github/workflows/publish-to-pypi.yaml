@@ -136,6 +136,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      # Only run this job on pull requests
+      if: github.ref != 'refs/heads/master'
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.ref }}
+        persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
+        token: ${{ secrets.READ_WRITE_PAT }}
+    - uses: actions/checkout@v4
+      if: github.event_name == 'push'
       with:
         ref: ${{ github.head_ref }}
         fetch-depth: 0
@@ -154,8 +163,8 @@ jobs:
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
-        branch: ${{ github.head_ref }}
-        force_with_lease: true
+        github_token: ${{ secrets.READ_WRITE_PAT }}
+        branch: ${{ github.ref }}
 
   version-bump-release:
     name: Release version bump ⬆️
@@ -174,7 +183,7 @@ jobs:
       if: github.event_name == 'pull_request'
       with:
         fetch-depth: 0
-        ref: ${{ github.head_ref }}
+        ref: ${{ github.event.pull_request.head.ref }}
         persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN.
         token: ${{ secrets.READ_WRITE_PAT }}
     - uses: actions/checkout@v4
@@ -199,12 +208,4 @@ jobs:
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{ secrets.READ_WRITE_PAT }}
-        branch: main
-    # - name: Create Pull Request
-    #   uses: peter-evans/create-pull-request@v7
-    #   with:
-    #     branch: version-bump
-    #     title: 'Release Version Bump'
-    #     body: 'Automated version bump for release'
-    #     base: main
-    #     head: version-bump
+        branch: ${{ github.event.pull_request.head.ref }}
