@@ -1,0 +1,54 @@
+# This worflow publishes the 🐍 Python package 📦 distribution to PyPI or TestPyPI
+# For more information see:
+# https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
+# Note:
+# This workflow requires a token from PyPI/TestPyPI. It should be stored as 'pypi_token' secret.
+
+name: Publish 🐍📦 to PyPI
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: "Artifact name of the distribution package"
+        type: string
+        default: "package-dist"
+        required: false
+      test:
+        description: "Publish to TestPyPI instead"
+        type: boolean
+        default: false
+        required: false
+      verbose:
+        description: "Verbosity for publishing"
+        type: boolean
+        default: false
+        required: false
+
+jobs:
+  publish-to-pypi:
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: ${{ inputs.test && 'testpypi' || 'pypi' }}
+      url: ${{ inputs.test && format('{0}/{1}', 'https://test.pypi.org/p', github.event.repository.name) || format('{0}/{1}', 'https://pypi.org/p', github.event.repository.name) }}
+
+    # permissions:
+    #   id-token: write
+
+    steps:
+      - name: Download 🗃️
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist/
+
+      - name: Publish 🐍📦 to ${{ inputs.test && 'TestPyPI' || 'PyPI' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ inputs.test && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
+          password: ${{ secrets.pypi_token }}
+          attestations: 'false'
+          skip-existing: 'true'
+          verbose: ${{ inputs.verbose }}

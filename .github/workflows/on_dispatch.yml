@@ -1,0 +1,35 @@
+# Workflow that triggers on dispatch
+# Run this workflow by triggering it on the web or on CLI as follows:
+# $ gh workflow run on-dispatch.yml -f type=minor
+
+name: Dispatch version bump workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      type:
+        description: "Version bump type"
+        type: choice
+        options: ['major', 'minor', 'micro']
+        default: 'minor'
+
+jobs:
+  version-bump:
+    name: Version bump ⬆️
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          token: ${{ secrets.READ_WRITE_PAT }}
+      - name: Hatch version bump ⬆️
+        uses: phdenzel/hatch-bump@v2
+        with:
+          type: ${{ inputs.type }}
+          ref: ${{ github.ref_name }}
+          github-token: ${{ secrets.READ_WRITE_PAT }}
+          tag: true
+          force: true
