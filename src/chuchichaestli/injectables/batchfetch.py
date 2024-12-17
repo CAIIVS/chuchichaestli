@@ -7,9 +7,10 @@ from chuchichaestli.injectables.typedefs import Fetch
 # base class
 # --------------------------------------------------------------------------------------
 class Identity(Fetch):
-    """A fatch class that returns the input as is, without any modifications."""
+    """A fetch class that returns the input as is, without any modifications."""
 
     def __call__(self, input: Any) -> Any:
+        """Apply fetch."""
         return input
 
 
@@ -17,22 +18,29 @@ class Identity(Fetch):
 # dictionary classes
 # --------------------------------------------------------------------------------------
 class ExtractD(Fetch):
-    """A fatch class that extracts a specific key from the input dictionary and
-    returns the corresponding value.
+    """Extract dictionary.
+
+    A fetch class that extracts specific key(s) from the input dictionary and
+    returns the corresponding value(s).
 
     Attributes:
-        key (str): The key to be extracted from the input dictionary.
+        keys (str | Sequence[str]): The keys to be extracted from the input dictionary.
     """
 
-    def __init__(self, key: str):
-        self.key = key
+    def __init__(self, keys: str | Sequence[str]):
+        self.keys = [keys] if isinstance(keys, str) else keys
 
-    def __call__(self, input: dict[str, Tensor]) -> Tensor:
-        return input[self.key]
+    def __call__(self, input: dict[str, Tensor]) -> Tensor | list[Tensor]:
+        """Apply fetch."""
+        if len(self.keys) == 1:
+            return input[self.keys[0]]
+        return [input[key] for key in self.keys]
 
 
 class SubsetD(Fetch):
-    """A fatch class that extracts keys from the input dictionary and returns a new
+    """Subset dictionary.
+
+    A fetch class that extracts keys from the input dictionary and returns a new
     dictionary with the corresponding values.
 
     Attributes:
@@ -43,6 +51,7 @@ class SubsetD(Fetch):
         self.keys = [keys] if isinstance(keys, str) else keys
 
     def __call__(self, input: dict[str, Tensor]) -> dict[str, Tensor]:
+        """Apply fetch."""
         return {key: input[key] for key in self.keys}
 
 
@@ -51,22 +60,29 @@ class SubsetD(Fetch):
 # --------------------------------------------------------------------------------------
 
 class ExtractS(Fetch):
-    """A fatch class that extracts a specific index from the input sequence and
-    returns the corresponding value.
+    """Extract sequence.
+
+    A fetch class that extracts specific index(es) from the input sequence and
+    returns the corresponding value(s).
 
     Attributes:
-        idx (int): The index to be extracted from the input dictionary.
+        idxs (int | List[int]): The index(es) to be extracted from the input sequence.
     """
 
-    def __init__(self, idx: int):
-        self.idx = idx
+    def __init__(self, idxs: int | list[int]):
+        self.idxs = [idxs] if isinstance(idxs, int) else idxs
 
-    def __call__(self, input: Sequence[Tensor]) -> Tensor:
-        return input[self.idx]
+    def __call__(self, input: Sequence[Tensor]) -> Tensor | list[Tensor]:
+        """Apply fetch."""
+        if len(self.idxs) == 1:
+            return input[self.idxs[0]]
+        return [input[idx] for idx in self.idxs]
 
 
 class SubsetS(Fetch):
-    """A fatch class that extracts indexes from the input sequence and returns a new
+    """Subset sequence.
+
+    A fetch class that extracts indexes from the input sequence and returns a new
     sequence with the corresponding values.
 
     Attributes:
@@ -77,4 +93,5 @@ class SubsetS(Fetch):
         self.idxs = [idxs] if isinstance(idxs, int) else idxs
 
     def __call__(self, input: Sequence[Tensor]) -> Sequence[Tensor]:
+        """Apply fetch."""
         return [input[idx] for idx in self.idxs]
