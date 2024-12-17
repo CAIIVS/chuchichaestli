@@ -59,34 +59,34 @@ class CondBase(L.LightningModule):
         return output
 
     def training_step(self, batch, batch_idx: int) -> STEP_OUTPUT:
-        inputs = self.train_fetch(batch)
+        cond, target = self.train_fetch(batch)
 
         # sample noise, timesteps
-        x_t, noise, timesteps = self.scheduler.noise_step(inputs)
+        x_t, noise, timesteps = self.scheduler.noise_step(target)
 
         # predict noise
-        output = self.forward({"x": x_t, "t": timesteps})
+        output = self.forward({"x": torch.cat((x_t, cond), dim=1), "t": timesteps})
 
         # compute loss
         loss = self.valid_loss(output, noise)
         return STEP_OUTPUT(
             loss=loss,
-            inputs=inputs,
+            inputs=cond,
             output=output,
             target=noise,
         )
 
     def validation_step(self, batch, batch_idx: int, dataloader_idx=0) -> STEP_OUTPUT:
-        inputs, target = self.valid_fetch(batch)
+        cond, target = self.valid_fetch(batch)
 
         # generate sample
-        output = self.predict_step(target)
+        output = self.predict_step(cond)
 
         # compute loss
         loss = self.valid_loss(output, target)
         return STEP_OUTPUT(
             loss=loss,
-            inputs=inputs,
+            inputs=cond,
             output=output,
             target=target,
         )
