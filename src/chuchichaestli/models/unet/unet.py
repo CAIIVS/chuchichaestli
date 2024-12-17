@@ -43,7 +43,7 @@ from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
 )
 from chuchichaestli.models.upsampling import Upsample
-from chuchichaestli.models.resnet import Norm
+from chuchichaestli.models.norm import Norm
 
 
 BLOCK_MAP = {

@@ -1,0 +1,65 @@
+# This worflow uploads 🚀 a GitHub release 🔖 from stored artifact dists 🗃️ signed with Sigstore 📄
+# For more information see:
+# https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
+
+name: Upload GitHub release 🚀
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: "Artifact name of the distribution package"
+        type: string
+        default: "package-dist"
+        required: false
+      tag:
+        description: "Get latest tag"
+        type: string
+        default: ""
+        required: false
+
+jobs:
+  github-release:
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # IMPORTANT: mandatory for making GitHub Releases
+      id-token: write  # IMPORTANT: mandatory for sigstore
+
+    steps:
+      - name: Download 🗃️
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist/
+
+      - name: Sign 📦 with 📄
+        uses: sigstore/gh-action-sigstore-python@v3.0.0
+        with:
+          inputs: >-
+            ./dist/*.tar.gz
+            ./dist/*.whl
+
+      - name: Fetch release tag 🔖
+        env:
+          GH_TOKEN: ${{ secrets.READ_WRITE_PAT }}
+        run: >-
+          [ -n '${{ inputs.tag }}' ]
+          && echo "RELEASE_TAG=${{ inputs.tag }}" >> $GITHUB_ENV
+          || echo "RELEASE_TAG=$(gh api repos/${{ github.repository }}/tags --jq '.[0].name')" >> $GITHUB_ENV
+
+      - name: Create GitHub Release ✨
+        env:
+          GH_TOKEN: ${{ secrets.READ_WRITE_PAT }}
+        run: >-
+          gh release create ${{ env.RELEASE_TAG }}
+          --repo '${{ github.repository }}'
+          --notes ""
+
+      - name: 🚀 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.READ_WRITE_PAT }}
+        run: >-
+          gh release upload ${{ env.RELEASE_TAG }}
+          dist/**
+          --repo '${{ github.repository }}'
