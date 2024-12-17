@@ -23,34 +23,7 @@ from torch import nn
 
 from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
-
-
-class Norm(nn.Module):
-    """Normalization layer implementation."""
-
-    def __init__(self, dimensions: int, norm_type: str, channels: int, num_groups: int):
-        """Initialize the normalization layer."""
-        super().__init__()
-        self.norm: nn.Module
-        match norm_type:
-            case "group":
-                self.norm = nn.GroupNorm(num_groups, channels)
-            case "instance" if dimensions == 1:
-                self.norm = nn.InstanceNorm1d(channels)
-            case "instance" if dimensions == 2:
-                self.norm = nn.InstanceNorm2d(channels)
-            case "instance" if dimensions == 3:
-                self.norm = nn.InstanceNorm3d(channels)
-            case "batch" if dimensions == 1:
-                self.norm = nn.BatchNorm1d(channels)
-            case "batch" if dimensions == 2:
-                self.norm = nn.BatchNorm2d(channels)
-            case "batch" if dimensions == 3:
-                self.norm = nn.BatchNorm3d(channels)
-
-    def forward(self, x: torch.Tensor):
-        """Forward pass through the normalization layer."""
-        return self.norm(x)
+from chuchichaestli.models.norm import Norm
 
 
 class ResidualBlock(nn.Module):
