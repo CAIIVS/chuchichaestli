@@ -1,10 +1,13 @@
-# From https://github.com/stanis-morozov/self-supervised-gan-eval/blob/main/src/self_supervised_gan_eval/resnet50.py
-# Copyright (c) Facebook, Inc. and its affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
+"""ResNet backbone implementation.
+
+From https://github.com/stanis-morozov/self-supervised-gan-eval/blob/main/src/self_supervised_gan_eval/resnet50.py
+
+Copyright (c) Facebook, Inc. and its affiliates.
+All rights reserved.
+
+This source code is licensed under the license found in the
+LICENSE file in the root directory of this source tree.
+"""
 
 import torch
 import torch.nn as nn

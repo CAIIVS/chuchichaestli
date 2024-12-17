@@ -1,6 +1,7 @@
 import pytest
 import torch
 from torch.nn import Module
+from chuchichaestli.debug.memory_usage import CudaMemoryStatsVisitor, MPSMemoryAllocationVisitor
 from chuchichaestli.metrics.frechet_distance import FrechetDistance
 
 
@@ -13,7 +14,7 @@ from chuchichaestli.metrics.frechet_distance import FrechetDistance
         ("dinov2", 1024),
     ],
 )
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
+@pytest.mark.skipif(not CudaMemoryStatsVisitor.has_cuda(), reason="GPU not available")
 def test_2D_same_input(model_name, num_features):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     metric = FrechetDistance(model_name, device, num_features=num_features).to(device)
@@ -39,7 +40,7 @@ def test_2D_same_input(model_name, num_features):
         ("dinov2", 1024),
     ],
 )
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
+@pytest.mark.skipif(not CudaMemoryStatsVisitor.has_cuda(), reason="GPU not available")
 def test_3D_same_input(model_name, num_features):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     metric = FrechetDistance(model_name, device, num_features=num_features).to(device)
@@ -68,7 +69,7 @@ def test_3D_same_input(model_name, num_features):
         ("dinov2", 1024),
     ],
 )
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
+@pytest.mark.skipif(not CudaMemoryStatsVisitor.has_cuda(), reason="GPU not available")
 def test_2D_same_input_vs_different(model_name, num_features):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     metric = FrechetDistance(model_name, device, num_features=num_features).to(device)
@@ -98,7 +99,7 @@ def test_2D_same_input_vs_different(model_name, num_features):
         ("dinov2", 1024),
     ],
 )
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
+@pytest.mark.skipif(not CudaMemoryStatsVisitor.has_cuda(), reason="GPU not available")
 def test_3D_same_input_vs_different(model_name, num_features):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     metric = FrechetDistance(model_name, device, num_features=num_features).to(device)

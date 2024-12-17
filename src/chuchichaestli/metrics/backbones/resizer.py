@@ -1,3 +1,5 @@
+"""Resize image utility."""
+
 from PIL import Image
 import numpy as np
 from torchvision.transforms.functional import to_tensor

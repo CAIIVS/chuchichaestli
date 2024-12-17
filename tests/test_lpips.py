@@ -1,6 +1,7 @@
 import pytest
 import torch
 from torch.nn import Module
+from chuchichaestli.debug.memory_usage import CudaMemoryStatsVisitor, MPSMemoryAllocationVisitor
 from chuchichaestli.metrics.lpips import LearnedPerceptualImagePatchSimilarity as LPIPS
 
 
@@ -11,7 +12,7 @@ from chuchichaestli.metrics.lpips import LearnedPerceptualImagePatchSimilarity a
         "alex",
     ],
 )
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
+@pytest.mark.skipif(not CudaMemoryStatsVisitor.has_cuda() and not MPSMemoryAllocationVisitor.has_mps(), reason="GPU not available")
 def test_2D_same_input(model_name):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     metric = LPIPS(net_type=model_name).to(device)
@@ -31,7 +32,7 @@ def test_2D_same_input(model_name):
         "alex",
     ],
 )
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
+@pytest.mark.skipif(not CudaMemoryStatsVisitor.has_cuda() and not MPSMemoryAllocationVisitor.has_mps(), reason="GPU not available")
 def test_3D_same_input(model_name):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     metric = LPIPS(net_type=model_name).to(device)
@@ -51,7 +52,7 @@ def test_3D_same_input(model_name):
         "alex",
     ],
 )
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
+@pytest.mark.skipif(not CudaMemoryStatsVisitor.has_cuda() and not MPSMemoryAllocationVisitor.has_mps(), reason="GPU not available")
 def test_2D_same_input_vs_different(model_name):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     metric = LPIPS(net_type=model_name).to(device)
@@ -80,7 +81,7 @@ def test_2D_same_input_vs_different(model_name):
         "alex",
     ],
 )
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
+@pytest.mark.skipif(not CudaMemoryStatsVisitor.has_cuda() and not MPSMemoryAllocationVisitor.has_mps(), reason="GPU not available")
 def test_3D_same_input_vs_different(model_name):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     metric = LPIPS(net_type=model_name).to(device)

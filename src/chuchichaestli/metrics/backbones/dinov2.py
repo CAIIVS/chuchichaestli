@@ -1,13 +1,16 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
+"""Copyright (c) Meta Platforms, Inc. and affiliates.
 
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# timm: https://github.com/rwightman/pytorch-image-models/tree/master/timm
-# DeiT: https://github.com/facebookresearch/deit
-# --------------------------------------------------------
+All rights reserved.
+
+This source code is licensed under the license found in the
+LICENSE file in the root directory of this source tree.
+--------------------------------------------------------
+
+References:
+timm: https://github.com/rwightman/pytorch-image-models/tree/master/timm
+DeiT: https://github.com/facebookresearch/deit
+--------------------------------------------------------
+"""
 
 import torchvision.transforms as TF
 import numpy as np
@@ -47,7 +50,6 @@ class DINOv2Encoder(Encoder):
         self.clean_resize = clean_resize
 
     def transform(self, image):
-
         imagenet_mean = np.array([0.485, 0.456, 0.406])
         imagenet_std = np.array([0.229, 0.224, 0.225])
 

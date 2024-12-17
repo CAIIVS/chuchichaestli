@@ -1,6 +1,8 @@
+"""CLIP encoder model."""
+
 import torch
 import open_clip
-from torchvision.transforms import Normalize, InterpolationMode
+from torchvision.transforms import Normalize
 import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint

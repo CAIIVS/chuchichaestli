@@ -1,3 +1,5 @@
+"""Load various (pretrained) encoders."""
+
 import inspect
 
 from chuchichaestli.metrics.backbones.backbone_encoder import Encoder
