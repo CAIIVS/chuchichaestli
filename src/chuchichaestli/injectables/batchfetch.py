@@ -1,13 +1,13 @@
 from typing import Any, Sequence
 from torch import Tensor
 
-from chuchichaestli.injectables.typedefs import Fätch
+from chuchichaestli.injectables.typedefs import Fetch
 
 # --------------------------------------------------------------------------------------
 # base class
 # --------------------------------------------------------------------------------------
-class Identity(Fätch):
-    """A fätch class that returns the input as is, without any modifications."""
+class Identity(Fetch):
+    """A fatch class that returns the input as is, without any modifications."""
 
     def __call__(self, input: Any) -> Any:
         return input
@@ -16,8 +16,8 @@ class Identity(Fätch):
 # --------------------------------------------------------------------------------------
 # dictionary classes
 # --------------------------------------------------------------------------------------
-class ExtractD(Fätch):
-    """A fätch class that extracts a specific key from the input dictionary and
+class ExtractD(Fetch):
+    """A fatch class that extracts a specific key from the input dictionary and
     returns the corresponding value.
 
     Attributes:
@@ -31,8 +31,8 @@ class ExtractD(Fätch):
         return input[self.key]
 
 
-class SubsetD(Fätch):
-    """A fätch class that extracts keys from the input dictionary and returns a new
+class SubsetD(Fetch):
+    """A fatch class that extracts keys from the input dictionary and returns a new
     dictionary with the corresponding values.
 
     Attributes:
@@ -50,8 +50,8 @@ class SubsetD(Fätch):
 # index classes
 # --------------------------------------------------------------------------------------
 
-class ExtractS(Fätch):
-    """A fätch class that extracts a specific index from the input sequence and
+class ExtractS(Fetch):
+    """A fatch class that extracts a specific index from the input sequence and
     returns the corresponding value.
 
     Attributes:
@@ -65,8 +65,8 @@ class ExtractS(Fätch):
         return input[self.idx]
 
 
-class SubsetS(Fätch):
-    """A fätch class that extracts indexes from the input sequence and returns a new
+class SubsetS(Fetch):
+    """A fatch class that extracts indexes from the input sequence and returns a new
     sequence with the corresponding values.
 
     Attributes:

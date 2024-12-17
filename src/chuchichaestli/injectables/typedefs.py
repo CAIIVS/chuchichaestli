@@ -24,6 +24,6 @@ class STEP_OUTPUT(TypedDict):
 # protocols
 # --------------------------------------------------------------------------------------
 
-class Fätch(Protocol):
+class Fetch(Protocol):
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         ...

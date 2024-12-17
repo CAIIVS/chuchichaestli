@@ -22,8 +22,8 @@ import torch
 from torch import Tensor
 from chuchichaestli.diffusion.ddpm.base import DiffusionProcess
 from chuchichaestli.injectables.typedefs import STEP_OUTPUT
-from chuchichaestli.injectables.typedefs import Fätch
-from chuchichaestli.injectables.bätchfätch import Identity
+from chuchichaestli.injectables.typedefs import Fetch
+from chuchichaestli.injectables.batchfetch import Identity
 
 import torch.nn as nn
 import lightning as L
@@ -40,16 +40,16 @@ class CondBase(L.LightningModule):
         scheduler: DiffusionProcess,
         train_loss: nn.modules.loss._Loss,
         valid_loss: nn.modules.loss._Loss | None = None,
-        train_fätch: Fätch | None = None,
-        valid_fätch: Fätch | None = None,
+        train_fetch: Fetch | None = None,
+        valid_fetch: Fetch | None = None,
     ):
         super().__init__()
         self.model = model
         self.scheduler = scheduler
         self.valid_loss = train_loss
         self.valid_loss = valid_loss or train_loss
-        self.train_fätch = train_fätch or Identity()
-        self.valid_fätch = valid_fätch or Identity()
+        self.train_fetch = train_fetch or Identity()
+        self.valid_fetch = valid_fetch or Identity()
 
     def forward(self, inputs) -> Tensor:
         if isinstance(inputs, dict):
@@ -59,7 +59,7 @@ class CondBase(L.LightningModule):
         return output
 
     def training_step(self, batch, batch_idx: int) -> STEP_OUTPUT:
-        inputs = self.train_fätch(batch)
+        inputs = self.train_fetch(batch)
 
         # sample noise, timesteps
         x_t, noise, timesteps = self.scheduler.noise_step(inputs)
@@ -77,7 +77,7 @@ class CondBase(L.LightningModule):
         )
 
     def validation_step(self, batch, batch_idx: int, dataloader_idx=0) -> STEP_OUTPUT:
-        inputs, target = self.valid_fätch(batch)
+        inputs, target = self.valid_fetch(batch)
 
         # generate sample
         output = self.predict_step(target)
