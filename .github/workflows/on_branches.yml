@@ -1,0 +1,35 @@
+# Workflow that triggers when commits are pushed to a non-default branch, but aren't in a PR
+
+name: Branch workflow
+
+on:
+  push:
+    branches-ignore: [main]
+    paths-ignore: ["**/__about__.py"]
+
+jobs:
+  in-pr-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: insurgent-lab/is-in-pr-action@v0.2.0
+        id: isInPR
+    outputs:
+      result: ${{ steps.isInPR.outputs.result }}
+
+  test-install-python-version:
+    name: Test install on 🐍
+    needs: in-pr-check
+    if: ${{ needs.in-pr-check.outputs.result == 'false' }}
+    uses: ./.github/workflows/test-install.yml
+    with:
+      versions: '["3.10", "3.11", "3.12"]'
+      lint: true
+      pytest: true
+      artifact-name: "pytest-results"
+
+  build-package:
+    name: Build distribution 📦
+    needs: test-install-python-version
+    uses: ./.github/workflows/build-package.yml
+    with:
+      artifact-name: "package-dist"

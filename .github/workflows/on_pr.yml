@@ -1,0 +1,56 @@
+# Workflow that triggers when commits are pushed to an unmerged PR
+
+name: PR workflow
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+    paths-ignore: ["**/__about__.py"]
+
+jobs:
+  test-install-python-version:
+    name: Test install on 🐍
+    uses: ./.github/workflows/test-install.yml
+    with:
+      versions: '["3.10", "3.11", "3.12"]'
+      lint: true
+      pytest: true
+      artifact-name: "pytest-results"
+
+  build-package:
+    name: Build distribution 📦
+    needs: test-install-python-version
+    uses: ./.github/workflows/build-package.yml
+    with:
+      artifact-name: "package-dist"
+
+  publish-to-testpypi:
+    name: Publish 🐍📦 to PyPI
+    needs: build-package
+    if: ${{ github.event.pull_request.merged == false }}
+    secrets: inherit
+    uses: ./.github/workflows/publish-to-pypi.yml
+    with:
+      test: true
+      artifact-name: "package-dist"
+
+  version-bump-dev:
+    name: Version bump ↗️ (dev)
+    needs: publish-to-testpypi
+    if: ${{ github.event.pull_request.merged == false }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Hatch version bump ↗️
+        uses: phdenzel/hatch-bump@v2
+        with:
+          type: "dev"
+          ref: ${{ github.head_ref }}
+          tag: false
+          force: false
