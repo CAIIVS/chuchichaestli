@@ -1,0 +1,45 @@
+# Workflow that triggers when commits are pushed to main upon version change
+
+name: Main version change workflow
+
+on:
+  push:
+    branches: [main]
+    paths: ["**/__about__.py"]
+
+jobs:
+  test-install-python-version:
+    name: Test install on 🐍
+    if: ${{ startsWith(github.event.head_commit.message, 'Bump') || startsWith(github.event.head_commit.message, 'bump') }}
+    uses: ./.github/workflows/test-install.yml
+    with:
+      versions: '["3.10", "3.11", "3.12"]'
+      lint: true
+      pytest: true
+      artifact-name: "pytest-results"
+
+  build-package:
+    name: Build distribution 📦
+    needs: test-install-python-version
+    uses: ./.github/workflows/build-package.yml
+    with:
+      artifact-name: "package-dist"
+
+  publish-to-pypi:
+    name: Publish 🐍📦 to PyPI
+    needs: build-package
+    secrets: inherit
+    uses: ./.github/workflows/publish-to-pypi.yml
+    with:
+      artifact-name: "package-dist"
+
+  github-release:
+    name: GitHub release 🚀
+    needs: [build-package, publish-to-pypi]
+    permissions:
+      contents: write
+      id-token: write
+    secrets: inherit
+    uses: ./.github/workflows/github-release.yml
+    with:
+      artifact-name: "package-dist"
