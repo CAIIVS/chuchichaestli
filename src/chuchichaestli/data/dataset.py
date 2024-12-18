@@ -410,7 +410,7 @@ class HDF5Dataset(Dataset):
         for loc in self.index[idx]:
             # fetch sample(s)
             frame_index, key, attr_key = loc
-            sample_arr = self.frame[frame_index][key][frame_index]
+            sample_arr = self.frame[frame_index][key][idx]
             sample = torch.Tensor(sample_arr)
             if len(sample) == 2 or (
                 self.n_channels and sample.shape[0] != self.n_channels
