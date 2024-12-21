@@ -21,7 +21,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 from math import gcd
 import torch
 from torch import nn
-from chuchichaestli.models.resnet import Norm
+from chuchichaestli.models.norm import Norm
 from chuchichaestli.models.resnet import ResidualBlock as ResnetBlock
 from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
 from chuchichaestli.models.attention import ATTENTION_MAP

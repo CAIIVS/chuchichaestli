@@ -1,4 +1,4 @@
-"""UNet model implementation and utilities.
+"""Metrics package for chuchichaestli.
 
 This file is part of Chuchichaestli.
 
@@ -17,7 +17,3 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
-
-from chuchichaestli.models.unet.unet import UNet
-
-__all__ = [UNet]
