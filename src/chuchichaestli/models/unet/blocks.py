@@ -236,5 +236,4 @@ ConvAttnMidBlock = partialclass(
     "ConvAttnMidBlock", MidBlock, attention="conv_attention"
 )
 ConvAttnUpBlock = partialclass("ConvAttnUpBlock", UpBlock, attention="conv_attention")
-AttnUpBlock = partialclass("AttnUpBlock", UpBlock, attention="conv_attention")
 AttnGateUpBlock = partialclass("AttnGateUpBlock", UpBlock, attention="attention_gate")
