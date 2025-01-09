@@ -76,22 +76,37 @@ class InDI(DiffusionProcess):
         )
 
     def noise_step(
-        self, x: torch.Tensor, y: torch.Tensor, *args, **kwargs
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        timesteps: torch.Tensor | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Noise step for the diffusion process.
 
         Args:
             x: High quality sample, tensor of shape (batch_size, *).
             y: Corresponding low quality sample, tensor of shape (batch_size, *).
+            timesteps: Timesteps to sample noise from. If None, timesteps are sampled.
             *args: Additional arguments.
             **kwargs: Additional keyword arguments.
 
         Returns:
             Tuple of the sampled tensor, noise tensor and timesteps.
         """
-        timesteps = self.sample_timesteps(x.shape[0])
+        if timesteps is not None:
+            x = (
+                x.unsqueeze(0)
+                .expand(len(timesteps), *x.shape)
+                .reshape(-1, *x.shape[1:])
+            )
+            timesteps = (
+                timesteps.repeat_interleave(x.shape[0] // len(timesteps)) * self.delta
+            )
+        else:
+            timesteps = self.sample_timesteps(x.shape[0])
         timesteps = timesteps.view(-1, *([1] * (x.dim() - 1)))
-
         x_t = (1 - timesteps) * x + timesteps * y
         # TODO: Verify that this is correct.
         noise = x_t - x

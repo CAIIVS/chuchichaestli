@@ -18,12 +18,13 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-import torch
-from typing import Any
 from collections.abc import Generator
+from typing import Any
 
-from chuchichaestli.diffusion.distributions import NormalDistribution
+import torch
+
 from chuchichaestli.diffusion.ddpm.ddpm import DDPM
+from chuchichaestli.diffusion.distributions import NormalDistribution
 
 
 class PriorGrad(DDPM):
@@ -71,20 +72,34 @@ class PriorGrad(DDPM):
         self.mean = mean
 
     def noise_step(
-        self, x_t: torch.Tensor, condition: torch.Tensor, *args, **kwargs
+        self,
+        x_t: torch.Tensor,
+        condition: torch.Tensor | None = None,
+        timesteps: torch.Tensor | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Noise step for the diffusion process.
 
         Args:
             x_t: Tensor of shape (batch_size, *).
             condition: Tensor of shape (batch_size, *).
+            timesteps: Optional timesteps to sample noise for (will be sampled randomly if None).
             *args: Additional arguments.
             **kwargs: Additional keyword arguments.
 
         Returns:
             Tuple of the sampled tensor, noise tensor and timesteps.
         """
-        timesteps = self.sample_timesteps(x_t.shape[0])
+        if timesteps is not None:
+            x_t = (
+                x_t.unsqueeze(0)
+                .expand(len(timesteps), *x_t.shape)
+                .reshape(-1, *x_t.shape[1:])
+            )
+            timesteps = timesteps.repeat_interleave(x_t.shape[0] // len(timesteps))
+        else:
+            timesteps = self.sample_timesteps(x_t.shape[0])
         noise = self.sample_noise(x_t.shape)
 
         s_shape = [-1] + [1] * (x_t.dim() - 1)
