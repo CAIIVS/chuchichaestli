@@ -156,3 +156,17 @@ def test_seed():
 
     # Check the output shape
     assert output.shape == (2 * 4, 16) + (32,) * 2
+
+
+def test_noise_indices():
+    """Test the noise_step method of the DDPM class."""
+    # Create dummy input tensor
+    input_shape = (4, 16) + (32,) * 2
+    x_t = torch.randn(input_shape)
+
+    # Call the noise_step method
+    ddpm = DDPM(num_timesteps=10, schedule="exponential")
+    output = ddpm.noise_step(x_t, timesteps=torch.tensor([0, 1, 2, 3]))
+
+    # Check the output shape
+    assert output[2].shape[0] == 4 * 4  # 4 timesteps, 4 samples
