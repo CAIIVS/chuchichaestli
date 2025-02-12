@@ -1,6 +1,4 @@
-"""UNet model implementation and utilities.
-
-This file is part of Chuchichaestli.
+"""This file is part of Chuchichaestli.
 
 Chuchichaestli is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -18,6 +16,20 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from chuchichaestli.models.unet.unet import UNet
+from chuchichaestli.metrics.backbones.inception import InceptionEncoder
+from chuchichaestli.metrics.backbones.swav import ResNet50Encoder  # , ResNet18Encoder
+from chuchichaestli.metrics.backbones.clip import CLIPEncoder
+from chuchichaestli.metrics.backbones.dinov2 import DINOv2Encoder
+from chuchichaestli.metrics.backbones.load_backbone_encoder import load_encoder, MODELS
+from chuchichaestli.metrics.backbones.resizer import pil_resize
 
-__all__ = [UNet]
+
+__all__ = [
+    "InceptionEncoder",
+    "ResNet50Encoder",
+    "CLIPEncoder",
+    "DINOv2Encoder",
+    "load_encoder",
+    "MODELS",
+    "pil_resize"
+]
