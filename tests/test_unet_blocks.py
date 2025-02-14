@@ -17,3 +17,41 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
+
+import pytest
+from src.chuchichaestli.models.unet import UNet
+
+@pytest.fixture
+def net_conf():
+    return {
+        "dimensions": 3,
+        "in_channels": 1,
+        "n_channels": 8,
+        "out_channels": 1,
+        "down_block_types": ["DownBlock", "DownBlock", "DownBlock"],
+        "mid_block_type": "MidBlock",
+        "up_block_types": ["UpBlock", "UpBlock", "UpBlock"],
+        "block_out_channel_mults": [2, 2, 2],
+        "num_layers_per_block": 1,
+        "skip_connection_action": "concat",
+        "skip_connection_between_levels": True,
+    }
+
+@pytest.fixture
+def model(net_conf):
+    return UNet(**net_conf)
+
+def count_res_blocks(blocks):
+    return sum(1 for block in blocks if hasattr(block, 'res_block'))
+
+def test_res_blocks(model):
+    """Test the number of residual blocks in the UNet model."""
+    encoder_res_blocks = count_res_blocks(model.down_blocks)
+    decoder_res_blocks = count_res_blocks(model.up_blocks)
+    
+    print(f"Number of res_blocks in encoder: {encoder_res_blocks}")
+    print(f"Number of res_blocks in decoder: {decoder_res_blocks}")
+    
+    # Add your assertions here
+    assert encoder_res_blocks == 3  # Adjust the expected value as needed
+    assert decoder_res_blocks == 3  # Adjust the expected value as needed

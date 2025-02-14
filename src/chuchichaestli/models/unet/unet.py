@@ -239,7 +239,7 @@ class UNet(nn.Module):
 
         for i in reversed(range(n_mults)):
             outs = ins
-            for _ in range(num_layers_per_block):
+            for _ in range(num_layers_per_block - 1):
                 up_block = BLOCK_MAP[up_block_types[i]](
                     dimensions=dimensions,
                     in_channels=ins,
@@ -301,14 +301,18 @@ class UNet(nn.Module):
 
         hh = [x]
 
-        for down_block in self.down_blocks:
+        # Iterate over down_blocks and append skip connections
+        for i, down_block in enumerate(self.down_blocks):
             x = down_block(x, t)
             if isinstance(down_block, GaussianNoiseBlock):
                 continue
-            hh.append(x)
+            # Append skip connection for the last down_block in each layer
+            if (i + 1) % num_blocks_per_layer == 0:
+                hh.append(x)
 
         x = self.mid_block(x, t)
 
+        # Iterate over up_blocks and use skip connections
         for up_block in self.up_blocks:
             if isinstance(up_block, Upsample | GaussianNoiseBlock):
                 x = up_block(x, t)
@@ -318,3 +322,35 @@ class UNet(nn.Module):
 
         x = self.conv_out(self.act(self.norm(x)))
         return x
+
+
+net_conf = {
+    "dimensions": 3,
+    "in_channels": 1,
+    "n_channels": 8,
+    "out_channels": 1,
+    "down_block_types": ["DownBlock", "DownBlock", "DownBlock"],
+    "mid_block_type": "MidBlock",
+    "up_block_types": ["UpBlock", "UpBlock", "UpBlock"],
+    "block_out_channel_mults": [2, 2, 2],
+    "time_embedding": True,
+    "time_channels": 32,
+    "num_layers_per_block": 1,
+    "groups": 1,
+    "act": "relu",
+    "in_kernel_size": 3,
+    "out_kernel_size": 3,
+    "res_groups": 1,
+    "res_act_fn": "relu",
+    "res_dropout": 0.1,
+    "res_norm_type": "batch",
+    "res_kernel_size": 3,
+    "attn_head_dim": 64,
+    "attn_n_heads": 8,
+    "attn_gate_inter_channels": 16,
+    "skip_connection_action": "concat",
+    "skip_connection_between_levels": True,
+}
+
+
+model = UNet(**net_conf)
