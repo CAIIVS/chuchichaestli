@@ -19,7 +19,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 import pytest
-from src.chuchichaestli.models.unet import UNet
+from chuchichaestli.models.unet import UNet
 
 @pytest.fixture
 def net_conf():
