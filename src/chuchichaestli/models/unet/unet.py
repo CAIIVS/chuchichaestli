@@ -211,6 +211,7 @@ class UNet(nn.Module):
             outs = ins * block_out_channel_mults[i]
 
             for _ in range(num_layers_per_block):
+                print(f"{_} down_block layer {i} ins {ins}, outs {outs}")
                 down_block = BLOCK_MAP[down_block_types[i]](
                     dimensions=dimensions,
                     in_channels=ins,
@@ -226,21 +227,26 @@ class UNet(nn.Module):
             if i < n_mults - 1:
                 self.down_blocks.append(Downsample(dimensions, ins))
 
-        self.mid_block = BLOCK_MAP[mid_block_type](
-            dimensions=dimensions,
-            channels=outs,
-            time_embedding=time_embedding,
-            time_channels=time_channels,
-            res_args=res_args,
-            attn_args=attn_args,
-        )
+            self.mid_block = BLOCK_MAP[mid_block_type](
+                dimensions=dimensions,
+                channels=outs,
+                time_embedding=time_embedding,
+                time_channels=time_channels,
+                res_args=res_args,
+                attn_args=attn_args,
+            )
+            
+
 
         if skip_connection_between_levels is None:
             skip_connection_between_levels = skip_connection_action == "concat"
 
-        for i in reversed(range(n_mults)):
-            outs = ins
 
+        for i in reversed(range(n_mults)):
+            ins = outs
+            outs = ins // block_out_channel_mults[i]
+
+            print(f"1st up_block layer {i}, ins {ins }, outs {outs}")
             up_block = BLOCK_MAP[up_block_types[i]](
                 dimensions=dimensions,
                 in_channels=ins,
@@ -249,27 +255,26 @@ class UNet(nn.Module):
                 time_channels=time_channels,
                 res_args=res_args,
                 attn_args=attn_args,
-                skip_connection_action=skip_connection_action
-                if skip_connection_between_levels
-                else None,
+                skip_connection_action=skip_connection_action,
             )
             self.up_blocks.append(up_block)
-            
-            outs = ins // block_out_channel_mults[i]
 
-            for _ in range(num_layers_per_block - 1):
+            skip_connection_between_levels = False if skip_connection_between_levels != None else skip_connection_between_levels
+            
+            for _ in range(num_layers_per_block -1 ):
+                print(f"2nd up_block layer {i}, additional block {_}, ins {outs}, outs {outs}")
                 up_block = BLOCK_MAP[up_block_types[i]](
                     dimensions=dimensions,
-                    in_channels=ins,
+                    in_channels=outs,
                     out_channels=outs,
                     time_embedding=time_embedding,
                     time_channels=time_channels,
                     res_args=res_args,
                     attn_args=attn_args,
-                    skip_connection_action=None,
+                    skip_connection_action=skip_connection_action if skip_connection_between_levels else None,
                 )
                 self.up_blocks.append(up_block)
-            
+
             ins = outs
             if i > 0:
                 self.up_blocks.append(Upsample(dimensions, outs))
@@ -308,7 +313,7 @@ class UNet(nn.Module):
         # Iterate over down_blocks and append skip connections
         for i, down_block in enumerate(self.down_blocks):
             x = down_block(x, t)
-            if isinstance(down_block, GaussianNoiseBlock | Downsample):
+            if isinstance(down_block, (GaussianNoiseBlock, Downsample)):
                 continue
             # Append skip connection for the last down_block in each layer
             if (i + 1) % self.num_layers_per_block == 0:
@@ -317,12 +322,14 @@ class UNet(nn.Module):
         x = self.mid_block(x, t)
 
         # Iterate over up_blocks and use skip connections
+        no_count_block = 0
         for i, up_block in enumerate(self.up_blocks):
-            if isinstance(up_block, Upsample | GaussianNoiseBlock):
+            if isinstance(up_block, (Upsample , GaussianNoiseBlock)):
                 x = up_block(x, t)
+                no_count_block += 1
                 continue
             # concat skip connection for the first upblock of each layer
-            if i % self.num_layers_per_block == 0:
+            if (i - no_count_block) % self.num_layers_per_block == 0:
                 hs = hh.pop()
                 x = up_block(x, hs, t)
             else:
@@ -330,3 +337,22 @@ class UNet(nn.Module):
 
         x = self.conv_out(self.act(self.norm(x)))
         return x
+
+
+
+net_conf = {
+    "dimensions": 1,
+    "down_block_types": ("DownBlock", "DownBlock"),
+    "up_block_types": ("AttnGateUpBlock", "AttnGateUpBlock"),
+    "n_channels": 32,
+    "block_out_channel_mults": (1, 2),
+    "num_layers_per_block": 1,
+}
+model = UNet(**net_conf)
+
+input_dims = (1, 1) + (32,) * net_conf["dimensions"]  # Example input dimensions
+sample = torch.randn(*input_dims)  # Example input
+timestep = 0.5  # Example timestep
+output = model(sample, timestep)
+print("input_dims", input_dims, "output", output.shape)
+assert output.shape == input_dims  # Check output shape
