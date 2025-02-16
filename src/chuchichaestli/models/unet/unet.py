@@ -211,7 +211,6 @@ class UNet(nn.Module):
             outs = ins * block_out_channel_mults[i]
 
             for _ in range(num_layers_per_block):
-                print(f"{_} down_block layer {i} ins {ins}, outs {outs}")
                 down_block = BLOCK_MAP[down_block_types[i]](
                     dimensions=dimensions,
                     in_channels=ins,
@@ -246,7 +245,6 @@ class UNet(nn.Module):
             ins = outs
             outs = ins // block_out_channel_mults[i]
 
-            print(f"1st up_block layer {i}, ins {ins }, outs {outs}")
             up_block = BLOCK_MAP[up_block_types[i]](
                 dimensions=dimensions,
                 in_channels=ins,
@@ -262,7 +260,6 @@ class UNet(nn.Module):
             skip_connection_between_levels = False if skip_connection_between_levels != None else skip_connection_between_levels
             
             for _ in range(num_layers_per_block -1 ):
-                print(f"2nd up_block layer {i}, additional block {_}, ins {outs}, outs {outs}")
                 up_block = BLOCK_MAP[up_block_types[i]](
                     dimensions=dimensions,
                     in_channels=outs,
@@ -337,22 +334,3 @@ class UNet(nn.Module):
 
         x = self.conv_out(self.act(self.norm(x)))
         return x
-
-
-
-net_conf = {
-    "dimensions": 1,
-    "down_block_types": ("DownBlock", "DownBlock"),
-    "up_block_types": ("AttnGateUpBlock", "AttnGateUpBlock"),
-    "n_channels": 32,
-    "block_out_channel_mults": (1, 2),
-    "num_layers_per_block": 1,
-}
-model = UNet(**net_conf)
-
-input_dims = (1, 1) + (32,) * net_conf["dimensions"]  # Example input dimensions
-sample = torch.randn(*input_dims)  # Example input
-timestep = 0.5  # Example timestep
-output = model(sample, timestep)
-print("input_dims", input_dims, "output", output.shape)
-assert output.shape == input_dims  # Check output shape
