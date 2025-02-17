@@ -196,7 +196,7 @@ class UpBlock(nn.Module):
                 )
             case "attention_gate":
                 self.attn = ATTENTION_MAP[attention](
-                    dimensions, in_channels, in_channels, **attn_args
+                    dimensions, in_channels, out_channels, **attn_args
                 )
             case _:
                 self.attn = None

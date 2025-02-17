@@ -257,7 +257,7 @@ class UNet(nn.Module):
             )
             self.up_blocks.append(up_block)
 
-            skip_connection_between_levels = False if skip_connection_between_levels != None else skip_connection_between_levels
+            skip_connection_between_levels = False if skip_connection_between_levels is not None else skip_connection_between_levels
             
             for _ in range(num_layers_per_block -1 ):
                 up_block = BLOCK_MAP[up_block_types[i]](
@@ -310,7 +310,7 @@ class UNet(nn.Module):
         # Iterate over down_blocks and append skip connections
         for i, down_block in enumerate(self.down_blocks):
             x = down_block(x, t)
-            if isinstance(down_block, (GaussianNoiseBlock, Downsample)):
+            if isinstance(down_block, GaussianNoiseBlock | Downsample):
                 continue
             # Append skip connection for the last down_block in each layer
             if (i + 1) % self.num_layers_per_block == 0:
@@ -321,7 +321,7 @@ class UNet(nn.Module):
         # Iterate over up_blocks and use skip connections
         no_count_block = 0
         for i, up_block in enumerate(self.up_blocks):
-            if isinstance(up_block, (Upsample , GaussianNoiseBlock)):
+            if isinstance(up_block, Upsample | GaussianNoiseBlock):
                 x = up_block(x, t)
                 no_count_block += 1
                 continue
