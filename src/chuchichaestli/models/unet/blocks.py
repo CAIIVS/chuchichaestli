@@ -167,7 +167,7 @@ class UpBlock(nn.Module):
         if skip_connection_action == "concat":
             self.res_block = ResidualBlock(
                 dimensions,
-                in_channels + out_channels,
+                in_channels + in_channels,
                 out_channels,
                 time_embedding,
                 time_channels,
@@ -196,7 +196,7 @@ class UpBlock(nn.Module):
                 )
             case "attention_gate":
                 self.attn = ATTENTION_MAP[attention](
-                    dimensions, in_channels, out_channels, **attn_args
+                    dimensions, in_channels, in_channels, **attn_args
                 )
             case _:
                 self.attn = None
