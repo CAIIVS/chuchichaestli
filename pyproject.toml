@@ -12,14 +12,14 @@ authors = [
 maintainers = [{ name = "Yann Billeter", email = "bily@zhaw.ch" }]
 description = "Where you find all the state-of-the-art cooking utensils (salt, pepper, gradient descent... the usual)."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
 dependencies = [
-  "numpy==1.26.4",
+  "numpy>=1.26",
   "torch>=2.2.2",
   "torchmetrics>=1.4.0",
   "torchvision>=0.20.1",
@@ -27,6 +27,9 @@ dependencies = [
   "open_clip_torch==2.19.0",
 ]
 [project.optional-dependencies]
+dev = ["ruff==0.4.1", "pre-commit==3.7.0", "pytest==8.1.1"]
+
+[dependency-groups]
 dev = ["ruff==0.4.1", "pre-commit==3.7.0", "pytest==8.1.1"]
 
 [project.urls]
