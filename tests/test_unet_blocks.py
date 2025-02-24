@@ -41,6 +41,7 @@ def net_conf():
 def count_res_blocks(blocks):
     return sum(1 for block in blocks if hasattr(block, 'res_block'))
 
+@pytest.mark.filterwarnings("ignore:Number of channels")
 @pytest.mark.parametrize("num_layers_per_block, expected_res_blocks", [(1, 3), (2, 6)])
 def test_res_blocks(net_conf, num_layers_per_block, expected_res_blocks):
     """Test the number of residual blocks in the UNet model."""
