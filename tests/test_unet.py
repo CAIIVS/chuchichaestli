@@ -272,9 +272,26 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
 
 
 @pytest.mark.parametrize(
-    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults,skip_connection_action",
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults,skip_connection_action,skip_connection_to_all_layers",
     [
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "concat"),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            True,
+        ),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            False,
+        ),
         (
             2,
             ("DownBlock", "AttnDownBlock"),
@@ -282,6 +299,34 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2),
             "concat",
+            True,
+        ),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            True,
+        ),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            False,
+        ),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            False,
         ),
         (
             3,
@@ -290,8 +335,27 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2),
             "concat",
+            True,
         ),
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "avg"),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            False,
+        ),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "avg", True),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "avg",
+            False,
+        ),
         (
             2,
             ("DownBlock", "AttnDownBlock", "DownBlock"),
@@ -299,6 +363,16 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2, 3),
             "avg",
+            True,
+        ),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock", "DownBlock"),
+            ("AttnUpBlock", "UpBlock", "AttnUpBlock"),
+            8,
+            (1, 2, 3),
+            "avg",
+            False,
         ),
         (
             3,
@@ -307,8 +381,27 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2),
             "avg",
+            True,
         ),
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "add"),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "avg",
+            False,
+        ),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "add", True),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "add",
+            False,
+        ),
         (
             2,
             ("DownBlock", "AttnDownBlock", "DownBlock"),
@@ -316,6 +409,16 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2, 3),
             "add",
+            True,
+        ),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock", "DownBlock"),
+            ("AttnUpBlock", "UpBlock", "AttnUpBlock"),
+            8,
+            (1, 2, 3),
+            "add",
+            False,
         ),
         (
             3,
@@ -324,6 +427,16 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2),
             "add",
+            True,
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "add",
+            False,
         ),
     ],
 )
@@ -334,6 +447,7 @@ def test_skip_connection_action(
     n_channels,
     block_out_channel_mults,
     skip_connection_action,
+    skip_connection_to_all_layers,
 ):
     """Test the forward pass of the UNet model without a timestep."""
     model = UNet(
@@ -346,6 +460,7 @@ def test_skip_connection_action(
         res_groups=8,
         attn_groups=8,
         skip_connection_action=skip_connection_action,
+        skip_connection_to_all_layers=skip_connection_to_all_layers,
     )
     input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
