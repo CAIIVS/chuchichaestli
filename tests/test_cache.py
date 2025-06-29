@@ -25,7 +25,7 @@ from chuchichaestli.data.cache import (
     nbytes,
     get_max_ram,
     get_max_shm,
-    estimate_byte_size,
+    serial_byte_size,
     SharedArray,
     SharedDict,
     SharedDictList,
@@ -76,8 +76,8 @@ def test_get_max_shm():
     print(shm_size)
 
 
-def test_estimate_byte_size():
-    """Test the estimate_byte_size function."""
+def test_serial_byte_size():
+    """Test the serial_byte_size function."""
     test_dict = {
         "numbers": [1, 2, 3, 4, 5],
         "index": 1,
@@ -85,13 +85,13 @@ def test_estimate_byte_size():
         "ratio": 0.8,
         "foo": "bar",
     }
-    dct_size = estimate_byte_size(test_dict)
+    dct_size = serial_byte_size(test_dict)
     assert dct_size == 87
 
 
-def test_estimate_byte_size_empty():
-    """Test the estimate_byte_size function."""
-    dct_size = estimate_byte_size({})
+def test_serial_byte_size_empty():
+    """Test the serial_byte_size function."""
+    dct_size = serial_byte_size({})
     assert dct_size == 5
 
 
@@ -342,7 +342,7 @@ def test_SharedDictList_init(n, descr, slot_size, cache_size):
             "foo": "bar",
         }
 
-    print(estimate_byte_size(gen_data(2)) * 120)
+    print(serial_byte_size(gen_data(2)) * 120)
     meta_cache = SharedDictList(
         n,
         gen_data(1),

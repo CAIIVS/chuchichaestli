@@ -42,7 +42,7 @@ __all__ = [
     "nbytes",
     "get_max_ram",
     "get_max_shm",
-    "estimate_byte_size",
+    "serial_byte_size",
 ]
 
 
@@ -71,6 +71,39 @@ C_DTYPES = {
     torch.float32: ctypes.c_float,
     torch.float64: ctypes.c_double,
 }
+
+NPY_TO_TORCH_DTYPES = {
+    np.bool: torch.bool,
+    "bool": torch.bool,
+    np.uint8: torch.uint8,
+    "uint8": torch.uint8,
+    np.int8: torch.int8,
+    "int8": torch.int8,
+    np.int16: torch.int16,
+    "int16": torch.int16,
+    np.int32: torch.int32,
+    "int32": torch.int32,
+    np.int64: torch.int64,
+    "int64": torch.int64,
+    np.float16: torch.float16,
+    "float16": torch.float16,
+    np.float32: torch.float32,
+    "float32": torch.float32,
+    np.float64: torch.float64,
+    "float64": torch.float64,
+    np.complex64: torch.complex64,
+    "complex64": torch.complex64,
+    np.complex128: torch.complex128,
+    "complex128": torch.complex128,
+}
+
+
+def npy_to_torch_dtype(dtype: str | np.dtype) -> torch.dtype:
+    """Converts numpy to torch data types."""
+    dtype = str(dtype)
+    return (
+        NPY_TO_TORCH_DTYPES[str(dtype)] if dtype in NPY_TO_TORCH_DTYPES.keys() else None
+    )
 
 
 class nbytes(float):
@@ -103,6 +136,10 @@ class nbytes(float):
         """Addition of nbyte instances."""
         return self.__class__(float.__add__(self, float(other)))
 
+    def __radd__(self, other: int | float) -> "nbytes":
+        """Addition of nbyte instances."""
+        return self.__class__(float.__radd__(self, float(other)))
+
     def __mul__(self, other: int | float) -> "nbytes":
         """Multiplication of nbyte instances."""
         return self.__class__(float.__mul__(self, float(other)))
@@ -110,6 +147,14 @@ class nbytes(float):
     def __rmul__(self, other: int | float) -> "nbytes":
         """Multiplication of nbyte instances."""
         return self.__class__(float.__rmul__(self, float(other)))
+
+    def __truediv__(self, other: int | float) -> "nbytes":
+        """Division (true) of nbyte instances."""
+        return self.__class__(float.__truediv__(self, float(other)))
+
+    def __floordiv__(self, other: int | float) -> "nbytes":
+        """Division (floor) of nbyte instances."""
+        return self.__class__(float.__floordiv__(self, float(other)))
 
     def __str__(self) -> str:
         """String of instance."""
@@ -135,7 +180,7 @@ class nbytes(float):
                 return f"{self / self.units[k]:.2f}{k}"
         return "0B"
 
-    def to(self, unit: str) -> float:
+    def to(self, unit: str) -> str:
         """Convert to unit."""
         if unit in self.units:
             return self.__class__(self / self.units[unit])
@@ -192,7 +237,7 @@ def get_max_shm() -> nbytes:
     return nbytes(psutil.Process().memory_info().rss)
 
 
-def estimate_byte_size(
+def serial_byte_size(
     dct: Any,
     serializer: type[DictSerializer] = PickleSerializer,
 ) -> nbytes:
@@ -234,13 +279,13 @@ class SharedArray:
         """Constructor.
 
         Args:
-          shape: Dataset N-d shape, e.g. (n_samples, channels, width, height, depth).
-          size: Maximum cache size in GiB (if int or float); default "4.0 GiB".
-          dtype: PyTorch data type (default torch.float32). Must be type with corresponding ctype,
-            i.e. bool, uint8, int8/16/32/64, or float32/64.
-          use_lock: If True, applies a threading lock for multiprocessing.
-          allow_overwrite: If True, cache slots can be overwritten.
-          verbose: Print information to the stdout.
+            shape: Dataset N-d shape, e.g. (n_samples, channels, width, height, depth).
+            size: Maximum cache size in GiB (if int or float); default "4.0 GiB".
+            dtype: PyTorch dtype (default torch.float32). Must be type with corresponding ctype,
+              i.e. bool, uint8, int8/16/32/64, or float32/64.
+            use_lock: If True, applies a threading lock for multiprocessing.
+            allow_overwrite: If True, cache slots can be overwritten.
+            verbose: Print information to the stdout.
         """
         self.cache_size = (
             nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
@@ -305,6 +350,17 @@ class SharedArray:
         """
         return self._shm_states
 
+    @property
+    def cached_states(self) -> int:
+        """Written states in cache."""
+        return int(sum([s == 1 for s in self.states]))
+
+    @property
+    def cached_bytes(self) -> "nbytes":
+        """Bytes written to cache."""
+        n_slots = len(self.array)
+        return self.cache_size * self.cached_states / n_slots
+
     def get_state(self, index: int | None) -> tuple[SlotState, int | None]:
         """Get the slot state at specified index."""
         if index is None:
@@ -365,10 +421,9 @@ class SharedArray:
 
     def __str__(self) -> str:
         """String of the instance."""
-        written = sum([s == 1 for s in self.states])
         n_slots = len(self.array)
         n = len(self.states)
-        return f"{self.__class__.__name__}({written}({n_slots})/{n}@{self.cache_size.as_str()})"
+        return f"{self.__class__.__name__}({self.cached_states}({n_slots})/{n}@{self.cache_size.as_str()})"
 
     def __repr__(self) -> str:
         """Representation of the instance."""
@@ -395,13 +450,13 @@ class SharedDict:
         """Constructor.
 
         Args:
-          descr: Descriptor ID for shared memory access.
-          size: Maximum cache size in MiB (if int or float); default "16.0 GiB".
-          serializer: Serializer for the encoding of the dictionary data.
-          use_lock: If True, applies a threading lock for multiprocessing.
-          allow_overwrite: If True, cache slots can be overwritten.
-          verbose: Print information to the stdout.
-          kwargs: Key-value dictionary pairs to load into memory.
+            descr: Descriptor ID for shared memory access.
+            size: Maximum cache size in MiB (if int or float); default "16.0 GiB".
+            serializer: Serializer for the encoding of the dictionary data.
+            use_lock: If True, applies a threading lock for multiprocessing.
+            allow_overwrite: If True, cache slots can be overwritten.
+            verbose: Print information to the stdout.
+            kwargs: Key-value dictionary pairs to load into memory.
 
         Note: If the dictionary is supposed to contain the keys
           ['descr', 'size', 'sample_size', 'allow_overwrite', 'serlializer', 'verbose']
@@ -429,7 +484,13 @@ class SharedDict:
     def get_allocation(
         self, name: str | None = None, size: int | float | str | None = None, **kwargs
     ) -> SharedMemory:
-        """Get a shared memory allocation."""
+        """Get a shared memory allocation.
+
+        Args:
+            name: Descriptor ID for shared memory access.
+            size: Number of samples in the dataset.
+            kwargs: Additional keywords for compatibility.
+        """
         if name is None:
             name = self.descr
         if size is None or size == 0:
@@ -455,7 +516,7 @@ class SharedDict:
         """Write data to the shared memory buffer.
 
         Returns:
-          Written data if it was successfully written to the buffer, None otherwise.
+            Written data if it was successfully written to the buffer, None otherwise.
         """
         byte_data = self.serializer.dumps(data)
         if not hasattr(self, "shm"):
@@ -473,7 +534,7 @@ class SharedDict:
     @contextmanager
     @lock
     def open_buffer(self) -> Generator:
-        """."""
+        """Buffer context manager."""
         dct = self.read_buffer()
         yield dct
         self.write_buffer(dct)
@@ -595,16 +656,16 @@ class SharedDictList:
         """Constructor.
 
         Args:
-          n: Number of samples in the list (can be larger than the number of memory slots).
-          sequence: Sequence of built-in types.
-          descr: Descriptor ID for shared memory access.
-          slot_size: Size of a single list entry (should be big enough for even the biggest entry,
-            otherwise a maximum size is estimated).
-          size: Maximum cache size in MiB (if int or float); default "16.0 GiB".
-          serializer: Serializer for the encoding of the dictionary data.
-          use_lock: If True, applies a threading lock for multiprocessing.
-          allow_overwrite: If True, cache slots can be overwritten.
-          verbose: Print information to the stdout.
+            n: Number of samples in the list (can be larger than the number of memory slots).
+            sequence: Sequence of built-in types.
+            descr: Descriptor ID for shared memory access.
+            slot_size: Size of a single list entry (should be big enough for even the
+              biggest entry, otherwise a maximum size is estimated).
+            size: Maximum cache size in MiB (if int or float); default "16.0 GiB".
+            serializer: Serializer for the encoding of the dictionary data.
+            use_lock: If True, applies a threading lock for multiprocessing.
+            allow_overwrite: If True, cache slots can be overwritten.
+            verbose: Print information to the stdout.
 
         Note: If the dictionary is supposed to contain the keys
           ['descr', 'size', 'sample_size', 'allow_overwrite', 'serlializer', 'verbose']
@@ -625,7 +686,7 @@ class SharedDictList:
         )
         if sequence:
             slot_bytes = max(
-                [nbytes(slot_size)] + [estimate_byte_size(v) for v in sequence]
+                [nbytes(slot_size)] + [serial_byte_size(v) for v in sequence]
             )
         else:
             slot_bytes = nbytes(slot_size)
@@ -670,10 +731,11 @@ class SharedDictList:
         """Get a shared memory allocation.
 
         Args:
-          name: Descriptor ID for shared memory access.
-          n_slots: Number of slots the shared list should have.
-          slot_size: Number of bytes each element should allocate in shared memory.
-          size: Number of samples in the dataset.
+            name: Descriptor ID for shared memory access.
+            n_slots: Number of slots the shared list should have.
+            slot_size: Number of bytes each element should allocate in shared memory.
+            size: Number of samples in the dataset.
+            kwargs: Additional keywords for compatibility.
         """
         if name is None:
             name = self.descr
@@ -681,13 +743,13 @@ class SharedDictList:
             shm_list = ShareableList(name=name)
         except FileNotFoundError:
             shm_list = ShareableList([np.random.bytes(slot_size)] * n_slots, name=name)
-            if not hasattr(self, "_shm_states"):
-                mp_states_arr = mp.Array(C_DTYPES[torch.uint8], size)  # type: ignore
-                shm_states_arr = np.ctypeslib.as_array(mp_states_arr.get_obj())
-                self._shm_states = torch.from_numpy(shm_states_arr)
-                self._shm_states *= 0
-                self._shm_states[n_slots:] = SlotState.OOC.value
-                _shm_states = self._shm_states
+        if not hasattr(self, "_shm_states"):
+            mp_states_arr = mp.Array(C_DTYPES[torch.uint8], size)  # type: ignore
+            shm_states_arr = np.ctypeslib.as_array(mp_states_arr.get_obj())
+            self._shm_states = torch.from_numpy(shm_states_arr)
+            self._shm_states *= 0
+            self._shm_states[n_slots:] = SlotState.OOC.value
+            _shm_states = self._shm_states
         else:
             _shm_states = None
         return shm_list, _shm_states
@@ -718,6 +780,17 @@ class SharedDictList:
           - states[index] == 2 means sample at index cannot be cached (due to cache limit).
         """
         return self._shm_states
+
+    @property
+    def cached_states(self) -> int:
+        """Written states in cache."""
+        return int(sum([s == 1 for s in self.states]))
+
+    @property
+    def cached_bytes(self) -> "nbytes":
+        """Bytes written to cache."""
+        n_slots = len(self.slots)
+        return self.cache_size * self.cached_states / n_slots
 
     def get_state(self, index: int | None) -> tuple[SlotState, int | None]:
         """Get the slot state at specified index."""
@@ -770,10 +843,9 @@ class SharedDictList:
 
     def __str__(self) -> str:
         """String of the instance."""
-        written = sum([s == 1 for s in self.states])
         n_slots = len(self.slots)
         n = len(self.states)
-        return f"{self.__class__.__name__}({written}({n_slots})/{n}@{self.cache_size.as_str()})"
+        return f"{self.__class__.__name__}({self.cached_states}({n_slots})/{n}@{self.cache_size.as_str()})"
 
     def __repr__(self) -> str:
         """Representation of the instance."""
