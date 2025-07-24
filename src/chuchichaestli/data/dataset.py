@@ -179,7 +179,6 @@ class HDF5Dataset(Dataset):
         if isinstance(attrs_cache, bool):
             attrs_cache = self.serial_size[1]
         self.init_cache(cache, attrs_cache)
-        print(self.cache)
         if self.preload and self.cache[0] is not None:
             for i in range(len(self)):
                 self[i]
@@ -782,7 +781,6 @@ class HDF5Dataset(Dataset):
                 item = torch.from_numpy(datasets[i][index]).type(self.dtype)
                 items[i] = item
                 self.cache_item(index, item, i)
-        print(items)
         attrs = self.get_cached_attrs(index)
         if attrs is None or self.n_attrs:
             attrs = self.attrs_getter(index)
