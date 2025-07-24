@@ -38,7 +38,7 @@ from chuchichaestli.data.cache import (
     SharedDictList,
 )
 from typing import Any
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 import warnings
 
 H5_FILE_EXTENSIONS = [".hdf", ".h5", ".hdf5", ".he5"]
@@ -155,7 +155,7 @@ class HDF5Dataset(Dataset):
 
         # locate HDF5 datasets in frame
         self.frame_datasets: list[list[H5PyDataset]] = []
-        self.groups = (groups,) if not isinstance(groups, list | tuple) else groups
+        self.groups = (groups,) if not isinstance(groups, Iterable) else groups
         self.sort_key = sort_key if sort_key is not None else self.default_sort_key
         self.pin_data(self.groups)
         self.make_index()
@@ -164,7 +164,7 @@ class HDF5Dataset(Dataset):
         self.frame_attrs: list[list[H5PyAttrs | H5PyDataset]] = []
         self.attr_groups_selected = attr_groups
         self.attrs_retrieval = attrs_retrieval
-        if not isinstance(attr_groups, list | tuple) and attr_groups is not None:
+        if not isinstance(attr_groups, Iterable) and attr_groups is not None:
             self.attr_groups_selected = (attr_groups,)
         self.pin_attrs(self.attr_groups_selected)
 
@@ -184,12 +184,15 @@ class HDF5Dataset(Dataset):
                 self[i]
 
     @staticmethod
-    def _split_glob(path: str | list[str]) -> tuple[list[str], list[str | None]]:
+    def _split_glob(
+        path: str | list[str], relative: bool = False
+    ) -> tuple[list[str], list[str | None]]:
         """Split path containing wildcard into root and wildcard expression."""
         root: list[str]
         file_key: list[str | None]
         if isinstance(path, str) and "*" in path:
-            path = path[1:] if path.startswith("/") else path
+            if relative:
+                path = path[1:] if path.startswith("/") else path
             components = Path(path).parts
             iwc = [i for i, c in enumerate(components) if "*" in c][0]
             root = [str(Path().joinpath(*components[:iwc]))]
