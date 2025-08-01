@@ -281,3 +281,17 @@ def test_dispatch_invalid_types():
         model._upsample("string", size=(64, 64))
     with pytest.raises(NotImplementedError):
         model._image_average({"not": "tensor"})
+
+
+def test_lpips_with_3d_input():
+    """Test LPIPS.forward with 3D inputs."""
+    model = LPIPSVGG16()
+    emb = LPIPSEmbedding(model.feature_channels, softplus=True)
+    lpips = LPIPS(model, emb)
+    x_3d_1 = torch.rand((2, 1, 32, 32, 8))
+    x_3d_2 = torch.rand((2, 1, 32, 32, 8))
+    loss = lpips(x_3d_1, x_3d_2, reduction=None)
+    assert loss.shape[0] == 2*8
+    loss2 = lpips(x_3d_1, x_3d_2, reduction=None, sample=4)
+    assert loss2.shape[0] == 2*4
+

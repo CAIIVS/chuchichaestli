@@ -34,7 +34,7 @@ from torchvision.transforms.v2.functional import normalize
 from torchvision import models as tv
 from torchvision.models.feature_extraction import create_feature_extractor
 from torch.fx.graph_module import GraphModule
-from chuchichaestli.metrics.base import sanitize_ndim, as_tri_channel
+from chuchichaestli.metrics.base import sanitize_ndim, as_tri_channel, as_batched_slices
 from chuchichaestli.models.adversarial.blocks import BaseConvBlock
 from chuchichaestli.utils import partialclass
 from typing import Any, Literal
@@ -625,6 +625,10 @@ class LPIPS(Module):
         """Forward method."""
         if x1.shape != x2.shape:
             raise ValueError(f"Input shapes must match, got {x1.shape} and {x2.shape}")
+        if x1.ndim == 5:
+            sample = kwargs.get("sample", 0)
+            x1 = as_batched_slices(x1, sample=sample)
+            x2 = as_batched_slices(x2, sample=sample)
         reduction = kwargs.get("reduction", self.reduction)
         if reduction is None:
             reduction = torch.nn.Identity()
