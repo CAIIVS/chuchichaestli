@@ -1,4 +1,4 @@
-"""Metrics package for chuchichaestli.
+"""Loss & evaluation metric implementations.
 
 This file is part of Chuchichaestli.
 
@@ -17,3 +17,12 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
+
+from chuchichaestli.metrics.mse import MSE
+from chuchichaestli.metrics.psnr import PSNR
+from chuchichaestli.metrics.ssim import SSIM, SSIMLoss
+from chuchichaestli.metrics.fid import FID
+from chuchichaestli.metrics.lpips import LPIPSLoss
+
+
+__all__ = ["MSE", "PSNR", "SSIM", "SSIMLoss", "FID", "LPIPSLoss"]
