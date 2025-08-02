@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.READ_WRITE_PAT }}
       - name: pyverto version bump ⬆️
-        uses: phdenzel/pyverto@v0.1.11
+        uses: phdenzel/pyverto@v0.2.0
         with:
           type: ${{ inputs.type }}
           ref: ${{ github.ref_name }}
