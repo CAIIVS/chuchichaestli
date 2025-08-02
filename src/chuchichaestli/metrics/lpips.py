@@ -42,7 +42,7 @@ from collections.abc import Iterable, Sequence, Callable
 
 
 __all__ = [
-    "LPIPS",
+    "LPIPSLoss",
     "LPIPSVGG16",
     "LPIPSAlexNet",
     "LPIPSSqueezeNet",

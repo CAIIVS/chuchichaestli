@@ -19,7 +19,6 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 import torch
-import warnings
 
 
 __all__ = ["EvalMetric", "sanitize_ndim", "as_tri_channel", "as_batched_slices"]

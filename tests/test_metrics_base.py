@@ -32,7 +32,7 @@ class DummyTensor(torch.Tensor):
     """A dummy tensor class to simulate the behavior of .to("cuda")."""
 
     def to(self, device=None, **kwargs):
-        """Simulate the .to("cuda") method."""
+        """Simulate device transfer."""
         return self
 
 
