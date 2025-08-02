@@ -94,7 +94,11 @@ class FeatureExtractor(Module):
         self.extractor = create_feature_extractor(model, feature_nodes)
         self.input_size = input_size
         if use_default_transforms:
-            self.transforms = self.weights.transforms()
+            if isinstance(self.weights, str):
+                weights = tv.get_model_weights("inception_v3")[self.weights]
+                self.transforms = weights.transforms()
+            else:
+                self.transforms = self.weights.transforms()
         else:
             self.transforms = partial(
                 interpolate,

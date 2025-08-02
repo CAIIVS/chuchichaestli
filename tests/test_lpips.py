@@ -80,6 +80,24 @@ def test_feature_extractor_non_default_transform(model_cls, sample_input):
     assert all(f.ndim == 4 for f in features)
 
 
+def test_feature_extractor_weights_as_string(sample_input):
+    """Test `FeatureExtractor` case: weights='IMAGENET1K_V1'."""
+    model = LPIPSVGG16(weights="IMAGENET1K_V1")
+    model.eval()
+    with torch.no_grad():
+        features = model(sample_input)
+    assert isinstance(features, list)
+    assert all(isinstance(f, torch.Tensor) for f in features)
+    assert all(f.ndim == 4 for f in features)
+
+
+def test_feature_extractor_weights_as_invalid_string():
+    """Test `FeatureExtractor` case: invalid weights leads to ValueError."""
+    with pytest.raises(KeyError): 
+        LPIPSVGG16(weights="invalid_weights")
+    
+
+
 def test_feature_extractor_2d_tensor():
     """Test `FeatureExtractor` case: use_default_transforms=False."""
     sample_2d_input = torch.rand((64, 64))
