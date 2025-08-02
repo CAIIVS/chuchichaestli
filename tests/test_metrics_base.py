@@ -78,6 +78,20 @@ def test_sanitize_ndim_invalid():
         sanitize_ndim(x)
 
 
+def test_sanitize_ndim_invalid_2_and_3D():
+    """Test `sanitize_ndim` function: case check_3D=True."""
+    with pytest.raises(ValueError):
+        x = torch.rand((1, 1, 10, 10, 10, 1))
+        sanitize_ndim(x, check_2D=True, check_3D=True)
+        
+
+def test_sanitize_ndim_invalid_3D():
+    """Test `sanitize_ndim` function: case check_3D=True."""
+    with pytest.raises(ValueError):
+        x = torch.rand((1, 1, 10, 10))
+        sanitize_ndim(x, check_2D=False, check_3D=True)
+
+
 @pytest.mark.parametrize("channel", [1, 2, 3])
 def test_as_tri_channel(channel):
     """Test `as_tri_channel` function."""

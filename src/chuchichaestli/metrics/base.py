@@ -25,14 +25,21 @@ import warnings
 __all__ = ["EvalMetric", "sanitize_ndim", "as_tri_channel", "as_batched_slices"]
 
 
-def sanitize_ndim(x: torch.Tensor):
+def sanitize_ndim(x: torch.Tensor, check_2D: bool = True, check_3D: bool = False):
     """Standardize image dimensionality to (B, C, W, H)."""
     if x.ndim == 3:
         x = x.unsqueeze(0)
     if x.ndim == 2:
         x = x.unsqueeze(0).unsqueeze(0)
-    elif x.ndim != 4:
-        raise ValueError("Require input of shape (C, W, H) or (B, C, W, H)!")
+    if check_2D and check_3D and (x.ndim != 4 and x.ndim != 5):
+        raise ValueError(
+            f"Require input of shape {'(C, W, H) or (B, C, W, H)' if check_2D else ''}"
+            f"{' or (B, C, W, H, D)' if check_3D else ''}."
+        )
+    elif check_3D and not check_2D and x.ndim != 5:
+        raise ValueError("Require input of shape (B, C, W, H, D).")
+    elif check_2D and not check_3D and x.ndim != 4:
+        raise ValueError("Require input of shape (C, W, H) or (B, C, W, H).")
     return x
 
 
