@@ -1,4 +1,4 @@
-"""Tests for the metrics.base module.
+"""Tests for the metrics.mse module.
 
 This file is part of Chuchichaestli.
 
