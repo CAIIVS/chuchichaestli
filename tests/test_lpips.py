@@ -21,7 +21,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 import torch
 import pytest
 from chuchichaestli.metrics.lpips import (
-    LPIPS,
+    LPIPSLoss,
     LPIPSVGG16,
     LPIPSAlexNet,
     LPIPSSqueezeNet,
@@ -151,19 +151,19 @@ def test_embedding_clamp_weights(sample_input):
 
 @pytest.mark.parametrize("embedding", [True, False, None])
 def test_lpips_forward_runs(sample_input, embedding):
-    """Test `LPIPS` initialization and forward method."""
+    """Test `LPIPSLoss` initialization and forward method."""
     x1, x2 = sample_input[0:1], sample_input[1:2]
-    model = LPIPS(model="vgg", embedding=embedding)
+    model = LPIPSLoss(model="vgg", embedding=embedding)
     loss = model(x1, x2)
     assert isinstance(loss, torch.Tensor)
     assert loss.ndim == 0  # scalar
 
 
 def test_lpips_scores_output(sample_input):
-    """Test `LPIPS.forward` case: `as_scores=True`."""
+    """Test `LPIPSLoss.forward` case: `as_scores=True`."""
     x1, x2 = sample_input[0:1], sample_input[1:2]
     fe = LPIPSVGG16()
-    model = LPIPS(model=fe, embedding=LPIPSEmbedding(fe.feature_channels))
+    model = LPIPSLoss(model=fe, embedding=LPIPSEmbedding(fe.feature_channels))
     scores = model(x1, x2, as_scores=True)
     assert isinstance(scores, list)
     assert all(s.ndim == 0 for s in scores)
@@ -171,25 +171,25 @@ def test_lpips_scores_output(sample_input):
 
 @pytest.mark.parametrize("reduction", [torch.mean, torch.sum, None])
 def test_lpips_reductions(reduction, sample_input):
-    """Test `LPIPS.forward` case: `reduction=True`."""
+    """Test `LPIPSLoss.forward` case: `reduction=True`."""
     x1, x2 = sample_input[0:1], sample_input[1:2]
-    model = LPIPS()
+    model = LPIPSLoss()
     loss = model(x1, x2, reduction=reduction)
     assert isinstance(loss, torch.Tensor)
     assert loss.ndim == 0
     
 
 def test_lpips_repr():
-    """Test `LPIPS.__repr__`."""
-    model = LPIPS("vgg")
+    """Test `LPIPSLoss.__repr__`."""
+    model = LPIPSLoss("vgg")
     rep = repr(model)
-    assert "LPIPS" in rep
+    assert "LPIPSLoss" in rep
     assert "VGG" in rep
 
 
 def test_lpips_input_shape_mismatch():
-    """Test `LPIPS.forward` case: ValueError."""
-    model = LPIPS("vgg")
+    """Test `LPIPSLoss.forward` case: ValueError."""
+    model = LPIPSLoss("vgg")
     x1 = torch.rand(1, 3, 64, 64)
     x2 = torch.rand(1, 3, 32, 32)
     with pytest.raises(ValueError):
@@ -214,7 +214,7 @@ def test_lpips_pretrained_weights(tmp_path):
     emb = LPIPSEmbedding(model.feature_channels, clamp_weights=True)
     filepath = tmp_path / "weights.pth"
     emb.save(filepath)
-    model = LPIPS(model, pretrained_weights=filepath, finetune=True)
+    model = LPIPSLoss(model, pretrained_weights=filepath, finetune=True)
     for module in model.embedding.modules():
         if isinstance(module, torch.nn.Conv2d):
             assert torch.all(torch.ge(module.weight.data, 0))
@@ -235,10 +235,10 @@ def test_non_embedding_save_and_load(tmp_path):
 
 
 def test_fallback_to_default_model():
-    """Test LPIPS fallback to default."""
-    model = LPIPS("nonexistent_model")
+    """Test LPIPSLoss fallback to default."""
+    model = LPIPSLoss("nonexistent_model")
     assert isinstance(model.model, LPIPSVGG16)
-    model = LPIPS()
+    model = LPIPSLoss()
     assert isinstance(model.model, LPIPSVGG16)
 
 
@@ -246,9 +246,9 @@ def test_fallback_to_default_model():
     "vgg16", "vgg", "alexnet", "resnet18", "resnet", "squeezenet", "convnext", "vit", "swinv2"
 ])
 def test_model_string_init(model_name):
-    """Test LPIPS initialization by string."""
-    model = LPIPS(model_name)
-    assert isinstance(model, LPIPS)
+    """Test LPIPSLoss initialization by string."""
+    model = LPIPSLoss(model_name)
+    assert isinstance(model, LPIPSLoss)
     assert model_name in model.model.__class__.__name__.lower()
 
 
@@ -271,8 +271,8 @@ def test_non_embedding_load_missing_file(tmp_path):
 
 
 def test_dispatch_utils():
-    """Test `LPIPS._*` singledispatched staticmethods."""
-    model = LPIPS("vgg")
+    """Test `LPIPSLoss._*` singledispatched staticmethods."""
+    model = LPIPSLoss("vgg")
     x = torch.rand(1, 3, 32, 32)
     out1 = model._normalize(x)
     out2 = model._normalize([x, x])
@@ -291,8 +291,8 @@ def test_dispatch_utils():
 
 
 def test_dispatch_invalid_types():
-    """Test `LPIPS._*` singledispatched staticmethods with incompatible types."""
-    model = LPIPS("vgg")
+    """Test `LPIPSLoss._*` singledispatched staticmethods with incompatible types."""
+    model = LPIPSLoss("vgg")
     with pytest.raises(NotImplementedError):
         model._normalize(42)
     with pytest.raises(NotImplementedError):
@@ -302,10 +302,10 @@ def test_dispatch_invalid_types():
 
 
 def test_lpips_with_3d_input():
-    """Test LPIPS.forward with 3D inputs."""
+    """Test LPIPSLoss.forward with 3D inputs."""
     model = LPIPSVGG16()
     emb = LPIPSEmbedding(model.feature_channels, softplus=True)
-    lpips = LPIPS(model, emb)
+    lpips = LPIPSLoss(model, emb)
     x_3d_1 = torch.rand((2, 1, 32, 32, 8))
     x_3d_2 = torch.rand((2, 1, 32, 32, 8))
     loss = lpips(x_3d_1, x_3d_2, reduction=None)

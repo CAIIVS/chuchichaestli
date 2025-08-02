@@ -144,7 +144,7 @@ class FeatureExtractor(Module):
 
 
 class LPIPSVGG16(FeatureExtractor):
-    """VGG16 feature extractor for LPIPS."""
+    """VGG16 feature extractor for LPIPSLoss."""
 
     def __init__(self, **kwargs):
         """Constructor."""
@@ -163,7 +163,7 @@ class LPIPSVGG16(FeatureExtractor):
 
 
 class LPIPSAlexNet(FeatureExtractor):
-    """AlexNet feature extractor for LPIPS."""
+    """AlexNet feature extractor for LPIPSLoss."""
 
     def __init__(self, **kwargs):
         """Constructor."""
@@ -182,7 +182,7 @@ class LPIPSAlexNet(FeatureExtractor):
 
 
 class LPIPSSqueezeNet(FeatureExtractor):
-    """SqueezeNet feature extractor for LPIPS."""
+    """SqueezeNet feature extractor for LPIPSLoss."""
 
     def __init__(self, **kwargs):
         """Constructor."""
@@ -205,7 +205,7 @@ class LPIPSSqueezeNet(FeatureExtractor):
 
 
 class LPIPSResNet18(FeatureExtractor):
-    """ResNet18 feature extractor for LPIPS."""
+    """ResNet18 feature extractor for LPIPSLoss."""
 
     def __init__(self, **kwargs):
         """Constructor."""
@@ -224,7 +224,7 @@ class LPIPSResNet18(FeatureExtractor):
 
 
 class LPIPSConvNeXt(FeatureExtractor):
-    """ConvNeXt-Tiny feature extractor for LPIPS."""
+    """ConvNeXt-Tiny feature extractor for LPIPSLoss."""
 
     def __init__(self, **kwargs):
         """Constructor."""
@@ -242,7 +242,7 @@ class LPIPSConvNeXt(FeatureExtractor):
 
 
 class LPIPSViT(FeatureExtractor):
-    """ViT-B-16 feature extractor for LPIPS."""
+    """ViT-B-16 feature extractor for LPIPSLoss."""
 
     def __init__(self, **kwargs):
         """Constructor."""
@@ -263,7 +263,7 @@ class LPIPSViT(FeatureExtractor):
 
 
 class LPIPSSwinV2(FeatureExtractor):
-    """Small SwinTransformer-V2 feature extractor for LPIPS."""
+    """Small SwinTransformer-V2 feature extractor for LPIPSLoss."""
 
     def __init__(self, **kwargs):
         """Constructor."""
@@ -401,7 +401,7 @@ class LPIPSNonEmbedding(Module):
         #     raise ValueError(f"Model weights not found at {path}!")
 
 
-class LPIPS(Module):
+class LPIPSLoss(Module):
     """LPIPS loss implementation."""
 
     def __init__(
@@ -488,9 +488,9 @@ class LPIPS(Module):
         self.reduction = reduction if reduction is not None else torch.nn.Identity()
 
     def __repr__(self) -> str:
-        """String representation of LPIPS."""
+        """String representation of LPIPSLoss."""
         return (
-            f"LPIPS(model={self.model.__class__.__name__}, "
+            f"LPIPSLoss(model={self.model.__class__.__name__}, "
             f"embedding={self.embedding.__class__.__name__}, "
             f"spatial_avg={self.spatial_average})"
         )
