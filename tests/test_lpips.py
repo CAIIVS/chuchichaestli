@@ -40,15 +40,18 @@ def sample_input():
     return torch.rand((2, 3, 64, 64))
 
 
-@pytest.mark.parametrize("model_cls", [
-    LPIPSVGG16,
-    LPIPSAlexNet,
-    LPIPSSqueezeNet,
-    LPIPSResNet18,
-    LPIPSConvNeXt,
-    LPIPSViT,
-    LPIPSSwinV2,
-])
+@pytest.mark.parametrize(
+    "model_cls",
+    [
+        LPIPSVGG16,
+        LPIPSAlexNet,
+        LPIPSSqueezeNet,
+        LPIPSResNet18,
+        LPIPSConvNeXt,
+        LPIPSViT,
+        LPIPSSwinV2,
+    ],
+)
 def test_feature_extractor_shapes(model_cls, sample_input):
     """Test `FeatureExtractor` initializations and forward methods."""
     model = model_cls()
@@ -60,15 +63,18 @@ def test_feature_extractor_shapes(model_cls, sample_input):
     assert all(f.ndim == 4 for f in features)
 
 
-@pytest.mark.parametrize("model_cls", [
-    LPIPSVGG16,
-    LPIPSAlexNet,
-    LPIPSSqueezeNet,
-    LPIPSResNet18,
-    LPIPSConvNeXt,
-    LPIPSViT,
-    LPIPSSwinV2,
-])
+@pytest.mark.parametrize(
+    "model_cls",
+    [
+        LPIPSVGG16,
+        LPIPSAlexNet,
+        LPIPSSqueezeNet,
+        LPIPSResNet18,
+        LPIPSConvNeXt,
+        LPIPSViT,
+        LPIPSSwinV2,
+    ],
+)
 def test_feature_extractor_non_default_transform(model_cls, sample_input):
     """Test `FeatureExtractor` case: use_default_transforms=False."""
     model = model_cls(use_default_transforms=False)
@@ -93,9 +99,8 @@ def test_feature_extractor_weights_as_string(sample_input):
 
 def test_feature_extractor_weights_as_invalid_string():
     """Test `FeatureExtractor` case: invalid weights leads to ValueError."""
-    with pytest.raises(KeyError): 
+    with pytest.raises(KeyError):
         LPIPSVGG16(weights="invalid_weights")
-    
 
 
 def test_feature_extractor_2d_tensor():
@@ -134,7 +139,7 @@ def test_embedding_out_channels_as_tuple(sample_input):
     """Test embedding alternative initialization and forward method."""
     model = LPIPSVGG16()
     features = model(sample_input)
-    emb = LPIPSEmbedding(model.feature_channels, [1]*len(model.feature_channels))
+    emb = LPIPSEmbedding(model.feature_channels, [1] * len(model.feature_channels))
     out = emb(features)
     assert len(out) == len(features)
     assert all(f.shape[1] == 1 for f in out)
@@ -177,7 +182,7 @@ def test_lpips_reductions(reduction, sample_input):
     loss = model(x1, x2, reduction=reduction)
     assert isinstance(loss, torch.Tensor)
     assert loss.ndim == 0
-    
+
 
 def test_lpips_repr():
     """Test `LPIPSLoss.__repr__`."""
@@ -218,8 +223,7 @@ def test_lpips_pretrained_weights(tmp_path):
     for module in model.embedding.modules():
         if isinstance(module, torch.nn.Conv2d):
             assert torch.all(torch.ge(module.weight.data, 0))
-    
-        
+
 
 def test_non_embedding_save_and_load(tmp_path):
     """Test `LPIPSNonEmbedding.{save, load}` method."""
@@ -242,9 +246,20 @@ def test_fallback_to_default_model():
     assert isinstance(model.model, LPIPSVGG16)
 
 
-@pytest.mark.parametrize("model_name", [
-    "vgg16", "vgg", "alexnet", "resnet18", "resnet", "squeezenet", "convnext", "vit", "swinv2"
-])
+@pytest.mark.parametrize(
+    "model_name",
+    [
+        "vgg16",
+        "vgg",
+        "alexnet",
+        "resnet18",
+        "resnet",
+        "squeezenet",
+        "convnext",
+        "vit",
+        "swinv2",
+    ],
+)
 def test_model_string_init(model_name):
     """Test LPIPSLoss initialization by string."""
     model = LPIPSLoss(model_name)
@@ -309,7 +324,6 @@ def test_lpips_with_3d_input():
     x_3d_1 = torch.rand((2, 1, 32, 32, 8))
     x_3d_2 = torch.rand((2, 1, 32, 32, 8))
     loss = lpips(x_3d_1, x_3d_2, reduction=None)
-    assert loss.shape[0] == 2*8
+    assert loss.shape[0] == 2 * 8
     loss2 = lpips(x_3d_1, x_3d_2, reduction=None, sample=4)
-    assert loss2.shape[0] == 2*4
-
+    assert loss2.shape[0] == 2 * 4

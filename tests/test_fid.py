@@ -93,9 +93,10 @@ def test_fid_feature_dim_property_invalid():
 
     class DummyErrorModel(DummyModel):
         """A dummy model that raises an error for feature_dim."""
+
         def forward(self, x):
             raise ValueError("This model does not support feature_dim.")
-    
+
     model = DummyErrorModel(feature_dim=None)
     fid = FID(model=model)
     print(fid.feature_dim)
@@ -198,7 +199,7 @@ def test_fid_5d_tensor_support():
 def test_torchvision_FID_default(monkeypatch):
     """Test that the FID with default torchvision model weights."""
     called = {}
-    
+
     def fake_to(self, device=None, **kwargs):
         called["to"] = True
         return self

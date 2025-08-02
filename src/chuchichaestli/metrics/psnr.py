@@ -26,7 +26,9 @@ class PSNR(MSE):
     """Peak-signal-to-noise ratio."""
 
     @torch.inference_mode()
-    def update(self, data: torch.Tensor, prediction: torch.Tensor, update_range: bool = True):
+    def update(
+        self, data: torch.Tensor, prediction: torch.Tensor, update_range: bool = True
+    ):
         """Compute metric on new input and update current state.
 
         Args:

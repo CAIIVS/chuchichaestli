@@ -126,7 +126,9 @@ class EvalMetric:
         self.aggregate = self.aggregate.to(device=self.device)
 
     @torch.inference_mode()
-    def update(self, data: torch.Tensor, prediction: torch.Tensor, update_range: bool = True):
+    def update(
+        self, data: torch.Tensor, prediction: torch.Tensor, update_range: bool = True
+    ):
         """Compute metric, aggregate, and update internal state.
 
         Args:
@@ -140,11 +142,17 @@ class EvalMetric:
         self.is_nan = torch.isnan(data) | torch.isnan(prediction)
         self.nan_count += torch.sum(self.is_nan)
         self.n_images += torch.tensor(prediction.shape[0], device=self.device)
-        self.n_observations += torch.tensor(prediction[~self.is_nan].numel(), device=self.device)
+        self.n_observations += torch.tensor(
+            prediction[~self.is_nan].numel(), device=self.device
+        )
         if update_range:
-            self.min_value = torch.minimum(prediction[~self.is_nan].min(), self.min_value)
+            self.min_value = torch.minimum(
+                prediction[~self.is_nan].min(), self.min_value
+            )
             self.min_value = torch.minimum(data[~self.is_nan].min(), self.min_value)
-            self.max_value = torch.maximum(prediction[~self.is_nan].max(), self.max_value)
+            self.max_value = torch.maximum(
+                prediction[~self.is_nan].max(), self.max_value
+            )
             self.max_value = torch.maximum(data[~self.is_nan].max(), self.max_value)
         return self
 

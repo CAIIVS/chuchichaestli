@@ -52,9 +52,9 @@ def generate_sequential_hdf5(
             m.attrs["index"] = f"{i}"
             m.attrs["pointer_elem"] = f"{samples*i}"
             m.attrs["src_method"] = "np.arange"
-        for i in range(num_datasets-1):
+        for i in range(num_datasets - 1):
             g2 = f.create_group(f"some/other/path_{i+1}")
-            data = arr[:samples//2, :, :] + (i+1)*num_elem
+            data = arr[: samples // 2, :, :] + (i + 1) * num_elem
             g2.create_dataset("images", data=data)
     return f
 
@@ -110,9 +110,9 @@ def generate_random_hdf5(
             m = g.create_group(f"metadata/{i}")
             m.attrs["foo"] = f"bar_{i}"
             m.attrs["src_method"] = "np.random.randn"
-        for i in range(num_datasets-1):
+        for i in range(num_datasets - 1):
             g2 = f.create_group(f"some/other/path_{i+1}")
-            data = arr[:samples//2, :, :] + (i+1)*arr.size
+            data = arr[: samples // 2, :, :] + (i + 1) * arr.size
             g2.create_dataset("images", data=data)
     return f
 
@@ -126,6 +126,7 @@ def pytest_sessionstart(session):
         else:
             generate_sequential_hdf5(dimensions=dimensions)
             # generate_random_hdf5(dimensions=dimensions)
+
 
 def pytest_sessionfinish(session):
     """Actions after the tests."""

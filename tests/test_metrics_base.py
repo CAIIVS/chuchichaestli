@@ -83,7 +83,7 @@ def test_sanitize_ndim_invalid_2_and_3D():
     with pytest.raises(ValueError):
         x = torch.rand((1, 1, 10, 10, 10, 1))
         sanitize_ndim(x, check_2D=True, check_3D=True)
-        
+
 
 def test_sanitize_ndim_invalid_3D():
     """Test `sanitize_ndim` function: case check_3D=True."""

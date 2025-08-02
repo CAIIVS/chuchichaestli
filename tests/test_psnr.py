@@ -119,6 +119,7 @@ def test_PSNR_update_5d_tensor_random():
     val = metric.compute()
     assert isinstance(val, float)
 
+
 def test_PSNR_update_5d_tensor_perfect():
     """Test PSNR metric with equal 5D tensors."""
     metric = PSNR(min_value=0, max_value=1)
@@ -126,7 +127,8 @@ def test_PSNR_update_5d_tensor_perfect():
     prd = torch.ones((2, 1, 4, 4, 3))
     metric.update(obs, prd)
     val = metric.compute()
-    assert val == float('inf') or torch.isinf(torch.tensor(val))
+    assert val == float("inf") or torch.isinf(torch.tensor(val))
+
 
 def test_PSNR_update_5d_tensor_extreme():
     """Test PSNR metric with 5D tensors at data range extreme."""
@@ -137,12 +139,13 @@ def test_PSNR_update_5d_tensor_extreme():
     val = metric.compute()
     assert pytest.approx(val) == 0.0
 
+
 def test_PSNR_update_5d_tensor_with_nan():
     """Test PSNR metric with NaN values in 5D tensors."""
     metric = PSNR(min_value=0, max_value=1)
     obs = torch.ones((1, 1, 2, 2, 2))
     prd = torch.ones((1, 1, 2, 2, 2))
-    obs[0, 0, 0, 0, 0] = float('nan')
+    obs[0, 0, 0, 0, 0] = float("nan")
     metric.update(obs, prd)
     val = metric.compute()
     assert val == float("inf") or torch.isinf(torch.tensor(val))

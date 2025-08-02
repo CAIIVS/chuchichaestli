@@ -26,7 +26,9 @@ class MSE(EvalMetric):
     """Mean-squared error."""
 
     @torch.inference_mode()
-    def update(self, data: torch.Tensor, prediction: torch.Tensor, update_range: bool = False):
+    def update(
+        self, data: torch.Tensor, prediction: torch.Tensor, update_range: bool = False
+    ):
         """Compute metric on new input and update current state.
 
         Args:

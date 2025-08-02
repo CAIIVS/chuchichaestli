@@ -307,7 +307,7 @@ class SSIMLoss(Module):
         loss = 1 - ssim_batch
         return reduction(loss)
 
-    
+
 if __name__ == "__main__":
     metric = SSIM(0, 1)
     obs = torch.rand((5, 1, 64, 64))
