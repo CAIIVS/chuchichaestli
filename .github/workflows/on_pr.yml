@@ -47,8 +47,8 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
-      - name: Hatch version bump ↗️
-        uses: phdenzel/hatch-bump@v2
+      - name: pyverto version bump ↗️
+        uses: phdenzel/pyverto@v0.2.0
         with:
           type: "dev"
           ref: ${{ github.head_ref }}

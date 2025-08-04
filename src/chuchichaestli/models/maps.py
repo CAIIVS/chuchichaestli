@@ -20,10 +20,17 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 
 from torch import nn
 
+
 DIM_TO_CONV_MAP = {
     1: nn.Conv1d,
     2: nn.Conv2d,
     3: nn.Conv3d,
+}
+
+DIM_TO_CONV_FN_MAP = {
+    1: nn.functional.conv1d,
+    2: nn.functional.conv2d,
+    3: nn.functional.conv3d,
 }
 
 DIM_TO_CONVT_MAP = {

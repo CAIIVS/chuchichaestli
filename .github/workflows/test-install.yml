@@ -62,7 +62,7 @@ jobs:
       - name: 🧪 with pytest
         if: ${{ inputs.pytest }}
         run: |
-          pytest --junitxml=junit/${{ inputs.artifact-name }}-${{ matrix.python-version }}.xml
+          pytest --import-mode=importlib --junitxml=junit/${{ inputs.artifact-name }}-${{ matrix.python-version }}.xml
 
       - name: 🗃️ pytest artifacts
         if: ${{ inputs.pytest }}

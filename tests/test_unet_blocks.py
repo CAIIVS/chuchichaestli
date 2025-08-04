@@ -21,6 +21,7 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 import pytest
 from chuchichaestli.models.unet import UNet
 
+
 @pytest.fixture
 def net_conf():
     return {
@@ -39,7 +40,8 @@ def net_conf():
 
 
 def count_res_blocks(blocks):
-    return sum(1 for block in blocks if hasattr(block, 'res_block'))
+    return sum(1 for block in blocks if hasattr(block, "res_block"))
+
 
 @pytest.mark.filterwarnings("ignore:Number of channels")
 @pytest.mark.parametrize("num_layers_per_block, expected_res_blocks", [(1, 3), (2, 6)])
@@ -47,13 +49,17 @@ def test_res_blocks(net_conf, num_layers_per_block, expected_res_blocks):
     """Test the number of residual blocks in the UNet model."""
     net_conf["num_layers_per_block"] = num_layers_per_block
     model = UNet(**net_conf)
-    
+
     encoder_res_blocks = count_res_blocks(model.down_blocks)
     decoder_res_blocks = count_res_blocks(model.up_blocks)
-    
+
     print(f"Number of res_blocks in encoder: {encoder_res_blocks}")
     print(f"Number of res_blocks in decoder: {decoder_res_blocks}")
-    
+
     # Add your assertions here
-    assert encoder_res_blocks == expected_res_blocks  # Adjust the expected value as needed
-    assert decoder_res_blocks == expected_res_blocks  # Adjust the expected value as needed
+    assert (
+        encoder_res_blocks == expected_res_blocks
+    )  # Adjust the expected value as needed
+    assert (
+        decoder_res_blocks == expected_res_blocks
+    )  # Adjust the expected value as needed

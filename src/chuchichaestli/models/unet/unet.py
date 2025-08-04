@@ -234,12 +234,9 @@ class UNet(nn.Module):
                 res_args=res_args,
                 attn_args=attn_args,
             )
-            
-
 
         if skip_connection_between_levels is None:
             skip_connection_between_levels = skip_connection_action == "concat"
-
 
         for i in reversed(range(n_mults)):
             ins = outs
@@ -257,9 +254,13 @@ class UNet(nn.Module):
             )
             self.up_blocks.append(up_block)
 
-            skip_connection_between_levels = False if skip_connection_between_levels is not None else skip_connection_between_levels
-            
-            for _ in range(num_layers_per_block -1 ):
+            skip_connection_between_levels = (
+                False
+                if skip_connection_between_levels is not None
+                else skip_connection_between_levels
+            )
+
+            for _ in range(num_layers_per_block - 1):
                 up_block = BLOCK_MAP[up_block_types[i]](
                     dimensions=dimensions,
                     in_channels=outs,
@@ -268,7 +269,9 @@ class UNet(nn.Module):
                     time_channels=time_channels,
                     res_args=res_args,
                     attn_args=attn_args,
-                    skip_connection_action=skip_connection_action if skip_connection_between_levels else None,
+                    skip_connection_action=skip_connection_action
+                    if skip_connection_between_levels
+                    else None,
                 )
                 self.up_blocks.append(up_block)
 
@@ -279,8 +282,7 @@ class UNet(nn.Module):
         match add_noise:
             case "up":
                 self.up_blocks.insert(
-                    0,
-                    GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
+                    0, GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
                 )
             case "down":
                 self.down_blocks.append(
@@ -330,7 +332,7 @@ class UNet(nn.Module):
                 hs = hh.pop()
                 x = up_block(x, hs, t)
             else:
-                x = up_block(x = x, h = None, t = t)
+                x = up_block(x=x, h=None, t=t)
 
         x = self.conv_out(self.act(self.norm(x)))
         return x

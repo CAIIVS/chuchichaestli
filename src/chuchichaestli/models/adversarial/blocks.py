@@ -77,6 +77,7 @@ class BaseConvBlock(nn.Module):
         out_channels: int,
         act: bool = True,
         act_fn: str | None = None,
+        act_last: bool = False,
         norm: bool = True,
         norm_type: str | None = None,
         num_groups: int = 16,
@@ -97,6 +98,7 @@ class BaseConvBlock(nn.Module):
           out_channels: Number of output channels.
           act: Use an activation function in the block.
           act_fn: Activation function.
+          act_last: If `True`, activations is used last.
           norm: Use normalization in the block.
           norm_type: Normalization type for the conv blocks.
           dropout: Use dropout in the block.
@@ -116,6 +118,7 @@ class BaseConvBlock(nn.Module):
         self.act: nn.Module | None = None
         self.attn: nn.Module | None = None
         self.dropout: nn.Module | None = None
+        self.act_last = act_last
         if norm and norm_type is not None:
             if norm_type == "group" and (
                 in_channels % num_groups != 0 or in_channels < num_groups
@@ -151,10 +154,14 @@ class BaseConvBlock(nn.Module):
         """Forward pass through the convolutional downsampling block."""
         h = x
         h = self.norm(h) if self.norm is not None else h
-        h = self.act(h) if self.act is not None else h
+        if not self.act_last:
+            h = self.act(h) if self.act is not None else h
         h = self.dropout(h) if self.dropout is not None else h
         h = self.attn(h, _h if _h is not None else h) if self.attn else h
-        return self.conv(h)
+        h = self.conv(h)
+        if self.act_last:
+            h = self.act(h) if self.act is not None else h
+        return h
 
 
 ConvDownBlock = partialclass("ConvDownBlock", BaseConvBlock, act=False, norm=False)
