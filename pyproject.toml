@@ -62,6 +62,15 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 path = "src/chuchichaestli/__about__.py"
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "/docs",
+  "/.*",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chuchichaestli"]
+
 [tool.hatch.envs.test]
 dependencies = ["pytest", "pytest-cov"]
 
