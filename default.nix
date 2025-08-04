@@ -19,7 +19,7 @@ let
     doCheck = false;
     meta = {
       description = "Where you find all the state-of-the-art cooking utensils (salt, pepper, gradient descent... the usual).";
-      meta.description.license = pkgs.lib.licenses.gpl3Plus;
+      license = pkgs.lib.licenses.gpl3Plus;
     };
   };
 in
