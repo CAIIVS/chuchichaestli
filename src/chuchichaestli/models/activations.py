@@ -31,6 +31,7 @@ ACTIVATION_FUNCTIONS: dict[str, Callable] = {
     "relu": nn.ReLU,
     "prelu": nn.PReLU,
     "leakyrelu": nn.LeakyReLU,
+    "softplus": nn.Softplus,
     "leakyrelu,0.1": partial(nn.LeakyReLU, negative_slope=0.1),
     "leakyrelu,0.2": partial(nn.LeakyReLU, negative_slope=0.2),
 }

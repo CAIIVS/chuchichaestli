@@ -19,7 +19,6 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
 import warnings
-
 import torch
 from torch import nn
 
@@ -196,6 +195,7 @@ class UNet(nn.Module):
 
         # Build decoder
         self.up_blocks = nn.ModuleList([])
+
         for i in reversed(range(n_mults)):
             ins = outs
             outs = ins // block_out_channel_mults[i]
@@ -233,14 +233,15 @@ class UNet(nn.Module):
             if i > 0:
                 self.up_blocks.append(Upsample(dimensions, outs))
 
-        if add_noise == "up":
-            self.up_blocks.insert(
-                0, GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
-            )
-        elif add_noise == "down":
-            self.down_blocks.append(
-                GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
-            )
+        match add_noise:
+            case "up":
+                self.up_blocks.insert(
+                    0, GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
+                )
+            case "down":
+                self.down_blocks.append(
+                    GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
+                )
 
         # Output layers
         self.norm = Norm(dimensions, res_norm_type, outs, groups)

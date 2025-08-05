@@ -51,7 +51,9 @@ def test_conv_attention_forward(dimensions):
     assert not torch.isnan(output).any()
 
 
-@pytest.mark.parametrize("dimensions,n_channels,img_wh", [(2, 32, 256), (2, 64, 128), (2, 512, 128)])
+@pytest.mark.parametrize(
+    "dimensions,n_channels,img_wh", [(2, 32, 256), (2, 64, 128), (2, 512, 128)]
+)
 def test_conv_attention_different_sizes(dimensions, n_channels, img_wh):
     """Test the ConvAttention module."""
     # Create an instance of ConvAttention
