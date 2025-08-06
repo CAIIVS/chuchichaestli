@@ -97,8 +97,6 @@ class UNet(nn.Module):
             "AttnUpBlock",
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 4),
-        time_embedding: bool = False,
-        time_channels: int = 32,
         upsample_type: Literal["Upsample", "UpsampleInterpolate"] = "Upsample",
         downsample_type: Literal["Downsample", "DownsampleInterpolate"] = "Downsample",
         num_layers_per_block: int = 1,
@@ -117,6 +115,29 @@ class UNet(nn.Module):
         ] = "silu",
         in_kernel_size: int = 3,
         out_kernel_size: int = 3,
+        time_embedding: Literal[
+            "SinusoidalTimeEmbedding", "DeepSinusoidalTimeEmbedding"
+        ]
+        | bool
+        | None = None,
+        time_channels: int = 32,
+        t_emb_dim: int = 32,
+        t_emb_flip: bool = False,
+        t_emb_shift: float = 1.0,
+        t_emb_act_fn: Literal[
+            "silu",
+            "swish",
+            "mish",
+            "gelu",
+            "relu",
+            "prelu",
+            "leakyrelu",
+            "leakyrelu,0.1",
+            "leakyrelu,0.2",
+            "softplus",
+        ] = "silu",
+        t_emb_post_act: bool = False,
+        t_emb_condition_dim: int | None = None,
         res_groups: int = 32,
         res_act_fn: Literal[
             "silu",
@@ -166,6 +187,16 @@ class UNet(nn.Module):
             act: Activation function (see `chuchichaestli.models.activations` for details).
             in_kernel_size: Kernel size for the input convolution.
             out_kernel_size: Kernel size for the output convolution.
+            time_embedding: Whether to use a time embedding.
+            time_channels: Number of time channels.
+            t_emb_dim: The dimension for the deep embedding (takes only
+              effect if `time_embedding='DeepSinusoidalTimeEmbedding'`).
+            t_emb_flip: Whether to flip the sine to cosine in the time embedding.
+            t_emb_shift: The downscale frequency shift for the time embedding.
+            t_emb_act_fn: Activation function for the time embedding.
+            t_emb_post_act: Whether to use an activation function
+              at the end of the time embedding.
+            t_emb_condition_dim: The condition dimension for the time embedding.
             res_groups: Number of groups for the residual block normalization (if group norm).
             res_act_fn: Activation function for the residual block
               (see `chuchichaestli.models.activations` for details).
