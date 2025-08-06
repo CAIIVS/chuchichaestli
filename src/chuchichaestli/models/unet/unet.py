@@ -251,6 +251,7 @@ class UNet(nn.Module):
         downsample_cls = DOWNSAMPLE_FUNCTIONS[downsample_type]
         n_mults = len(block_out_channel_mults)
         self.num_blocks_per_level = num_blocks_per_level
+        self.skip_connection_to_all_blocks = skip_connection_to_all_blocks
 
         # Group normalization optimization
         if res_norm_type == "group" and n_channels % res_groups != 0:
@@ -428,6 +429,9 @@ class UNet(nn.Module):
             # concat skip connection for the first upblock of each layer
             if (i - no_count_block) % self.num_blocks_per_level == 0:
                 hs = hh.pop()
+                x = up_block(x, hs, t_emb)
+            elif self.skip_connection_to_all_blocks:
+                hs = hh[-1]
                 x = up_block(x, hs, t_emb)
             else:
                 x = up_block(x=x, h=None, t=t_emb)
