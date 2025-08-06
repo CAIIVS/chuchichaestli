@@ -49,6 +49,12 @@ def test_throws_error_on_mismatched_lengths_2():
         )
 
 
+def test_throws_warning_for_group_divisibility():
+    """Test that the UNet model throws a warning when the number of channels is not divisible by the number of groups."""
+    with pytest.warns():
+        UNet(n_channels=16, res_groups=32)
+
+
 @pytest.mark.parametrize(
     "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
     [
@@ -119,10 +125,10 @@ def test_forward_pass(
     """Test the forward pass of the UNet model."""
     model = UNet(
         dimensions=dimensions,
+        n_channels=n_channels,
         down_block_types=down_block_types,
         up_block_types=up_block_types,
         block_out_channel_mults=block_out_channel_mults,
-        n_channels=n_channels,
         res_groups=4,
         num_layers_per_block=1,
     )
@@ -131,7 +137,38 @@ def test_forward_pass(
     timestep = 0.5  # Example timestep
     output = model(sample, timestep)
     assert output.shape == input_dims  # Check output shape
+    tensor_timestep = torch.Tensor([0.5])
+    output = model(sample, tensor_timestep)
 
+
+@pytest.mark.parametrize(
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
+    [
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (1, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+        (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+    ]
+)
+def test_forward_with_2_layers_per_block(dimensions, down_block_types, up_block_types, n_channels, block_out_channel_mults):
+    """Test the forward pass of the UNet model with a specified number of layers per block."""
+    model = UNet(
+        dimensions=dimensions,
+        n_channels=n_channels,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        block_out_channel_mults=block_out_channel_mults,
+        res_groups=4,
+        num_layers_per_block=2,
+        time_embedding=False,
+    )
+    input_dims = (1, 1) + (32,) * dimensions
+    sample = torch.randn(*input_dims)  # Example input
+    output = model(sample)
+    assert output.shape == input_dims  # Check output shape
+    
 
 def test_info_conv_attn(
     dimensions=2,
@@ -178,7 +215,7 @@ def test_info_conv_attn(
         (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
     ],
 )
-def test_no_timestep(
+def test_with_timestep(
     dimensions, down_block_types, up_block_types, n_channels, block_out_channel_mults
 ):
     """Test the forward pass of the UNet model without a timestep."""
@@ -188,14 +225,16 @@ def test_no_timestep(
         up_block_types=up_block_types,
         n_channels=n_channels,
         block_out_channel_mults=block_out_channel_mults,
-        time_embedding=False,
+        time_embedding=True,
         res_groups=8,
     )
     input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
-
-    output = model(sample)
-    assert output.shape == input_dims
+    timestep = 0.5  # Example timestep
+    output = model(sample, timestep)
+    assert output.shape == input_dims  # Check output shape
+    tensor_timestep = torch.Tensor([0.5])
+    output = model(sample, tensor_timestep)
 
 
 @pytest.mark.parametrize(

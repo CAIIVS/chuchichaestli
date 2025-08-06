@@ -23,7 +23,11 @@ import torch
 from torch import nn
 
 from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
-from chuchichaestli.models.downsampling import Downsample
+from chuchichaestli.models.downsampling import (
+    DOWNSAMPLE_FUNCTIONS,
+    Downsample,
+    DownsampleInterpolate,
+)
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import Norm
 from chuchichaestli.models.unet.blocks import (
@@ -42,7 +46,13 @@ from chuchichaestli.models.unet.blocks import (
 from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
 )
-from chuchichaestli.models.upsampling import Upsample
+from chuchichaestli.models.upsampling import (
+    UPSAMPLE_FUNCTIONS,
+    Upsample,
+    UpsampleInterpolate,
+)
+from typing import Literal
+from collections.abc import Sequence
 
 BLOCK_MAP = {
     "DownBlock": DownBlock,
@@ -59,7 +69,7 @@ BLOCK_MAP = {
 
 
 class UNet(nn.Module):
-    """UNet model implementation - Conservatively optimized version."""
+    """Flexible U-Net model implementation."""
 
     def __init__(
         self,
@@ -67,46 +77,121 @@ class UNet(nn.Module):
         in_channels: int = 1,
         n_channels: int = 32,
         out_channels: int = 1,
-        down_block_types: tuple[str, ...] = (
+        down_block_types: Sequence[
+            Literal["DownBlock", "AttnDownBlock", "ConvAttnDownBlock"]
+        ] = (
             "DownBlock",
             "DownBlock",
             "AttnDownBlock",
             "AttnDownBlock",
         ),
-        mid_block_type: str = "MidBlock",
-        up_block_types: tuple[str, ...] = (
+        mid_block_type: Literal[
+            "MidBlock", "AttnMidBlock", "ConvAttnMidBlock"
+        ] = "MidBlock",
+        up_block_types: Sequence[
+            Literal["UpBlock", "AttnUpBlock", "ConvAttnUpBlock", "AttnGateUpBlock"]
+        ] = (
             "UpBlock",
             "UpBlock",
             "AttnUpBlock",
             "AttnUpBlock",
         ),
-        block_out_channel_mults: tuple[int, ...] = (1, 2, 2, 4),
+        block_out_channel_mults: Sequence[int] = (1, 2, 2, 4),
         time_embedding: bool = False,
         time_channels: int = 32,
+        upsample_type: Literal["Upsample", "UpsampleInterpolate"] = "Upsample",
+        downsample_type: Literal["Downsample", "DownsampleInterpolate"] = "Downsample",
         num_layers_per_block: int = 1,
         groups: int = 8,
-        act: str = "silu",
+        act: Literal[
+            "silu",
+            "swish",
+            "mish",
+            "gelu",
+            "relu",
+            "prelu",
+            "leakyrelu",
+            "leakyrelu,0.1",
+            "leakyrelu,0.2",
+            "softplus",
+        ] = "silu",
         in_kernel_size: int = 3,
         out_kernel_size: int = 3,
         res_groups: int = 32,
-        res_act_fn: str = "silu",
+        res_act_fn: Literal[
+            "silu",
+            "swish",
+            "mish",
+            "gelu",
+            "relu",
+            "prelu",
+            "leakyrelu",
+            "leakyrelu,0.1",
+            "leakyrelu,0.2",
+            "softplus",
+        ] = "silu",
         res_dropout: float = 0.1,
-        res_norm_type: str = "group",
+        res_norm_type: Literal["group", "instance", "batch", "adabatch"] = "group",
         res_kernel_size: int = 3,
         attn_head_dim: int = 32,
         attn_n_heads: int = 1,
         attn_dropout_p: float = 0.0,
-        attn_norm_type: str = "group",
+        attn_norm_type: Literal["group", "instance", "batch", "adabatch"] = "group",
         attn_groups: int = 32,
         attn_kernel_size: int = 1,
         attn_gate_inter_channels: int = 32,
-        skip_connection_action: str = "concat",
+        skip_connection_action: Literal["concat", "avg", "add"] = "concat",
         skip_connection_to_all_layers: bool | None = None,
-        add_noise: str | None = None,
+        add_noise: Literal["up", "down"] | None = None,
         noise_sigma: float = 0.1,
         noise_detached: bool = True,
     ):
-        """UNet model implementation - maintains exact original logic with optimizations."""
+        """Constructor.
+
+        Args:
+            dimensions: Number of (spatial) dimensions.
+            in_channels: Number of input channels.
+            n_channels: Number of channels in the first layer.
+            out_channels: Number of output channels.
+            down_block_types: Types of down blocks.
+            mid_block_type: Type of mid block.
+            up_block_types: Types of up blocks.
+            block_out_channel_mults: Output channel multipliers for each block.
+            time_embedding: Whether to use a time embedding.
+            time_channels: Number of time channels.
+            num_layers_per_block: Number of layers per block.
+            upsample_type: Type of upsampling block (see `chuchichaestli.models.upsampling` for details).
+            downsample_type: Type of downsampling block (see `chuchichaestli.models.downsampling` for details).
+            groups: Number of groups for group normalization.
+            act: Activation function (see `chuchichaestli.models.activations` for details).
+            in_kernel_size: Kernel size for the input convolution.
+            out_kernel_size: Kernel size for the output convolution.
+            res_groups: Number of groups for the residual block normalization (if group norm).
+            res_act_fn: Activation function for the residual block
+              (see `chuchichaestli.models.activations` for details).
+            res_dropout: Dropout rate for the residual block.
+            res_norm_type: Normalization type for the residual block
+              (see `chuchichaestli.models.norm` for details).
+            res_kernel_size: Kernel size for the residual block.
+            attn_head_dim: Dimension of the attention head.
+            attn_n_heads: Number of attention heads.
+            attn_dropout_p: Dropout probability of the scaled dot product attention.
+            attn_norm_type: Normalization type for the convolutional attention block
+              (see `chuchichaestli.models.norm` for details).
+            attn_groups: Number of groups for the convolutional attention block normalization
+              (if `attn_norm_type` is `"group"`).
+            attn_kernel_size: Kernel size for the convolutional attention block.
+            attn_gate_inter_channels: Number of intermediate channels for the attention gate
+              (if `up_block_types` contains `"AttnGateUpBlock"`).
+            skip_connection_action: Action to take for the skip connection.
+              If `None`, no skip connections are used.
+            skip_connection_to_all_levels: TODO
+            add_noise: Add a Gaussian noise regularizer block in the bottleneck (before or after).
+              Can be "up" (after the bottlenet) or "down" (before the bottleneck).
+            noise_sigma: Std. relative (to the magnitude of the input) for the noise generation.
+            noise_detached: If True, the input is detached for the noise generation.
+              Note, this should generally be `True`, otherwise the noise is learnable.
+        """
         super().__init__()
 
         self._validate_inputs(
@@ -115,6 +200,8 @@ class UNet(nn.Module):
 
         # Cache commonly used values
         conv_cls = DIM_TO_CONV_MAP[dimensions]
+        upsample_cls = UPSAMPLE_FUNCTIONS[upsample_type]
+        downsample_cls = DOWNSAMPLE_FUNCTIONS[downsample_type]
         n_mults = len(block_out_channel_mults)
         self.num_layers_per_block = num_layers_per_block
 
@@ -178,7 +265,7 @@ class UNet(nn.Module):
                 ins = outs
 
             if i < n_mults - 1:
-                self.down_blocks.append(Downsample(dimensions, ins))
+                self.down_blocks.append(downsample_cls(dimensions, ins))
 
         # Build middle block
         self.mid_block = BLOCK_MAP[mid_block_type](
@@ -231,7 +318,7 @@ class UNet(nn.Module):
 
             ins = outs
             if i > 0:
-                self.up_blocks.append(Upsample(dimensions, outs))
+                self.up_blocks.append(upsample_cls(dimensions, outs))
 
         match add_noise:
             case "up":
@@ -283,7 +370,9 @@ class UNet(nn.Module):
         hh = []
         for i, down_block in enumerate(self.down_blocks):
             x = down_block(x, t_emb)
-            if isinstance(down_block, GaussianNoiseBlock | Downsample):
+            if isinstance(
+                down_block, Downsample | DownsampleInterpolate | GaussianNoiseBlock
+            ):
                 continue
             # Append skip connection for the last down_block in each layer
             if (i + 1) % self.num_layers_per_block == 0:
@@ -293,7 +382,9 @@ class UNet(nn.Module):
 
         no_count_block = 0
         for i, up_block in enumerate(self.up_blocks):
-            if isinstance(up_block, Upsample | GaussianNoiseBlock):
+            if isinstance(
+                up_block, Upsample | UpsampleInterpolate | GaussianNoiseBlock
+            ):
                 x = up_block(x, t_emb)
                 no_count_block += 1
                 continue
@@ -303,6 +394,5 @@ class UNet(nn.Module):
                 x = up_block(x, hs, t_emb)
             else:
                 x = up_block(x=x, h=None, t=t_emb)
-
         x = self.conv_out(self.act(self.norm(x)))
         return x
