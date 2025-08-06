@@ -31,6 +31,12 @@ from torch import nn
 from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
 from typing import Literal
 
+__all__ = [
+    "GaussianFourierProjection",
+    "SinusoidalTimeEmbedding",
+    "DeepSinusoidalTimeEmbedding",
+]
+
 
 class GaussianFourierProjection(nn.Module):
     """Gaussian Fourier embeddings for noise levels."""
@@ -75,21 +81,28 @@ class SinusoidalTimeEmbedding(nn.Module):
     """Sinusoidal time embeddings as described in Denoising Diffusion Probabilistic Models."""
 
     def __init__(
-        self, num_channels: int, flip_sin_to_cos: bool, downscale_freq_shift: float
+        self,
+        num_channels: int,
+        flip_sin_to_cos: bool = False,
+        downscale_freq_shift: float = 1.0,
+        **kwargs,
     ):
-        """Sinusoidal timestep embeddings as described in Denoising Diffusion Probabilistic Models.
+        """Sinusoidal time embeddings.
 
         Args:
             num_channels: The number of channels.
             flip_sin_to_cos: Whether to flip the sin to cos.
             downscale_freq_shift: The downscale frequency shift.
+            kwargs: Additional keyword arguments for compatibility (have no effect).
         """
         super().__init__()
         self.num_channels = num_channels
         self.flip_sin_to_cos = flip_sin_to_cos
         self.downscale_freq_shift = downscale_freq_shift
 
-    def forward(self, timesteps: torch.Tensor, scale: float = 1.0, max_period: float = 1e4):
+    def forward(
+        self, timesteps: torch.Tensor, scale: float = 1.0, max_period: float = 1e4
+    ):
         """Forward step.
 
         Args:
@@ -126,7 +139,10 @@ class SinusoidalTimeEmbedding(nn.Module):
 
 
 class TimestepEmbedding(nn.Module):
-    """Timestep embedding with optional conditioning."""
+    """Linear timestep embedding with optional conditioning.
+
+    Typicall used to further process sinusoidal embedding representations.
+    """
 
     def __init__(
         self,
@@ -145,36 +161,36 @@ class TimestepEmbedding(nn.Module):
             "leakyrelu,0.2",
             "softplus",
         ] = "silu",
-        condition_dim: int = None,
+        post_activation: bool = False,
+        condition_dim: int | None = None,
     ):
-        """Timestep embedding.
+        """Linear timestep embedding.
 
         Args:
             input_dim: The input dimension.
             embedding_dim: The embedding dimension.
             out_dim: The output dimension. If not set, will use embedding_dim.
             activation: The activation function. Defaults to "silu".
-            condition_dim (int, optional): The condition dimension. Defaults to None.
+            post_activation: Whether to use an activation function at the end.
+            condition_dim: The condition dimension. Defaults to None.
                 If set, will condition the input on the condition tensor.
         """
         super().__init__()
         self.linear_1 = nn.Linear(input_dim, embedding_dim, bias=True)
-        self.activation = ACTIVATION_FUNCTIONS.get(activation)
-
-        if self.activation is None:
-            raise ValueError(f"Activation function {activation} not found.")
-
-        if out_dim is not None:
-            self.linear_2 = nn.Linear(embedding_dim, out_dim, bias=True)
-        else:
-            self.linear_2 = nn.Linear(embedding_dim, embedding_dim, bias=True)
-
-        self.post_activation = ACTIVATION_FUNCTIONS.get(activation)
-
-        if condition_dim is not None:
-            self.proj_cond = nn.Linear(condition_dim, embedding_dim, bias=True)
-        else:
-            self.proj_cond = None
+        self.activation = ACTIVATION_FUNCTIONS.get(activation, "silu")()
+        self.linear_2 = nn.Linear(
+            embedding_dim, out_dim if out_dim is not None else embedding_dim, bias=True
+        )
+        self.post_activation = (
+            ACTIVATION_FUNCTIONS.get(activation, "silu")()
+            if post_activation
+            else nn.Identity()
+        )
+        self.proj_cond = (
+            nn.Linear(condition_dim, input_dim, bias=True)
+            if condition_dim is not None
+            else None
+        )
 
     def forward(self, sample: torch.Tensor, condition: torch.Tensor | None = None):
         """Forward pass.
@@ -183,12 +199,86 @@ class TimestepEmbedding(nn.Module):
             sample: The input tensor.
             condition: An optional tensor to condition the input.
         """
-        if condition is not None:
+        if condition is not None and self.proj_cond is not None:
             sample += self.proj_cond(condition)
-
         sample = self.linear_1(sample)
         sample = self.activation(sample)
         sample = self.linear_2(sample)
         sample = self.post_activation(sample)
-
         return sample
+
+
+class DeepSinusoidalTimeEmbedding(nn.Module):
+    """Deep sinusoidal time embeddings, i.e. sinusoidal embedding and MLP)."""
+
+    def __init__(
+        self,
+        num_channels: int,
+        embedding_dim: int | None = None,
+        flip_sin_to_cos: bool = False,
+        downscale_freq_shift: float = 1.0,
+        activation: Literal[
+            "silu",
+            "swish",
+            "mish",
+            "gelu",
+            "relu",
+            "prelu",
+            "leakyrelu",
+            "leakyrelu,0.1",
+            "leakyrelu,0.2",
+            "softplus",
+        ] = "silu",
+        post_activation: bool = False,
+        condition_dim: int = None,
+        **kwargs,
+    ):
+        """Deep sinusoidal time embeddings.
+
+        Args:
+            num_channels: The number of channels.
+            embedding_dim: The dimension for the deep embedding.
+            flip_sin_to_cos: Whether to flip the sin to cos.
+            downscale_freq_shift: The downscale frequency shift.
+            activation: The activation function. Defaults to "silu".
+            post_activation: Whether to use an activation function at the end.
+            condition_dim: The condition dimension. Defaults to None.
+                If set, will condition the input on the condition tensor.
+            kwargs: Additional keyword arguments for compatibility (have no effect).
+        """
+        super().__init__()
+        self.sinusoidal_embedding = SinusoidalTimeEmbedding(
+            num_channels=num_channels,
+            flip_sin_to_cos=flip_sin_to_cos,
+            downscale_freq_shift=downscale_freq_shift,
+        )
+        embedding_dim = embedding_dim if embedding_dim is not None else num_channels
+        self.mlp = TimestepEmbedding(
+            num_channels,
+            embedding_dim,
+            out_dim=num_channels,
+            activation=activation,
+            post_activation=post_activation,
+        )
+
+    def forward(
+        self,
+        timesteps: torch.Tensor,
+        scale: float = 1.0,
+        max_period: float = 1e4,
+        condition: torch.Tensor | None = None,
+    ):
+        """Forward step.
+
+        Args:
+            timesteps: a 1-D Tensor of N indices, one per batch element. These may be fractional.
+            scale: The scale of the embeddings. Defaults to 1.0.
+            max_period: controls the minimum frequency of the embeddings.
+            condition: An optional tensor to condition the input.
+
+        Returns:
+            [N x dim] Tensor of positional embeddings.
+        """
+        emb = self.sinusoidal_embedding(timesteps, scale=scale, max_period=max_period)
+        emb = self.mlp(emb, condition=condition)
+        return emb
