@@ -45,6 +45,7 @@ from chuchichaestli.models.unet.blocks import (
 )
 from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
+    DeepSinusoidalTimeEmbedding,
 )
 from chuchichaestli.models.upsampling import (
     UPSAMPLE_FUNCTIONS,
@@ -65,6 +66,12 @@ BLOCK_MAP = {
     "ConvAttnMidBlock": ConvAttnMidBlock,
     "ConvAttnUpBlock": ConvAttnUpBlock,
     "AttnGateUpBlock": AttnGateUpBlock,
+}
+
+TIME_EMBEDDING_MAP = {
+    "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
+    "DeepSinusoidalTimeEmbedding": DeepSinusoidalTimeEmbedding,
+    True: SinusoidalTimeEmbedding,
 }
 
 
@@ -269,8 +276,13 @@ class UNet(nn.Module):
 
         self.time_channels = time_channels
         self.time_emb = (
-            SinusoidalTimeEmbedding(
-                time_channels, flip_sin_to_cos=False, downscale_freq_shift=0.0
+            TIME_EMBEDDING_MAP[time_embedding](
+                num_channels=time_channels,
+                embedding_dim=t_emb_dim,
+                flip_sin_to_cos=t_emb_flip,
+                downscale_freq_shift=t_emb_shift,
+                activation=t_emb_act_fn,
+                condition_dim=t_emb_condition_dim,
             )
             if time_embedding
             else None
@@ -287,7 +299,7 @@ class UNet(nn.Module):
                     dimensions=dimensions,
                     in_channels=ins,
                     out_channels=outs,
-                    time_embedding=time_embedding,
+                    time_embedding=self.time_emb is not None,
                     time_channels=time_channels,
                     res_args=res_args,
                     attn_args=attn_args,
@@ -302,7 +314,7 @@ class UNet(nn.Module):
         self.mid_block = BLOCK_MAP[mid_block_type](
             dimensions=dimensions,
             channels=outs,
-            time_embedding=time_embedding,
+            time_embedding=self.time_emb is not None,
             time_channels=time_channels,
             res_args=res_args,
             attn_args=attn_args,
@@ -335,7 +347,7 @@ class UNet(nn.Module):
                     dimensions=dimensions,
                     in_channels=outs,
                     out_channels=outs,
-                    time_embedding=time_embedding,
+                    time_embedding=self.time_emb is not None,
                     time_channels=time_channels,
                     res_args=res_args,
                     attn_args=attn_args,
