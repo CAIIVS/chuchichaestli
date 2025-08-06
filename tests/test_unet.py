@@ -18,10 +18,9 @@ along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
 Developed by the Intelligent Vision Systems Group at ZHAW.
 """
 
-from chuchichaestli.models.unet import UNet
-
 import pytest
 import torch
+from chuchichaestli.models.unet import UNet
 
 
 def test_throws_error_on_invalid_dimension():
@@ -130,15 +129,15 @@ def test_forward_pass(
         up_block_types=up_block_types,
         block_out_channel_mults=block_out_channel_mults,
         res_groups=4,
-        num_layers_per_block=1,
+        num_blocks_per_level=1,
     )
     input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
-    timestep = 0.5  # Example timestep
-    output = model(sample, timestep)
+    model.eval()
+    output = model(sample)
     assert output.shape == input_dims  # Check output shape
-    tensor_timestep = torch.Tensor([0.5])
-    output = model(sample, tensor_timestep)
+    output2 = model(sample, 0.5)
+    assert torch.equal(output, output2)
 
 
 @pytest.mark.parametrize(
@@ -150,9 +149,11 @@ def test_forward_pass(
         (1, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
         (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
         (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
-    ]
+    ],
 )
-def test_forward_with_2_layers_per_block(dimensions, down_block_types, up_block_types, n_channels, block_out_channel_mults):
+def test_forward_with_2_layers_per_block(
+    dimensions, down_block_types, up_block_types, n_channels, block_out_channel_mults
+):
     """Test the forward pass of the UNet model with a specified number of layers per block."""
     model = UNet(
         dimensions=dimensions,
@@ -161,14 +162,13 @@ def test_forward_with_2_layers_per_block(dimensions, down_block_types, up_block_
         up_block_types=up_block_types,
         block_out_channel_mults=block_out_channel_mults,
         res_groups=4,
-        num_layers_per_block=2,
-        time_embedding=False,
+        num_blocks_per_level=2,
     )
     input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
     output = model(sample)
     assert output.shape == input_dims  # Check output shape
-    
+
 
 def test_info_conv_attn(
     dimensions=2,
@@ -189,7 +189,7 @@ def test_info_conv_attn(
         block_out_channel_mults=block_out_channel_mults,
         time_embedding=False,
         res_groups=8,
-        num_layers_per_block=2,
+        num_blocks_per_level=2,
         attn_groups=16,
     )
     print(f"\n# UNet({down_block_types=}, {up_block_types=})")
@@ -208,24 +208,61 @@ def test_info_conv_attn(
 
 
 @pytest.mark.parametrize(
-    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
+    "dimensions,down_block_types,up_block_types,block_out_channel_mults,time_embedding",
     [
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
-        (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
-        (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (1, 2), True),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            (1, 2),
+            "SinusoidalTimeEmbedding",
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            (1, 2),
+            "SinusoidalTimeEmbedding",
+        ),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            (1, 2),
+            "DeepSinusoidalTimeEmbedding",
+        ),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            (1, 2),
+            "DeepSinusoidalTimeEmbedding",
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            (1, 2),
+            "DeepSinusoidalTimeEmbedding",
+        ),
     ],
 )
 def test_with_timestep(
-    dimensions, down_block_types, up_block_types, n_channels, block_out_channel_mults
+    dimensions,
+    down_block_types,
+    up_block_types,
+    block_out_channel_mults,
+    time_embedding,
 ):
     """Test the forward pass of the UNet model without a timestep."""
     model = UNet(
         dimensions=dimensions,
         down_block_types=down_block_types,
         up_block_types=up_block_types,
-        n_channels=n_channels,
+        n_channels=32,
         block_out_channel_mults=block_out_channel_mults,
-        time_embedding=True,
+        time_embedding=time_embedding,
         res_groups=8,
     )
     input_dims = (1, 1) + (32,) * dimensions
@@ -233,7 +270,7 @@ def test_with_timestep(
     timestep = 0.5  # Example timestep
     output = model(sample, timestep)
     assert output.shape == input_dims  # Check output shape
-    tensor_timestep = torch.Tensor([0.5])
+    tensor_timestep = torch.Tensor([0.5])  # same as tensor
     output = model(sample, tensor_timestep)
 
 
@@ -311,7 +348,7 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
 
 
 @pytest.mark.parametrize(
-    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults,skip_connection_action,skip_connection_to_all_layers",
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults,skip_connection_action,skip_connection_to_all_blocks",
     [
         (
             1,
@@ -486,7 +523,7 @@ def test_skip_connection_action(
     n_channels,
     block_out_channel_mults,
     skip_connection_action,
-    skip_connection_to_all_layers,
+    skip_connection_to_all_blocks,
 ):
     """Test the forward pass of the UNet model without a timestep."""
     model = UNet(
@@ -499,11 +536,10 @@ def test_skip_connection_action(
         res_groups=8,
         attn_groups=8,
         skip_connection_action=skip_connection_action,
-        skip_connection_to_all_layers=skip_connection_to_all_layers,
+        skip_connection_to_all_blocks=skip_connection_to_all_blocks,
     )
-    input_dims = (1, 1) + (32,) * dimensions
+    input_dims = (3, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
-
     output = model(sample)
     assert output.shape == input_dims
 
@@ -689,7 +725,7 @@ def test_forward_pass_with_noise(
         block_out_channel_mults=block_out_channel_mults,
         n_channels=n_channels,
         res_groups=4,
-        num_layers_per_block=1,
+        num_blocks_per_level=1,
         add_noise=add_noise,
         noise_sigma=noise_sigma,
     )
@@ -719,7 +755,7 @@ def test_forward_pass_with_noise_at_inference(
         block_out_channel_mults=block_out_channel_mults,
         n_channels=n_channels,
         res_groups=4,
-        num_layers_per_block=1,
+        num_blocks_per_level=1,
         add_noise=add_noise,
         noise_sigma=noise_sigma,
     )
