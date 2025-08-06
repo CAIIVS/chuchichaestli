@@ -41,7 +41,7 @@ def test_forward(dimensions):
 
 
 @pytest.mark.parametrize("dimensions", [1, 2, 3])
-def test_forward(dimensions):
+def test_interpolate_forward(dimensions):
     """Test the forward method of the `DownsampleInterpolate` module."""
     # Create dummy input tensor
     input_shape = (1, 16) + (32,) * dimensions
