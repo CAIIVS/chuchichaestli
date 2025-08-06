@@ -76,7 +76,15 @@ TIME_EMBEDDING_MAP = {
 
 
 class UNet(nn.Module):
-    """Flexible U-Net model implementation."""
+    """Highly customizable U-Net model implementation.
+
+    The architecture consists of an encoder-decoder structure with skip connections.
+    The encoder chains several convolutional (residual) and downsampling blocks.
+    Each downsampling block separates the encoder into spatially hierarchical levels.
+    The decoder is built symmetrically to the encoder with (residual) transposed
+    convolutional and upsampling blocks, each level linked via skip connections
+    which ensure spatial information is passed through the network.
+    """
 
     def __init__(
         self,
@@ -106,7 +114,7 @@ class UNet(nn.Module):
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 4),
         upsample_type: Literal["Upsample", "UpsampleInterpolate"] = "Upsample",
         downsample_type: Literal["Downsample", "DownsampleInterpolate"] = "Downsample",
-        num_layers_per_block: int = 1,
+        num_blocks_per_level: int = 1,
         groups: int = 8,
         act: Literal[
             "silu",
@@ -169,7 +177,7 @@ class UNet(nn.Module):
         attn_kernel_size: int = 1,
         attn_gate_inter_channels: int = 32,
         skip_connection_action: Literal["concat", "avg", "add"] = "concat",
-        skip_connection_to_all_layers: bool | None = None,
+        skip_connection_to_all_blocks: bool | None = None,
         add_noise: Literal["up", "down"] | None = None,
         noise_sigma: float = 0.1,
         noise_detached: bool = True,
@@ -181,13 +189,13 @@ class UNet(nn.Module):
             in_channels: Number of input channels.
             n_channels: Number of channels in the first layer.
             out_channels: Number of output channels.
-            down_block_types: Types of down blocks.
+            down_block_types: Types of down blocks as a list, starting at the
+              first block (in the highest level).
             mid_block_type: Type of mid block.
-            up_block_types: Types of up blocks.
+            up_block_types: Types of up blocks as a list, starting with the last
+              block (lowest level).
             block_out_channel_mults: Output channel multipliers for each block.
-            time_embedding: Whether to use a time embedding.
-            time_channels: Number of time channels.
-            num_layers_per_block: Number of layers per block.
+            num_blocks_per_level: Number of layers per block.
             upsample_type: Type of upsampling block (see `chuchichaestli.models.upsampling` for details).
             downsample_type: Type of downsampling block (see `chuchichaestli.models.downsampling` for details).
             groups: Number of groups for group normalization.
@@ -205,13 +213,13 @@ class UNet(nn.Module):
               at the end of the time embedding.
             t_emb_condition_dim: The condition dimension for the time embedding.
             res_groups: Number of groups for the residual block normalization (if group norm).
-            res_act_fn: Activation function for the residual block
+            res_act_fn: Activation function for the residual blocks
               (see `chuchichaestli.models.activations` for details).
-            res_dropout: Dropout rate for the residual block.
+            res_dropout: Dropout rate for the residual blocks.
             res_norm_type: Normalization type for the residual block
               (see `chuchichaestli.models.norm` for details).
-            res_kernel_size: Kernel size for the residual block.
-            attn_head_dim: Dimension of the attention head.
+            res_kernel_size: Kernel size for the residual blocks.
+            attn_head_dim: Dimension of the attention heads.
             attn_n_heads: Number of attention heads.
             attn_dropout_p: Dropout probability of the scaled dot product attention.
             attn_norm_type: Normalization type for the convolutional attention block
@@ -223,7 +231,8 @@ class UNet(nn.Module):
               (if `up_block_types` contains `"AttnGateUpBlock"`).
             skip_connection_action: Action to take for the skip connection.
               If `None`, no skip connections are used.
-            skip_connection_to_all_levels: TODO
+            skip_connection_to_all_blocks: If `True`, the U-Net builds skip connections
+              to all blocks in a level, otherwise only to the first block in a level.
             add_noise: Add a Gaussian noise regularizer block in the bottleneck (before or after).
               Can be "up" (after the bottlenet) or "down" (before the bottleneck).
             noise_sigma: Std. relative (to the magnitude of the input) for the noise generation.
@@ -241,7 +250,7 @@ class UNet(nn.Module):
         upsample_cls = UPSAMPLE_FUNCTIONS[upsample_type]
         downsample_cls = DOWNSAMPLE_FUNCTIONS[downsample_type]
         n_mults = len(block_out_channel_mults)
-        self.num_layers_per_block = num_layers_per_block
+        self.num_blocks_per_level = num_blocks_per_level
 
         # Group normalization optimization
         if res_norm_type == "group" and n_channels % res_groups != 0:
@@ -294,7 +303,7 @@ class UNet(nn.Module):
         for i in range(n_mults):
             outs = ins * block_out_channel_mults[i]
 
-            for _ in range(num_layers_per_block):
+            for _ in range(num_blocks_per_level):
                 down_block = BLOCK_MAP[down_block_types[i]](
                     dimensions=dimensions,
                     in_channels=ins,
@@ -320,9 +329,6 @@ class UNet(nn.Module):
             attn_args=attn_args,
         )
 
-        if skip_connection_to_all_layers is None:
-            skip_connection_to_all_layers = skip_connection_action == "concat"
-
         # Build decoder
         self.up_blocks = nn.ModuleList([])
 
@@ -330,22 +336,10 @@ class UNet(nn.Module):
             ins = outs
             outs = ins // block_out_channel_mults[i]
 
-            up_block = BLOCK_MAP[up_block_types[i]](
-                dimensions=dimensions,
-                in_channels=ins,
-                out_channels=outs,
-                time_embedding=time_embedding,
-                time_channels=time_channels,
-                res_args=res_args,
-                attn_args=attn_args,
-                skip_connection_action=skip_connection_action,
-            )
-            self.up_blocks.append(up_block)
-
-            for _ in range(num_layers_per_block - 1):
+            for j in range(num_blocks_per_level):
                 up_block = BLOCK_MAP[up_block_types[i]](
                     dimensions=dimensions,
-                    in_channels=outs,
+                    in_channels=ins if j == 0 else outs,
                     out_channels=outs,
                     time_embedding=self.time_emb is not None,
                     time_channels=time_channels,
@@ -353,7 +347,7 @@ class UNet(nn.Module):
                     attn_args=attn_args,
                     skip_connection_action=(
                         skip_connection_action
-                        if skip_connection_to_all_layers
+                        if j == 0 or skip_connection_to_all_blocks
                         else None
                     ),
                 )
@@ -418,7 +412,7 @@ class UNet(nn.Module):
             ):
                 continue
             # Append skip connection for the last down_block in each layer
-            if (i + 1) % self.num_layers_per_block == 0:
+            if (i + 1) % self.num_blocks_per_level == 0:
                 hh.append(x)
 
         x = self.mid_block(x, t_emb)
@@ -432,7 +426,7 @@ class UNet(nn.Module):
                 no_count_block += 1
                 continue
             # concat skip connection for the first upblock of each layer
-            if (i - no_count_block) % self.num_layers_per_block == 0:
+            if (i - no_count_block) % self.num_blocks_per_level == 0:
                 hs = hh.pop()
                 x = up_block(x, hs, t_emb)
             else:
