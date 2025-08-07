@@ -1,26 +1,12 @@
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for local datasets.
 
-This file does not contain actual unit test, but rather example usagee on
-local datasets (saved locally in ./data); run with
-`pytest tests/local_test_dataset.py[::<test_name>] -sv`
-to inspect outputs and check correct file parsing by eye.
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
+This file does not contain actual unit test, but rather example usage on local
+datasets (saved locally in ./data); run with
+`[uv run] pytest tests/local_test_dataset.py[::<test_name>] -sv`
+to inspect outputs and check correct file parsing.
 """
 
 import pytest

@@ -1,22 +1,7 @@
-"""Implementation of PriorGrad.
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Implementation of the PriorGrad noise process."""
 
 from collections.abc import Generator
 from typing import Any
@@ -30,8 +15,10 @@ from chuchichaestli.diffusion.distributions import NormalDistribution
 class PriorGrad(DDPM):
     """PriorGrad noise process.
 
-    Implementation of "PriorGrad: Improving conditional denoising diffusion models with data-dependent adataptive prior"
-    by Lee et al. (see https://arxiv.org/abs/2106.06406)
+    As described in the paper:
+    "PriorGrad: Improving conditional denoising diffusion models with
+    data-dependent adataptive prior" by Lee et al. (2021);
+    see https://arxiv.org/abs/2106.06406.
     """
 
     def __init__(

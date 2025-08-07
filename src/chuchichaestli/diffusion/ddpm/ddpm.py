@@ -1,22 +1,7 @@
-"""Implementation of the Diffusion Probabilistic Model (DDPM) noise process as described in the paper.
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Implementation of the Diffusion Probabilistic Model (DDPM) noise process."""
 
 from collections.abc import Generator
 from typing import Any
@@ -30,8 +15,9 @@ from chuchichaestli.diffusion.ddpm.base import SCHEDULES, DiffusionProcess
 class DDPM(DiffusionProcess):
     """Diffusion Probabilistic Model (DDPM) noise process.
 
-    The DDPM noise process is described in the paper "Denoising Diffusion Probabilistic Models" by Ho et al.
-    See https://arxiv.org/abs/2006.11239.
+    As described in the paper:
+    "Denoising Diffusion Probabilistic Models" by Ho et al. (2020);
+    see https://arxiv.org/abs/2006.11239.
     """
 
     def __init__(
