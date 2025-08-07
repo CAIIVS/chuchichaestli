@@ -112,10 +112,9 @@ class UNet(nn.Module):
             "AttnUpBlock",
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 4),
+        num_blocks_per_level: int = 1,
         upsample_type: Literal["Upsample", "UpsampleInterpolate"] = "Upsample",
         downsample_type: Literal["Downsample", "DownsampleInterpolate"] = "Downsample",
-        num_blocks_per_level: int = 1,
-        groups: int = 8,
         act: Literal[
             "silu",
             "swish",
@@ -128,6 +127,7 @@ class UNet(nn.Module):
             "leakyrelu,0.2",
             "softplus",
         ] = "silu",
+        groups: int = 8,
         in_kernel_size: int = 3,
         out_kernel_size: int = 3,
         time_embedding: Literal[
@@ -153,7 +153,6 @@ class UNet(nn.Module):
         ] = "silu",
         t_emb_post_act: bool = False,
         t_emb_condition_dim: int | None = None,
-        res_groups: int = 32,
         res_act_fn: Literal[
             "silu",
             "swish",
@@ -168,6 +167,7 @@ class UNet(nn.Module):
         ] = "silu",
         res_dropout: float = 0.1,
         res_norm_type: Literal["group", "instance", "batch", "adabatch"] = "group",
+        res_groups: int = 32,
         res_kernel_size: int = 3,
         attn_head_dim: int = 32,
         attn_n_heads: int = 1,
@@ -176,7 +176,7 @@ class UNet(nn.Module):
         attn_groups: int = 32,
         attn_kernel_size: int = 1,
         attn_gate_inter_channels: int = 32,
-        skip_connection_action: Literal["concat", "avg", "add"] = "concat",
+        skip_connection_action: Literal["concat", "avg", "add"] | None = "concat",
         skip_connection_to_all_blocks: bool | None = None,
         add_noise: Literal["up", "down"] | None = None,
         noise_sigma: float = 0.1,
@@ -187,7 +187,7 @@ class UNet(nn.Module):
         Args:
             dimensions: Number of (spatial) dimensions.
             in_channels: Number of input channels.
-            n_channels: Number of channels in the first layer.
+            n_channels: Number of channels in the first block.
             out_channels: Number of output channels.
             down_block_types: Types of down blocks as a list, starting at the
               first block (in the highest level).
@@ -195,11 +195,12 @@ class UNet(nn.Module):
             up_block_types: Types of up blocks as a list, starting with the last
               block (lowest level).
             block_out_channel_mults: Output channel multipliers for each block.
-            num_blocks_per_level: Number of layers per block.
+            num_blocks_per_level: Number of blocks per level (blocks are repeated if `>1`).
             upsample_type: Type of upsampling block (see `chuchichaestli.models.upsampling` for details).
             downsample_type: Type of downsampling block (see `chuchichaestli.models.downsampling` for details).
-            groups: Number of groups for group normalization.
-            act: Activation function (see `chuchichaestli.models.activations` for details).
+            act: Activation function for the output layer (see
+              `chuchichaestli.models.activations` for details).
+            groups: Number of groups for group normalization in the output layer.
             in_kernel_size: Kernel size for the input convolution.
             out_kernel_size: Kernel size for the output convolution.
             time_embedding: Whether to use a time embedding.
@@ -212,12 +213,12 @@ class UNet(nn.Module):
             t_emb_post_act: Whether to use an activation function
               at the end of the time embedding.
             t_emb_condition_dim: The condition dimension for the time embedding.
-            res_groups: Number of groups for the residual block normalization (if group norm).
             res_act_fn: Activation function for the residual blocks
               (see `chuchichaestli.models.activations` for details).
             res_dropout: Dropout rate for the residual blocks.
             res_norm_type: Normalization type for the residual block
               (see `chuchichaestli.models.norm` for details).
+            res_groups: Number of groups for the residual block normalization (if group norm).
             res_kernel_size: Kernel size for the residual blocks.
             attn_head_dim: Dimension of the attention heads.
             attn_n_heads: Number of attention heads.
@@ -253,10 +254,10 @@ class UNet(nn.Module):
         self.num_blocks_per_level = num_blocks_per_level
         self.skip_connection_to_all_blocks = skip_connection_to_all_blocks
 
-        # Group normalization optimization
+        # Group normalization configuration
         if res_norm_type == "group" and n_channels % res_groups != 0:
             warnings.warn(
-                f"Number of channels ({n_channels}) is not divisible by the number of groups ({res_groups}). Setting number of groups to in_channels."
+                f"Number of channels ({n_channels}) is not divisible by the number of groups ({res_groups}). Setting number of groups to n_channels."
             )
             res_groups = n_channels
             groups = min(groups, n_channels)
@@ -280,6 +281,7 @@ class UNet(nn.Module):
             "inter_channels": attn_gate_inter_channels,
         }
 
+        # Input layer
         self.conv_in = conv_cls(
             in_channels, n_channels, kernel_size=in_kernel_size, padding="same"
         )
@@ -368,7 +370,7 @@ class UNet(nn.Module):
                     GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
                 )
 
-        # Output layers
+        # Output layer
         self.norm = Norm(dimensions, res_norm_type, outs, groups)
         self.act = ACTIVATION_FUNCTIONS[act]()
         self.conv_out = conv_cls(

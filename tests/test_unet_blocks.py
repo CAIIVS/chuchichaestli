@@ -26,13 +26,6 @@ from chuchichaestli.models.unet.blocks import (
     DownBlock,
     MidBlock,
     UpBlock,
-    AttnDownBlock,
-    AttnMidBlock,
-    AttnUpBlock,
-    ConvAttnDownBlock,
-    ConvAttnMidBlock,
-    ConvAttnUpBlock,
-    AttnGateUpBlock,
 )
 
 

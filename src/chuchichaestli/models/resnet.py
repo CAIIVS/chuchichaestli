@@ -78,7 +78,7 @@ class ResidualBlock(nn.Module):
         """Forward pass through the residual block."""
         hh = self.conv1(self.act1(self.norm1(x)))
         idx = [slice(None), slice(None)] + [None] * self.dimensions
-        if self.time_embedding and t is not None:
+        if self.time_embedding:
             hh += self.time_proj(self.time_act(t))[idx]
         hh = self.conv2(self.dropout(self.act2(self.norm2(hh))))
 
