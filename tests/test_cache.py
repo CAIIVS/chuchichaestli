@@ -248,13 +248,6 @@ def test_SharedDict_write(descr, cache_size):
 )
 def test_SharedDict_buffer_too_small(descr, cache_size):
     """Test the SharedArray module."""
-    sample_dict = {
-        "numbers": [1, 2, 3, 4, 5],
-        "index": 1,
-        "bool": False,
-        "ratio": 0.8,
-        "foo": "bar",
-    }
     with pytest.raises(ValueError):
         cache_dict = SharedDict(descr=descr, size=cache_size, verbose=True)
         cache_dict.clear_allocation()

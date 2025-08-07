@@ -10,7 +10,6 @@ to inspect outputs and check correct file parsing.
 """
 
 import pytest
-import gc
 import time
 import tqdm
 import torch
