@@ -9,7 +9,7 @@ from chuchichaestli.models.resnet import ResidualBlock
 
 
 @pytest.mark.parametrize(
-    "dimensions, in_channels, out_channels, time_channels, res_groups, res_act_fn, res_droupout",
+    "dimensions, in_channels, out_channels, time_channels, res_groups, res_act_fn, res_dropout",
     [
         (1, 32, 32, 32, 16, "silu", 0.1),
         (2, 32, 32, 32, 16, "silu", 0.1),
@@ -32,9 +32,9 @@ def test_forward_resnet(
     time_channels,
     res_groups,
     res_act_fn,
-    res_droupout,
+    res_dropout,
 ):
-    """Test the forward method of the ResnetBlock1D module."""
+    """Test the forward method of the ResidualBlock module."""
     # Create dummy input tensor
     input_shape = (1, in_channels) + (32,) * dimensions
     input_tensor = torch.randn(input_shape)
@@ -49,7 +49,7 @@ def test_forward_resnet(
         time_channels,
         res_groups,
         res_act_fn,
-        res_droupout,
+        res_dropout,
     )
 
     # Call the forward method
@@ -68,7 +68,7 @@ def test_forward_resnet(
     ],
 )
 def test_forward_groups_not_divisible(dimensions, input_channels, res_groups):
-    """Test the forward method of the ResnetBlock3D module."""
+    """Test the forward method of the ResidualBlock with invalid groups."""
     # Call the forward method
     with pytest.raises(ValueError):
         ResidualBlock(dimensions, input_channels, 32, True, 32, res_groups=res_groups)
