@@ -220,7 +220,7 @@ class UNet(nn.Module):
             skip_connection_to_all_blocks: If `True`, the U-Net builds skip connections
               to all blocks in a level, otherwise only to the first block in a level.
             add_noise: Add a Gaussian noise regularizer block in the bottleneck (before or after).
-              Can be "up" (after the bottlenet) or "down" (before the bottleneck).
+              Can be "up" (after the bottleneck) or "down" (before the bottleneck).
             noise_sigma: Std. relative (to the magnitude of the input) for the noise generation.
             noise_detached: If True, the input is detached for the noise generation.
               Note, this should generally be `True`, otherwise the noise is learnable.
@@ -279,6 +279,7 @@ class UNet(nn.Module):
                 flip_sin_to_cos=t_emb_flip,
                 downscale_freq_shift=t_emb_shift,
                 activation=t_emb_act_fn,
+                post_activation=t_emb_post_act,
                 condition_dim=t_emb_condition_dim,
             )
             if time_embedding
