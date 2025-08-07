@@ -16,14 +16,13 @@
         pkgs = import nixpkgs { inherit system; };
         makeEnvsForPython = dist: dist.withPackages (p: with p; [
           numpy
+          h5py
           torch
-          torchmetrics
           torchvision
-          timm
-          open-clip-torch
+          psutil
         ]);
         pyDists = with pkgs; [
-          python312 python311
+          python312
         ];
         pyEnvs = map makeEnvsForPython pyDists;
       in

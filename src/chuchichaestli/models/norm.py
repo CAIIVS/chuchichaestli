@@ -5,6 +5,7 @@
 
 import torch
 from torch import nn
+from typing import Literal
 
 
 __all__ = ["Norm"]
@@ -14,7 +15,7 @@ class Norm(nn.Module):
     """Normalization layer implementation."""
 
     def __init__(
-        self, dimensions: int, norm_type: str, channels: int, num_groups: int, **kwargs
+        self, dimensions: int, norm_type: Literal["group", "instance", "batch", "adabatch"], channels: int, num_groups: int, **kwargs
     ):
         """Initialize the normalization layer."""
         super().__init__()
@@ -34,7 +35,7 @@ class Norm(nn.Module):
                 self.norm = nn.BatchNorm2d(channels, **kwargs)
             case "batch" if dimensions == 3:
                 self.norm = nn.BatchNorm3d(channels, **kwargs)
-            case "abatch":
+            case "adabatch":
                 self.norm = AdaptiveBatchNorm(dimensions, channels, **kwargs)
 
     def forward(self, x: torch.Tensor):

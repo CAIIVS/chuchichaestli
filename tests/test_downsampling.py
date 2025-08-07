@@ -5,18 +5,35 @@
 
 import pytest
 import torch
-from chuchichaestli.models.downsampling import Downsample
+from chuchichaestli.models.downsampling import Downsample, DownsampleInterpolate
 
 
 @pytest.mark.parametrize("dimensions", [1, 2, 3])
 def test_forward(dimensions):
-    """Test the forward method of the downsample module."""
+    """Test the forward method of the `Downsample` module."""
     # Create dummy input tensor
     input_shape = (1, 16) + (32,) * dimensions
     output_shape = (1, 16) + (16,) * dimensions
     input_tensor = torch.randn(input_shape)
 
     upsample = Downsample(dimensions=dimensions, num_channels=16)
+
+    # Call the forward method
+    output_tensor = upsample.forward(input_tensor, None)
+
+    # Check the output tensor shape
+    assert output_tensor.shape == output_shape
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+def test_interpolate_forward(dimensions):
+    """Test the forward method of the `DownsampleInterpolate` module."""
+    # Create dummy input tensor
+    input_shape = (1, 16) + (32,) * dimensions
+    output_shape = (1, 16) + (16,) * dimensions
+    input_tensor = torch.randn(input_shape)
+
+    upsample = DownsampleInterpolate(dimensions=dimensions, num_channels=None)
 
     # Call the forward method
     output_tensor = upsample.forward(input_tensor, None)

@@ -3,10 +3,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the UNet model."""
 
-from chuchichaestli.models.unet import UNet
-
 import pytest
 import torch
+from chuchichaestli.models.unet import UNet
 
 
 def test_throws_error_on_invalid_dimension():
@@ -32,6 +31,12 @@ def test_throws_error_on_mismatched_lengths_2():
             up_block_types=("UpBlock", "AttnUpBlock"),
             block_out_channel_mults=(1, 2, 3),
         )
+
+
+def test_throws_warning_for_group_divisibility():
+    """Test that the UNet model throws a warning when the number of channels is not divisible by the number of groups."""
+    with pytest.warns():
+        UNet(n_channels=16, res_groups=32)
 
 
 @pytest.mark.parametrize(
@@ -104,17 +109,49 @@ def test_forward_pass(
     """Test the forward pass of the UNet model."""
     model = UNet(
         dimensions=dimensions,
+        n_channels=n_channels,
         down_block_types=down_block_types,
         up_block_types=up_block_types,
         block_out_channel_mults=block_out_channel_mults,
-        n_channels=n_channels,
         res_groups=4,
-        num_layers_per_block=1,
+        num_blocks_per_level=1,
     )
     input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
-    timestep = 0.5  # Example timestep
-    output = model(sample, timestep)
+    model.eval()
+    output = model(sample)
+    assert output.shape == input_dims  # Check output shape
+    output2 = model(sample, 0.5)
+    assert torch.equal(output, output2)
+
+
+@pytest.mark.parametrize(
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
+    [
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (2, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (3, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (1, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
+        (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+        (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+    ],
+)
+def test_forward_with_2_layers_per_block(
+    dimensions, down_block_types, up_block_types, n_channels, block_out_channel_mults
+):
+    """Test the forward pass of the UNet model with a specified number of layers per block."""
+    model = UNet(
+        dimensions=dimensions,
+        n_channels=n_channels,
+        down_block_types=down_block_types,
+        up_block_types=up_block_types,
+        block_out_channel_mults=block_out_channel_mults,
+        res_groups=4,
+        num_blocks_per_level=2,
+    )
+    input_dims = (1, 1) + (32,) * dimensions
+    sample = torch.randn(*input_dims)  # Example input
+    output = model(sample)
     assert output.shape == input_dims  # Check output shape
 
 
@@ -137,7 +174,7 @@ def test_info_conv_attn(
         block_out_channel_mults=block_out_channel_mults,
         time_embedding=False,
         res_groups=8,
-        num_layers_per_block=2,
+        num_blocks_per_level=2,
         attn_groups=16,
     )
     print(f"\n# UNet({down_block_types=}, {up_block_types=})")
@@ -156,31 +193,70 @@ def test_info_conv_attn(
 
 
 @pytest.mark.parametrize(
-    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
+    "dimensions,down_block_types,up_block_types,block_out_channel_mults,time_embedding",
     [
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
-        (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
-        (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), (1, 2), True),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            (1, 2),
+            "SinusoidalTimeEmbedding",
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            (1, 2),
+            "SinusoidalTimeEmbedding",
+        ),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            (1, 2),
+            "DeepSinusoidalTimeEmbedding",
+        ),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            (1, 2),
+            "DeepSinusoidalTimeEmbedding",
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            (1, 2),
+            "DeepSinusoidalTimeEmbedding",
+        ),
     ],
 )
-def test_no_timestep(
-    dimensions, down_block_types, up_block_types, n_channels, block_out_channel_mults
+def test_with_timestep(
+    dimensions,
+    down_block_types,
+    up_block_types,
+    block_out_channel_mults,
+    time_embedding,
 ):
     """Test the forward pass of the UNet model without a timestep."""
     model = UNet(
         dimensions=dimensions,
         down_block_types=down_block_types,
         up_block_types=up_block_types,
-        n_channels=n_channels,
+        n_channels=32,
         block_out_channel_mults=block_out_channel_mults,
-        time_embedding=False,
+        time_embedding=time_embedding,
         res_groups=8,
     )
     input_dims = (1, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
-
-    output = model(sample)
-    assert output.shape == input_dims
+    timestep = 0.5  # Example timestep
+    output = model(sample, timestep)
+    assert output.shape == input_dims  # Check output shape
+    tensor_timestep = torch.Tensor([0.5])  # same as tensor
+    output = model(sample, tensor_timestep)
 
 
 @pytest.mark.parametrize(
@@ -257,9 +333,26 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
 
 
 @pytest.mark.parametrize(
-    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults,skip_connection_action",
+    "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults,skip_connection_action,skip_connection_to_all_blocks",
     [
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "concat"),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            True,
+        ),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            False,
+        ),
         (
             2,
             ("DownBlock", "AttnDownBlock"),
@@ -267,6 +360,34 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2),
             "concat",
+            True,
+        ),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            True,
+        ),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            False,
+        ),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            False,
         ),
         (
             3,
@@ -275,8 +396,27 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2),
             "concat",
+            True,
         ),
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "avg"),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "concat",
+            False,
+        ),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "avg", True),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "avg",
+            False,
+        ),
         (
             2,
             ("DownBlock", "AttnDownBlock", "DownBlock"),
@@ -284,6 +424,16 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2, 3),
             "avg",
+            True,
+        ),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock", "DownBlock"),
+            ("AttnUpBlock", "UpBlock", "AttnUpBlock"),
+            8,
+            (1, 2, 3),
+            "avg",
+            False,
         ),
         (
             3,
@@ -292,8 +442,27 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2),
             "avg",
+            True,
         ),
-        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "add"),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "avg",
+            False,
+        ),
+        (1, ("DownBlock", "DownBlock"), ("UpBlock", "UpBlock"), 8, (1, 2), "add", True),
+        (
+            1,
+            ("DownBlock", "DownBlock"),
+            ("UpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "add",
+            False,
+        ),
         (
             2,
             ("DownBlock", "AttnDownBlock", "DownBlock"),
@@ -301,6 +470,16 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2, 3),
             "add",
+            True,
+        ),
+        (
+            2,
+            ("DownBlock", "AttnDownBlock", "DownBlock"),
+            ("AttnUpBlock", "UpBlock", "AttnUpBlock"),
+            8,
+            (1, 2, 3),
+            "add",
+            False,
         ),
         (
             3,
@@ -309,6 +488,16 @@ def test_kernel_sizes(in_kernel_size, out_kernel_size, res_kernel_size):
             8,
             (1, 2),
             "add",
+            True,
+        ),
+        (
+            3,
+            ("DownBlock", "AttnDownBlock"),
+            ("AttnUpBlock", "UpBlock"),
+            8,
+            (1, 2),
+            "add",
+            False,
         ),
     ],
 )
@@ -319,6 +508,7 @@ def test_skip_connection_action(
     n_channels,
     block_out_channel_mults,
     skip_connection_action,
+    skip_connection_to_all_blocks,
 ):
     """Test the forward pass of the UNet model without a timestep."""
     model = UNet(
@@ -331,10 +521,10 @@ def test_skip_connection_action(
         res_groups=8,
         attn_groups=8,
         skip_connection_action=skip_connection_action,
+        skip_connection_to_all_blocks=skip_connection_to_all_blocks,
     )
-    input_dims = (1, 1) + (32,) * dimensions
+    input_dims = (3, 1) + (32,) * dimensions
     sample = torch.randn(*input_dims)  # Example input
-
     output = model(sample)
     assert output.shape == input_dims
 
@@ -520,7 +710,7 @@ def test_forward_pass_with_noise(
         block_out_channel_mults=block_out_channel_mults,
         n_channels=n_channels,
         res_groups=4,
-        num_layers_per_block=1,
+        num_blocks_per_level=1,
         add_noise=add_noise,
         noise_sigma=noise_sigma,
     )
@@ -550,7 +740,7 @@ def test_forward_pass_with_noise_at_inference(
         block_out_channel_mults=block_out_channel_mults,
         n_channels=n_channels,
         res_groups=4,
-        num_layers_per_block=1,
+        num_blocks_per_level=1,
         add_noise=add_noise,
         noise_sigma=noise_sigma,
     )
