@@ -74,7 +74,7 @@ class ResidualBlock(nn.Module):
 
         self.dropout = nn.Dropout(res_dropout)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the residual block."""
         hh = self.conv1(self.act1(self.norm1(x)))
         idx = [slice(None), slice(None)] + [None] * self.dimensions

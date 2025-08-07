@@ -20,10 +20,10 @@ Developed by the Intelligent Vision Systems Group at ZHAW.
 
 import torch
 from torch import nn
-
 from chuchichaestli.models.attention import ATTENTION_MAP
 from chuchichaestli.models.resnet import ResidualBlock
 from chuchichaestli.utils import partialclass
+from typing import Literal
 
 
 class GaussianNoiseBlock(nn.Module):
@@ -49,11 +49,9 @@ class GaussianNoiseBlock(nn.Module):
           to the noise level.
         """
         super().__init__()
-        self.sigma = sigma
+        self.sigma = nn.Parameter(torch.tensor(sigma))
         self.detached = detached
         self.noise = torch.tensor(mu)
-        if device is not None:
-            self.noise = self.noise.to(device)
 
     def forward(
         self, x: torch.Tensor, *args, noise_at_inference: bool = False
@@ -74,10 +72,10 @@ class DownBlock(nn.Module):
         dimensions: int,
         in_channels: int,
         out_channels: int,
-        time_embedding: bool = True,
+        time_embedding: bool = False,
         time_channels: int = 32,
         res_args: dict = {},
-        attention: str | None = None,
+        attention: Literal["self_attention", "conv_attention"] | None = None,
         attn_args: dict = {},
     ):
         """Initialize the down block."""
@@ -101,7 +99,7 @@ class DownBlock(nn.Module):
             case _:
                 self.attn = None
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the down block."""
         x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
@@ -115,10 +113,10 @@ class MidBlock(nn.Module):
         self,
         dimensions: int,
         channels: int,
-        time_embedding: bool = True,
+        time_embedding: bool = False,
         time_channels: int = 32,
         res_args: dict = {},
-        attention: str | None = None,
+        attention: Literal["self_attention", "conv_attention"] | None = None,
         attn_args: dict = {},
     ):
         """Initialize the mid block."""
@@ -139,7 +137,7 @@ class MidBlock(nn.Module):
             case _:
                 self.attn = None
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the mid block."""
         x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
@@ -154,12 +152,13 @@ class UpBlock(nn.Module):
         dimensions: int,
         in_channels: int,
         out_channels: int,
-        time_embedding: bool = True,
+        time_embedding: bool = False,
         time_channels: int = 32,
         res_args: dict = {},
-        attention: str | None = None,
+        attention: Literal["self_attention", "conv_attention", "attention_gate"]
+        | None = None,
         attn_args: dict = {},
-        skip_connection_action: str | None = None,
+        skip_connection_action: Literal["concat", "avg", "add"] | None = None,
     ):
         """Initialize the up block."""
         super().__init__()
@@ -202,7 +201,7 @@ class UpBlock(nn.Module):
                 self.attn = None
 
     def forward(
-        self, x: torch.Tensor, h: torch.Tensor, t: torch.Tensor
+        self, x: torch.Tensor, h: torch.Tensor, t: torch.Tensor | None = None
     ) -> torch.Tensor:
         """Forward pass through the up block."""
         x = self.attn(x, h) if self.attn else x

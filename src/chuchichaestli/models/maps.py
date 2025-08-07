@@ -44,3 +44,5 @@ UPSAMPLE_MODE = {
     2: "bilinear",
     3: "trilinear",
 }
+
+DOWNSAMPLE_MODE = UPSAMPLE_MODE
