@@ -4,48 +4,60 @@ dynamic = ["version"]
 license = "GPL-3.0-or-later"
 license-files = ["LICEN[CS]E*"]
 authors = [
-  { name = "Yann Billeter", email = "bily@zhaw.ch" },
-  { name = "Daniel Barco", email = "baoc@zhaw.ch" },
-  { name = "Philipp Denzel", email = "denp@zhaw.ch" },
-  { name = "Martin Oswald", email = "oswd@zhaw.ch" },
-  { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
+    { name = "Yann Billeter", email = "bily@zhaw.ch" },
+    { name = "Daniel Barco", email = "baoc@zhaw.ch" },
+    { name = "Philipp Denzel", email = "denp@zhaw.ch" },
+    { name = "Martin Oswald", email = "oswd@zhaw.ch" },
+    { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
 ]
 maintainers = [
-  { name = "Daniel Barco", email = "baoc@zhaw.ch" },
-  { name = "Philipp Denzel", email = "denp@zhaw.ch" },
-  { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
+    { name = "Daniel Barco", email = "baoc@zhaw.ch" },
+    { name = "Philipp Denzel", email = "denp@zhaw.ch" },
+    { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
 ]
 description = "Where you find all the state-of-the-art cooking utensils (salt, pepper, gradient descent... the usual)."
 readme = "README.md"
 requires-python = ">=3.10"
 keywords = ["artificial intelligence", "deep learning", "neural networks"]
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
-  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
-  "Operating System :: OS Independent",
-  "Topic :: Scientific/Engineering :: Artificial Intelligence",
-  "Topic :: Scientific/Engineering :: Image Processing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
-  "numpy>=1.26",
-  "torch>=2.2.2",
-  "torchvision>=0.20.1",  
-  "h5py>=3.12.1",
-  "psutil>=6.1.0"
+    "numpy>=1.26",
+    "torch>=2.2.2",
+    "torchvision>=0.20.1",  
+    "h5py>=3.12.1",
+    "psutil>=6.1.0"
 ]
 [project.optional-dependencies]
 dev = ["ruff==0.4.1", "pytest==8.1.1", "pytest-cov>=6.2.1"]
+doc = [
+    "mkdocs>=1.6.1",
+    "mkdocs-api-autonav>=0.3.0",
+    "mkdocs-material>=9.6.16",
+    "mkdocstrings[python]>=0.30.0",
+]
 
 [dependency-groups]
 dev = [
-  "ruff==0.4.1",
-  "pre-commit==3.7.0",
-  "pytest==8.1.1",
-  "pytest-cov>=6.2.1",
+    "ruff==0.4.1",
+    "pre-commit==3.7.0",
+    "pytest==8.1.1",
+    "pytest-cov>=6.2.1",
+]
+doc = [
+    "mkdocs>=1.6.1",
+    "mkdocs-api-autonav>=0.3.0",
+    "mkdocs-material>=9.6.16",
+    "mkdocstrings[python]>=0.30.0",
 ]
 
 [project.urls]
@@ -64,8 +76,8 @@ path = "src/chuchichaestli/__about__.py"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
-  "/docs",
-  "/.*",
+    "/docs",
+    "/.*",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -82,25 +94,25 @@ addopts = ["--import-mode=importlib"]
 branch = true
 parallel = true
 omit = [
-  "chuchichaestli/__about__.py",
+    "chuchichaestli/__about__.py",
 ]
 
 [tool.coverage.paths]
 chuchichaestli = ["src/chuchichaestli"]
-tests = ["tests"]
+# tests = ["tests"]
 
 [tool.coverage.report]
 exclude_lines = [
-  "no cov",
-  "if __name__ == .__main__.:",
-  "if TYPE_CHECKING:",
+    "no cov",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
 ]
 
 # Linting, flaking, etc.
 [tool.ruff.lint]
 extend-select = [
-  "UP", # pyupgrade
-  "D",  # pydocstyle
+    "UP", # pyupgrade
+    "D",  # pydocstyle
 ]
 
 [tool.ruff.lint.pydocstyle]
