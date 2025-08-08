@@ -43,7 +43,7 @@ dev = [
     "pytest==8.1.1",
     "pytest-cov>=6.2.1",
 ]
-doc = [
+docs = [
     "mkdocs>=1.6.1",
     "mkdocs-api-autonav>=0.3.0",
     "mkdocs-material>=9.6.16",
@@ -57,7 +57,7 @@ dev = [
     "pytest==8.1.1",
     "pytest-cov>=6.2.1",
 ]
-doc = [
+docs = [
     "mkdocs>=1.6.1",
     "mkdocs-api-autonav>=0.3.0",
     "mkdocs-material>=9.6.16",
