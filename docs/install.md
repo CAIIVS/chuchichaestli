@@ -49,14 +49,14 @@ nix-config and rebuild it
 {pkgs, ...}: let
 	remote = builtins.fetchurl {
 		url = "https://raw.githubusercontent.com/CAIIVS/chuchichaestli/refs/heads/main/default.nix";
-		sha256 = "0a838l8h2qv4c95zi68r1nr8ndmn8929f53js04g3h15ii3zbskb";
+		sha256 = "sha256:0a838l8h2qv4c95zi68r1nr8ndmn8929f53js04g3h15ii3zbskb";
 	};
 	chuchichaestli = pkgs.callPackage remote {
 		src = pkgs.fetchFromGitHub {
 		owner = "CAIIVS";
 		repo = "chuchichaestli";
 		rev = "main";
-		sha256 = "10vyprf5736plprmww0xr20i1m83x2d43cnk7k1p0f4fnv6iraf2";
+		sha256 = "sha256:0l5q6j7kav2lsy1pl1izqa8f31q32r7fz47qhim45gjawp838vrw";
 	};
 in {
 	environment.systemPackages = with pkgs; [
