@@ -43,3 +43,11 @@ jobs:
     uses: ./.github/workflows/github-release.yml
     with:
       artifact-name: "package-dist"
+
+  deploy-docs:
+    name: Deploy docs 📖
+    needs: [github-release]
+    permissions:
+      contents: write
+    secrets: inherit
+    uses: ./.github/workflows/deploy-docs.yml

@@ -1,0 +1,46 @@
+# Build the 📖 package documentation
+# For more information see:
+# https://www.mkdocs.org/user-guide/deploying-your-docs/
+
+name: Deploy docs 📖
+
+on:
+  workflow_call:
+    inputs:
+      strict:
+        description: "Strict mode. This will cause MkDocs to abort the build on any warnings."
+        type: boolean
+        default: false
+        required: false
+      force:
+        description: "Force the push to the repository"
+        type: boolean
+        default: false
+        required: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: 3.12
+      - name: Force deploy docs strictly
+        if: ${{ inputs.force && inputs.strict }}
+        run: |
+          uv run --group docs mkdocs gh-deploy --strict --force
+      - name: 🛸 Force deploy docs
+        if: ${{ inputs.force }}
+        run: |
+          uv run --group docs mkdocs gh-deploy --force
+      - name: 🛸 Deploy docs strictly
+        if: ${{ inputs.force }}
+        run: |
+          uv run --group docs mkdocs gh-deploy --strict
+      - name: 🛸 Deploy docs
+        if: ${{ inputs.force }}
+        run: |
+          uv run --group docs mkdocs gh-deploy
+      
