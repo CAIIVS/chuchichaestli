@@ -1,22 +1,7 @@
-"""Implementation of the Brownian Bridge Diffusion Model.
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Implementation of the Brownian Bridge Diffusion Model."""
 
 from collections.abc import Generator
 from typing import Any
@@ -29,9 +14,11 @@ from chuchichaestli.diffusion.distributions import DistributionAdapter
 
 
 class BBDM(DiffusionProcess):
-    """Brownian Bridge Diffusion Model.
+    """Brownian Bridge Diffusion Model (BBDM).
 
-    C.f. https://openaccess.thecvf.com/content/CVPR2023/papers/Li_BBDM_Image-to-Image_Translation_With_Brownian_Bridge_Diffusion_Models_CVPR_2023_paper.pdf
+    As described in the paper:
+    "BBDM: Image-to-image Translation with Brownian Bridge Diffusion Models" by Li et al. (2022);
+     see https://arxiv.org/abs/2205.07680.
     """
 
     def __init__(

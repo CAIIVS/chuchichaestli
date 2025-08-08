@@ -1,22 +1,7 @@
-"""UNet model - Conservatively Optimized version.
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""A highly customizable U-Net model implementation."""
 
 import warnings
 import torch
@@ -235,7 +220,7 @@ class UNet(nn.Module):
             skip_connection_to_all_blocks: If `True`, the U-Net builds skip connections
               to all blocks in a level, otherwise only to the first block in a level.
             add_noise: Add a Gaussian noise regularizer block in the bottleneck (before or after).
-              Can be "up" (after the bottlenet) or "down" (before the bottleneck).
+              Can be "up" (after the bottleneck) or "down" (before the bottleneck).
             noise_sigma: Std. relative (to the magnitude of the input) for the noise generation.
             noise_detached: If True, the input is detached for the noise generation.
               Note, this should generally be `True`, otherwise the noise is learnable.
@@ -294,6 +279,7 @@ class UNet(nn.Module):
                 flip_sin_to_cos=t_emb_flip,
                 downscale_freq_shift=t_emb_shift,
                 activation=t_emb_act_fn,
+                post_activation=t_emb_post_act,
                 condition_dim=t_emb_condition_dim,
             )
             if time_embedding
