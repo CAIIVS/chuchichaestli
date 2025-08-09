@@ -27,6 +27,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
         with:
           python-version: 3.12
+          enable-cache: false
       - name: Force deploy docs strictly
         if: ${{ inputs.force && inputs.strict }}
         run: |
