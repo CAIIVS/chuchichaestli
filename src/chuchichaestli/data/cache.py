@@ -52,38 +52,27 @@ C_DTYPES = {
     torch.float64: ctypes.c_double,
 }
 
-NPY_TO_TORCH_DTYPES = {
-    np.bool: torch.bool,
-    "bool": torch.bool,
-    np.uint8: torch.uint8,
-    "uint8": torch.uint8,
-    np.int8: torch.int8,
-    "int8": torch.int8,
-    np.int16: torch.int16,
-    "int16": torch.int16,
-    np.int32: torch.int32,
-    "int32": torch.int32,
-    np.int64: torch.int64,
-    "int64": torch.int64,
-    np.float16: torch.float16,
-    "float16": torch.float16,
-    np.float32: torch.float32,
-    "float32": torch.float32,
-    np.float64: torch.float64,
-    "float64": torch.float64,
-    np.complex64: torch.complex64,
-    "complex64": torch.complex64,
-    np.complex128: torch.complex128,
-    "complex128": torch.complex128,
-}
 
-
-def npy_to_torch_dtype(dtype: str | np.dtype) -> torch.dtype:
-    """Converts numpy to torch data types."""
-    dtype = str(dtype)
-    return (
-        NPY_TO_TORCH_DTYPES[str(dtype)] if dtype in NPY_TO_TORCH_DTYPES.keys() else None
-    )
+def npy_to_torch_dtype(dtype: str | np.dtype | type) -> torch.dtype | None:
+    """Converts numpy dtype to torch dtype robustly."""
+    try:
+        name = np.dtype(dtype).name  # e.g. "uint8", "bool"
+    except Exception:
+        name = str(dtype)
+    mapping = {
+        "bool": torch.bool,
+        "uint8": torch.uint8,
+        "int8": torch.int8,
+        "int16": torch.int16,
+        "int32": torch.int32,
+        "int64": torch.int64,
+        "float16": torch.float16,
+        "float32": torch.float32,
+        "float64": torch.float64,
+        "complex64": torch.complex64,
+        "complex128": torch.complex128,
+    }
+    return mapping.get(name)
 
 
 class nbytes(float):
