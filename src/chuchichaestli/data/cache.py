@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Caching for tensors from PyTorch datasets."""
 
-import psutil
 import pickle
 from enum import Enum
 import ctypes
@@ -23,8 +22,6 @@ __all__ = [
     "SharedDict",
     "SharedDictList",
     "nbytes",
-    "get_max_ram",
-    "get_max_shm",
     "serial_byte_size",
 ]
 
@@ -208,16 +205,6 @@ def lock(fn):
             self._lock.release()
 
     return wrapper
-
-
-def get_max_ram() -> nbytes:
-    """Get the maximal size of total RAM."""
-    return nbytes(psutil.virtual_memory().total)
-
-
-def get_max_shm() -> nbytes:
-    """Get the maximal size of available shared memory."""
-    return nbytes(psutil.Process().memory_info().rss)
 
 
 def serial_byte_size(

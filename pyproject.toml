@@ -35,7 +35,6 @@ dependencies = [
     "torch>=2.2.2",
     "torchvision>=0.20.1",  
     "h5py>=3.12.1",
-    "psutil>=6.1.0"
 ]
 [project.optional-dependencies]
 dev = [

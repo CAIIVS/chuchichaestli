@@ -19,10 +19,9 @@
           h5py
           torch
           torchvision
-          psutil
         ]);
         pyDists = with pkgs; [
-          python312
+          python313
         ];
         pyEnvs = map makeEnvsForPython pyDists;
       in
