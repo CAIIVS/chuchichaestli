@@ -294,12 +294,12 @@ class SharedArray:
                 )
 
         mp_arr = mp.Array(C_DTYPES[dtype], n_slots * slot_size, lock=use_lock)  # type: ignore
-        shm_arr = np.ctypeslib.as_array(mp_arr.get_obj())
+        shm_arr = np.ctypeslib.as_array(mp_arr.get_obj() if hasattr(mp_arr, "get_obj") else mp_arr)
         shm_arr = shm_arr.reshape((n_slots, *shape[1:]))
         self._slots = torch.from_numpy(shm_arr)
         self._slots *= 0
 
-        mp_states_arr = mp.Array(C_DTYPES[torch.uint8], shape[0])  # type: ignore
+        mp_states_arr = mp.Array(C_DTYPES[torch.uint8], shape[0], lock=True)  # type: ignore
         shm_states_arr = np.ctypeslib.as_array(mp_states_arr.get_obj())
         self._shm_states = torch.from_numpy(shm_states_arr)
         self._shm_states *= 0
@@ -705,9 +705,9 @@ class SharedDictList:
         try:
             shm_list = ShareableList(name=name)
         except FileNotFoundError:
-            shm_list = ShareableList([np.random.bytes(slot_size)] * n_slots, name=name)
+            shm_list = ShareableList([bytes(slot_size)] * n_slots, name=name)
         if not hasattr(self, "_shm_states"):
-            mp_states_arr = mp.Array(C_DTYPES[torch.uint8], size)  # type: ignore
+            mp_states_arr = mp.Array(C_DTYPES[torch.uint8], size, lock=True)  # type: ignore
             shm_states_arr = np.ctypeslib.as_array(mp_states_arr.get_obj())
             self._shm_states = torch.from_numpy(shm_states_arr)
             self._shm_states *= 0
