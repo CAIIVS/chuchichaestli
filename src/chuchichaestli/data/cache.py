@@ -347,16 +347,18 @@ class SharedArray:
 
     def clear(self, index: int | None = None):
         """Clear the cache (optionally only at a specified index)."""
-        _, index = self.get_state(index)
         if index is None:
             self._slots *= 0
             self._shm_states *= 0
             self._shm_states[len(self) :] = SlotState.OOC.value
         else:
-            self[index] = torch.zeros(self._slots.shape[1:])
-            self._shm_states[index] = torch.zeros(self._shm_states.shape[1:])
-            if len(self) <= index:
-                self._shm_states[index] = SlotState.OOC.value
+            _, idx = self.get_state(index)
+            if idx is None:
+                return
+            self._slots[idx].zero_()
+            self._shm_states[idx] = 0
+            if len(self) <= idx:
+                self._shm_states[idx] = SlotState.OOC.value
 
     def clear_allocation(self):
         """Delete shared memory allocation."""
@@ -365,26 +367,34 @@ class SharedArray:
 
     def __getitem__(self, index: int | None) -> torch.Tensor | None:
         """Fetch sample tensor from cache if stored, otherwise returns None."""
-        state, index = self.get_state(index)
-        if state != SlotState.SET:
+        state, idx = self.get_state(index)
+        if state != SlotState.SET or idx is None:
             return None
-        return self.array[index]
+        return self.array[idx]
 
     def __setitem__(self, index: int | None, item: torch.Tensor):
         """Fill the cache at specified location."""
-        state, index = self.get_state(index)
-        if state == SlotState.OOC or state == SlotState.INVALID:
+        state, idx = self.get_state(index)
+        if (state == SlotState.OOC or state == SlotState.INVALID) or idx is None:
             return
         if state == SlotState.SET and not self.allow_overwrite:
             raise RuntimeError(
                 f"{self} is locked and does not allow overwrites at {index=}."
             )
-        self.array[index] = item
-        self.states[index] = SlotState.SET.value
+        if item.shape != self.array[idx].shape:
+            raise RuntimeError(
+                f"Shape mismatch: got {tuple(item.shape)} expected {tuple(self.array[idx].shape)}"
+            )
+        self._lock.acquire()
+        try:
+            self.array[idx] = item
+            self.states[idx] = SlotState.SET.value
+        finally:
+            self._lock.release()
 
     def __contains__(self, index: int | None) -> bool:
         """Test 'in' cache in shared memory."""
-        state, index = self.get_state(index)
+        state, _ = self.get_state(index)
         return state == SlotState.SET
 
     def __len__(self) -> int:
@@ -795,10 +805,10 @@ class SharedDictList:
         self, index: int | None
     ) -> int | float | bool | str | bytes | dict | None:
         """Fetch sample data from cache if stored, otherwise returns None."""
-        state, index = self.get_state(index)
-        if state != SlotState.SET or index is None:
+        state, idx = self.get_state(index)
+        if state != SlotState.SET or idx is None:
             return None
-        data = self._slots[index]
+        data = self._slots[idx]
         if isinstance(data, bytes):
             return self.serializer.loads(data)
         return data
@@ -807,21 +817,25 @@ class SharedDictList:
         self, index: int, item: int | float | bool | str | bytes | dict | None
     ):
         """Fill the cache at specified slot."""
-        state = self.get_state(index)
-        if state == SlotState.OOC:
+        state, idx = self.get_state(index)
+        if state == SlotState.OOC or idx is None:
             return
         if state == SlotState.SET and not self.allow_overwrite:
             raise RuntimeError(
-                f"{self} is locked and does not allow overwrites at {index=}."
+                f"{self} is locked and does not allow overwrites at index={idx}."
             )
         if isinstance(item, dict):
             item = self.serializer.dumps(item)
-        self.slots[index] = item
-        self.states[index] = SlotState.SET.value
+        self._lock.acquire()
+        try:
+            self.slots[idx] = item
+            self.states[idx] = SlotState.SET.value
+        finally:
+            self._lock.release()
 
     def __contains__(self, index: int) -> bool:
         """Test 'in' cache in shared memory."""
-        state = self.get_state(index)
+        state, _ = self.get_state(index)
         return state == SlotState.SET
 
     def __len__(self) -> int:
