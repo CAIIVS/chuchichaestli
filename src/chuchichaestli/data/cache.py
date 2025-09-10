@@ -142,18 +142,18 @@ class nbytes(float):
 
     def as_str(self) -> str:
         """Parse to string in decimal units."""
-        for k in self.units:
-            if not k.endswith("B"):
-                continue
-            if 1 <= int(self) // self.units[k] < 999:
-                return f"{self / self.units[k]:.2f}{k}"
+        units = ["PB", "TB", "GB", "MB", "KB", "B"]
+        for u in units:
+            if self >= self.units[u]:
+                return f"{self / self.units[u]:.2f}{u}"
         return "0B"
 
     def as_bstr(self) -> str:
         """Parse to string in binary units."""
-        for k in self.units:
-            if not k.endswith("B") and 1 <= int(self) // self.units[k] < 999:
-                return f"{self / self.units[k]:.2f}{k}"
+        units = ["P", "T", "G", "M", "K", "b"]
+        for u in units:
+            if self >= self.units[u]:
+                return f"{self / self.units[u]:.2f}{u}"
         return "0B"
 
     def to(self, unit: str) -> "nbytes":
