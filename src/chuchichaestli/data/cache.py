@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Caching for tensors from PyTorch datasets."""
 
+import struct
 import pickle
 from enum import Enum
 import ctypes
@@ -343,7 +344,7 @@ class SharedArray:
             raise IndexError(
                 f"Index {index} out of range for dataset {list(self.states.shape)}"
             )
-        return SlotState(self.states[index].item()), index
+        return SlotState(int(self.states[index].item())), index
 
     def clear(self, index: int | None = None):
         """Clear the cache (optionally only at a specified index)."""
