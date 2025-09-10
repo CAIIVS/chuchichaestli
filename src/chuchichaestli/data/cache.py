@@ -304,6 +304,8 @@ class SharedArray:
         self._shm_states = torch.from_numpy(shm_states_arr)
         self._shm_states *= 0
         self._shm_states[n_slots:] = SlotState.OOC.value
+        self._slot_bytes = slot_bytes
+        self._n_slots = n_slots
 
     @property
     def array(self) -> torch.Tensor:
@@ -329,8 +331,7 @@ class SharedArray:
     @property
     def cached_bytes(self) -> "nbytes":
         """Bytes written to cache."""
-        n_slots = len(self.array)
-        return self.cache_size * self.cached_states / n_slots
+        return nbytes(self._slot_bytes * self.cached_states)
 
     def get_state(self, index: int | None) -> tuple[SlotState, int | None]:
         """Get the slot state at specified index."""
@@ -443,6 +444,7 @@ class SharedDict:
         self.serializer = serializer
         self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
         self.verbose = verbose
+        self._hdr_size = 8  # big-endian length header
         self.shm = self.get_allocation()
         self.clear()
         self.update(kwargs)
@@ -462,10 +464,12 @@ class SharedDict:
             name = self.descr
         if size is None or size == 0:
             size = self.cache_size
+        req_size = int(size) if not isinstance(size, nbytes) else int(size)
+        req_size = max(req_size, getattr(self, "_hdr_size", 8))  # ensure room for header
         try:
             shm = SharedMemory(name=name)
         except FileNotFoundError:
-            shm = SharedMemory(name=name, create=True, size=int(size))
+            shm = SharedMemory(name=name, create=True, size=req_size)
         return shm
 
     def clear_allocation(
@@ -488,15 +492,30 @@ class SharedDict:
         byte_data = self.serializer.dumps(data)
         if not hasattr(self, "shm"):
             self.get_allocation()
-        if len(byte_data) < self.cache_size:
-            self.shm.buf[: len(byte_data)] = byte_data
-        else:
+        cap = len(self.shm.buf)
+        total_len = self._hdr_size + len(byte_data)
+        if total_len > cap:
             return None
+        self.shm.buf[: self._hdr_size] = struct.pack(">Q", len(byte_data))
+        self.shm.buf[self._hdr_size : self._hdr_size + len(byte_data)] = byte_data
         return byte_data
 
     def read_buffer(self) -> dict:
         """Read the shared memory buffer."""
-        return self.serializer.loads(self.shm.buf.tobytes())
+        buf = self.shm.buf
+        if len(buf) < self._hdr_size:
+            return {}
+        try:
+            length = struct.unpack(">Q", self.shm.buf[: self._hdr_size])[0]
+        except struct.error:
+            return {}
+        if length == 0:
+            return {}
+        end = self._hdr_size + length
+        if end > len(buf):
+            return {}
+        data = self.shm.buf[self._hdr_size : end].tobytes()
+        return self.serializer.loads(data)
 
     @contextmanager
     @lock
@@ -679,7 +698,10 @@ class SharedDictList:
         self._slots, self._shm_states = self.get_allocation(
             name=self.descr, n_slots=n_slots, slot_size=int(slot_bytes), size=n
         )
+        self._slot_bytes = nbytes(slot_bytes)
         for i, d in enumerate(sequence):
+            if i >= len(self._slots):
+                break
             self[i] = d
         self.allow_overwrite = allow_overwrite
 
@@ -753,7 +775,9 @@ class SharedDictList:
     def cached_bytes(self) -> "nbytes":
         """Bytes written to cache."""
         n_slots = len(self.slots)
-        return self.cache_size * self.cached_states / n_slots
+        if n_slots == 0:
+            return nbytes(0)
+        return nbytes(self._slot_bytes * self.cached_states)
 
     def get_state(self, index: int | None) -> tuple[SlotState, int | None]:
         """Get the slot state at specified index."""
@@ -765,7 +789,7 @@ class SharedDictList:
             raise IndexError(
                 f"Index {index} out of range for dataset {list(self.states.shape)}"
             )
-        return SlotState(self.states[index].item()), index
+        return SlotState(int(self.states[index].item())), index
 
     def __getitem__(
         self, index: int | None
