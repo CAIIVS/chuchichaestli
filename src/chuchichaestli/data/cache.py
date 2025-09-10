@@ -268,7 +268,8 @@ class SharedArray:
         self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
 
         slot_size = int(np.prod(shape[1:]))
-        slot_bytes = nbytes(slot_size * nbytes(dtype.itemsize))
+        elem_size = torch.empty((), dtype=dtype).element_size()
+        slot_bytes = nbytes(slot_size * elem_size)
         dataset_bytes = nbytes(shape[0] * slot_bytes)
         cache_bytes = self.cache_size.to("B")
         states_bytes = nbytes(shape[0] * torch.uint8.itemsize)
