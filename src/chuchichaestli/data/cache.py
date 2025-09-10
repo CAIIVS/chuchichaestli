@@ -52,6 +52,8 @@ C_DTYPES = {
     torch.float64: ctypes.c_double,
 }
 
+_SENTINEL = object()
+
 
 def npy_to_torch_dtype(dtype: str | np.dtype | type) -> torch.dtype | None:
     """Converts numpy dtype to torch dtype robustly."""
@@ -588,7 +590,7 @@ class SharedDict:
     def pop(self, key: str | int, default: Any | None = None):
         """Pop the dictionary in shared memory."""
         with self.open_buffer() as dct:
-            if default is None or default is object():
+            if default is _SENTINEL:
                 return dct.pop(key)
             return dct.pop(key, default)
 
