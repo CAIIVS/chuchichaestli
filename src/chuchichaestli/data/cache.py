@@ -104,9 +104,8 @@ class nbytes(float):
 
             n_bytes = n_bytes.replace(unit, "").strip()
             if not n_bytes:
-                n_bytes = 0
-            n_bytes = float(n_bytes)
-            n_bytes = n_bytes * units
+                n_bytes = "0"
+            n_bytes = float(n_bytes) * units
         return float.__new__(cls, n_bytes)
 
     def __add__(self, other: int | float) -> "nbytes":
@@ -157,7 +156,7 @@ class nbytes(float):
                 return f"{self / self.units[k]:.2f}{k}"
         return "0B"
 
-    def to(self, unit: str) -> str:
+    def to(self, unit: str) -> "nbytes":
         """Convert to unit."""
         unit_ci = unit.upper()
         if unit_ci in self.units:
@@ -223,7 +222,7 @@ class SlotState(Enum):
     INVALID = -1
     EMPTY = 0
     SET = 1
-    OOC = 2  # not in cache but valid dataset index
+    OOC = 2  # out of cache/capacity (valid dataset index  but not cacheable)
 
 
 class SharedArray:
@@ -263,8 +262,11 @@ class SharedArray:
 
         if dtype not in C_DTYPES:
             raise ValueError(
-                f"Unsupported dtype: {dtype}. Must be one of {C_DTYPES.keys()}"
+                f"Unsupported dtype: {dtype}. Must be one of {list(C_DTYPES.keys())}"
             )
+
+        self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
+
         slot_size = int(np.prod(shape[1:]))
         slot_bytes = nbytes(slot_size * nbytes(dtype.itemsize))
         dataset_bytes = nbytes(shape[0] * slot_bytes)
@@ -419,7 +421,7 @@ class SharedDict:
 
         Args:
             descr: Descriptor ID for shared memory access.
-            size: Maximum cache size in MiB (if int or float); default "16.0 GiB".
+            size: Maximum cache size in MiB (if int or float); default "16.0 MiB".
             serializer: Serializer for the encoding of the dictionary data.
             use_lock: If True, applies a threading lock for multiprocessing.
             allow_overwrite: If True, cache slots can be overwritten.
@@ -427,7 +429,7 @@ class SharedDict:
             kwargs: Key-value dictionary pairs to load into memory.
 
         Note: If the dictionary is supposed to contain the keys
-          ['descr', 'size', 'sample_size', 'allow_overwrite', 'serlializer', 'verbose']
+          ['descr', 'size', 'sample_size', 'allow_overwrite', 'serializer', 'verbose']
         """
         super().__init__()
         self.descr = descr
@@ -438,11 +440,7 @@ class SharedDict:
         if self.cache_size <= 5:
             raise ValueError("Chosen cache size is too small!")
         self.serializer = serializer
-        self._lock: mp.synchronize.Lock | DummyLock
-        if use_lock:
-            self._lock = Lock()
-        else:
-            self._lock = DummyLock()
+        self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
         self.verbose = verbose
         self.shm = self.get_allocation()
         self.clear()
@@ -552,11 +550,11 @@ class SharedDict:
         """Test not equal dictionary in shared memory."""
         return self.read_buffer() != other
 
-    def __or__(self, other: Any) -> bool:
+    def __or__(self, other: Any) -> dict:
         """Test 'or' dictionary in shared memory."""
         return self.read_buffer() | other
 
-    def __ror__(self, other: Any) -> bool:
+    def __ror__(self, other: Any) -> dict:
         """Test 'or' dictionary in shared memory."""
         return other | self.read_buffer()
 
@@ -564,7 +562,7 @@ class SharedDict:
         """String of dictionary in shared memory."""
         return str(self.read_buffer()) + "@shm"
 
-    def __repr(self) -> str:
+    def __repr__(self) -> str:
         """Representation of dictionary in shared memory."""
         return repr(self.read_buffer()) + "@shm"
 
@@ -589,7 +587,7 @@ class SharedDict:
         with self.open_buffer() as dct:
             dct.update(other, **kwargs)
 
-    def setdefault(self, key: str | int, default: Any | None = None) -> dict:
+    def setdefault(self, key: str | int, default: Any | None = None) -> Any:
         """Setdefault the dictionary in shared memory."""
         with self.open_buffer() as dct:
             return dct.setdefault(key, default)
@@ -612,7 +610,7 @@ class SharedDictList:
     def __init__(
         self,
         n: int,
-        *sequence: list[int | float | bool | str | bytes | dict | None],
+        *sequence: int | float | bool | str | bytes | dict | None,
         descr: str = "shm_list",
         slot_size: int | float | str = "650b",
         size: int | float | str = "64M",
@@ -642,11 +640,7 @@ class SharedDictList:
 
         self.descr = descr
         self.serializer = serializer
-        self._lock: mp.synchronize.Lock | DummyLock
-        if use_lock:
-            self._lock = Lock()
-        else:
-            self._lock = DummyLock()
+        self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
         self.allow_overwrite = True
         self.verbose = verbose
         self.cache_size = (
