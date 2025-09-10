@@ -95,7 +95,13 @@ class nbytes(float):
         elif isinstance(n_bytes, str):
             unit = "".join(i for i in n_bytes if not (i.isdigit() or i in ["."]))
             unit = unit.strip()
-            units = cls.units[unit]
+            unit_ci = unit.upper()
+            if unit_ci not in cls.units:
+                raise ValueError(
+                    f"Unknown unit '{unit}'. Choose from {list(cls.units.keys())}."
+                )
+            units = cls.units[unit_ci]
+
             n_bytes = n_bytes.replace(unit, "").strip()
             if not n_bytes:
                 n_bytes = 0
@@ -153,8 +159,9 @@ class nbytes(float):
 
     def to(self, unit: str) -> str:
         """Convert to unit."""
-        if unit in self.units:
-            return self.__class__(self / self.units[unit])
+        unit_ci = unit.upper()
+        if unit_ci in self.units:
+            return self.__class__(self / self.units[unit_ci])
         else:
             raise ValueError(f"Unknown unit, choose from {list(self.units.keys())}.")
 
