@@ -8,8 +8,6 @@ import numpy as np
 import torch
 from chuchichaestli.data.cache import (
     nbytes,
-    get_max_ram,
-    get_max_shm,
     serial_byte_size,
     SharedArray,
     SharedDict,
@@ -43,23 +41,6 @@ def test_nbytes_null(x):
     assert isinstance(b.as_bstr(), str)
     assert isinstance(b.to("G"), nbytes)
     assert isinstance(b.to("G"), float)
-
-
-def test_get_max_ram():
-    """Test the get_max_ram function."""
-    ram_size = get_max_ram()
-    assert isinstance(ram_size, float)
-    assert ram_size > 0
-    print(ram_size)
-
-
-def test_get_max_shm():
-    """Test the get_max_shm function."""
-    shm_size = get_max_shm()
-    assert isinstance(shm_size, float)
-    assert shm_size > 0
-    print(shm_size)
-
 
 def test_serial_byte_size():
     """Test the serial_byte_size function."""
