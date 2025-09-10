@@ -326,7 +326,7 @@ class SharedArray:
     @property
     def cached_states(self) -> int:
         """Written states in cache."""
-        return int(sum([s == 1 for s in self.states]))
+        return int((self.states == SlotState.SET.value).sum().item())
 
     @property
     def cached_bytes(self) -> "nbytes":
@@ -769,7 +769,7 @@ class SharedDictList:
     @property
     def cached_states(self) -> int:
         """Written states in cache."""
-        return int(sum([s == 1 for s in self.states]))
+        return int((self.states == SlotState.SET.value).sum().item())
 
     @property
     def cached_bytes(self) -> "nbytes":
