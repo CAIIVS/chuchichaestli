@@ -256,7 +256,7 @@ class SharedArray:
             verbose: Print information to the stdout.
         """
         self.cache_size = (
-            nbytes(f"{size}M") if isinstance(size, int | float) else nbytes(size)
+            nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
         )
         self.allow_overwrite = allow_overwrite
         self.verbose = verbose
