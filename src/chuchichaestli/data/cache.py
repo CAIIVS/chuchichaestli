@@ -24,6 +24,7 @@ __all__ = [
     "SharedDictList",
     "nbytes",
     "serial_byte_size",
+    "npy_to_torch_dtype",
 ]
 
 
@@ -626,7 +627,7 @@ class SharedDict:
         with self.open_buffer() as dct:
             return dct.setdefault(key, default)
 
-    def pop(self, key: str | int, default: Any | None = None):
+    def pop(self, key: str | int, default: Any = _SENTINEL):
         """Pop the dictionary in shared memory."""
         with self.open_buffer() as dct:
             if default is _SENTINEL:
@@ -668,7 +669,7 @@ class SharedDictList:
             verbose: Print information to the stdout.
 
         Note: If the dictionary is supposed to contain the keys
-          ['descr', 'cache_size', 'sample_size', 'allow_overwrite', 'serlializer', 'verbose']
+          ['descr', 'cache_size', 'sample_size', 'allow_overwrite', 'serializer', 'verbose']
           use instead '__{key}'.
         """
         super().__init__()
