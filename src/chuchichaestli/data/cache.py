@@ -256,7 +256,7 @@ class SharedArray:
             verbose: Print information to the stdout.
         """
         self.cache_size = (
-            nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
+            nbytes(f"{size}M") if isinstance(size, int | float) else nbytes(size)
         )
         self.allow_overwrite = allow_overwrite
         self.verbose = verbose
@@ -383,7 +383,7 @@ class SharedArray:
                 f"{self} is locked and does not allow overwrites at {index=}."
             )
         if item.shape != self.array[idx].shape:
-            raise RuntimeError(
+            raise ValueError(
                 f"Shape mismatch: got {tuple(item.shape)} expected {tuple(self.array[idx].shape)}"
             )
         self._lock.acquire()
@@ -427,34 +427,32 @@ class SharedDict:
         serializer: DictSerializer = PickleSerializer(),
         use_lock: bool = True,
         allow_overwrite: bool = True,
-        verbose: bool = False,
         **kwargs,
     ):
         """Constructor.
 
         Args:
             descr: Descriptor ID for shared memory access.
-            size: Maximum cache size in MiB (if int or float); default "16.0 MiB".
+            size: Maximum cache size in GiB (if int or float); default "16.0 MiB".
             serializer: Serializer for the encoding of the dictionary data.
             use_lock: If True, applies a threading lock for multiprocessing.
             allow_overwrite: If True, cache slots can be overwritten.
-            verbose: Print information to the stdout.
             kwargs: Key-value dictionary pairs to load into memory.
 
         Note: If the dictionary is supposed to contain the keys
-          ['descr', 'size', 'sample_size', 'allow_overwrite', 'serializer', 'verbose']
+          ['descr', 'cache_size', 'allow_overwrite', 'serializer']
+          use instead '__{key}'.
         """
         super().__init__()
         self.descr = descr
         self.allow_overwrite = True
         self.cache_size = (
-            nbytes(f"{size}M") if isinstance(size, int | float) else nbytes(size)
+            nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
         )
         if self.cache_size <= 5:
             raise ValueError("Chosen cache size is too small!")
         self.serializer = serializer
         self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
-        self.verbose = verbose
         self._hdr_size = 8  # big-endian length header
         self.shm = self.get_allocation()
         self.clear()
@@ -519,14 +517,19 @@ class SharedDict:
         try:
             length = struct.unpack(">Q", self.shm.buf[: self._hdr_size])[0]
         except struct.error:
-            return {}
+            raise RuntimeError("Failed to unpack header length.")
         if length == 0:
             return {}
         end = self._hdr_size + length
         if end > len(buf):
-            return {}
+            raise RuntimeError(
+                f"Buffer length mismatch (expected {end} but got {len(buf)})"
+            )
         data = self.shm.buf[self._hdr_size : end].tobytes()
-        return self.serializer.loads(data)
+        try:
+            return self.serializer.loads(data)
+        except Exception as e:
+            raise RuntimeError(f"Failed to deserialize buffer: {e}")
 
     @contextmanager
     @lock
@@ -552,7 +555,7 @@ class SharedDict:
     def __setitem__(self, key: str | int, value: Any):
         """Set item of dictionary in shared memory."""
         if not self.allow_overwrite:
-            return
+            raise RuntimeError("SharedDict is locked and does not allow overwrites.")
         with self.open_buffer() as dct:
             dct[key] = value
 
@@ -658,14 +661,15 @@ class SharedDictList:
             descr: Descriptor ID for shared memory access.
             slot_size: Size of a single list entry (should be big enough for even the
               biggest entry, otherwise a maximum size is estimated).
-            size: Maximum cache size in MiB (if int or float); default "16.0 GiB".
+            size: Maximum cache size in GiB (if int or float); default "64.0 MiB".
             serializer: Serializer for the encoding of the dictionary data.
             use_lock: If True, applies a threading lock for multiprocessing.
             allow_overwrite: If True, cache slots can be overwritten.
             verbose: Print information to the stdout.
 
         Note: If the dictionary is supposed to contain the keys
-          ['descr', 'size', 'sample_size', 'allow_overwrite', 'serlializer', 'verbose']
+          ['descr', 'cache_size', 'sample_size', 'allow_overwrite', 'serlializer', 'verbose']
+          use instead '__{key}'.
         """
         super().__init__()
 
@@ -675,7 +679,7 @@ class SharedDictList:
         self.allow_overwrite = True
         self.verbose = verbose
         self.cache_size = (
-            nbytes(f"{size}M") if isinstance(size, int | float) else nbytes(size)
+            nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
         )
         if sequence:
             slot_bytes = max(
@@ -732,6 +736,10 @@ class SharedDictList:
             slot_size: Number of bytes each element should allocate in shared memory.
             size: Number of samples in the dataset.
             kwargs: Additional keywords for compatibility.
+
+        Returns:
+            shm_list: List in shared memory.
+            _shm_states: List slot states if newly allocated, None otherwise.
         """
         if name is None:
             name = self.descr
@@ -800,7 +808,11 @@ class SharedDictList:
             raise IndexError(
                 f"Index {index} out of range for dataset {list(self.states.shape)}"
             )
-        return SlotState(int(self.states[index].item())), index
+        try:
+            state = SlotState(int(self.states[index].item()))
+        except Exception as e:
+            raise RuntimeError(f"Corrupt slot state value at index {index}: {self.states[index]}. {e}")
+        return state, index
 
     def __getitem__(
         self, index: int | None
@@ -811,7 +823,12 @@ class SharedDictList:
             return None
         data = self._slots[idx]
         if isinstance(data, bytes):
-            return self.serializer.loads(data)
+            try:
+                return self.serializer.loads(data)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to deserialize item at index {idx}: {e}"
+                )
         return data
 
     def __setitem__(
@@ -826,7 +843,14 @@ class SharedDictList:
                 f"{self} is locked and does not allow overwrites at index={idx}."
             )
         if isinstance(item, dict):
-            item = self.serializer.dumps(item)
+            item_bytes = self.serializer.dumps(item)
+            if len(item_bytes) > self._slot_bytes:
+                raise RuntimeError(
+                    f"Serialized dict at index {idx} ({len(item_bytes)} bytes) "
+                    f"exceeds slot size ({self._slot_bytes} bytes). "
+                    f"Increase slot_size or reduce dict size."
+                )
+            item = item_bytes
         self._lock.acquire()
         try:
             self.slots[idx] = item
