@@ -64,9 +64,9 @@ def test_serial_byte_size_empty():
 @pytest.mark.parametrize(
     "shape,dtype,cache_size",
     [
-        ((100, 1, 64, 64), torch.float32, 1.0),
+        ((100, 1, 64, 64), torch.float32, 0.05),
         ((200, 1, 32, 32), torch.float64, "4G"),
-        ((300, 1, 32, 32), torch.int8, 4),
+        ((300, 1, 32, 32), torch.int8, 1),
     ],
 )
 def test_SharedArray_init(shape, dtype, cache_size):
@@ -179,15 +179,15 @@ def test_SharedArray_str(
 @pytest.mark.parametrize(
     "descr,cache_size",
     [
-        ("metadata_cache_test", 16),
-        ("metadata_cache_test", 32),
+        ("metadata_cache_test", 0.016),
+        ("metadata_cache_test", 0.032),
     ],
 )
 def test_SharedDict_init(descr, cache_size):
     """Test the SharedArray module."""
     cache_dict = SharedDict(descr=descr, size=cache_size, verbose=True)
     assert hasattr(cache_dict, "shm")
-    assert cache_dict.cache_size == nbytes(f"{cache_size}M")
+    assert cache_dict.cache_size == nbytes(f"{cache_size}G")
     cache_dict.clear_allocation()
 
 
