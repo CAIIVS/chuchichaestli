@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Caching for tensors from PyTorch datasets."""
 
-import psutil
+import struct
 import pickle
 from enum import Enum
 import ctypes
@@ -23,9 +23,8 @@ __all__ = [
     "SharedDict",
     "SharedDictList",
     "nbytes",
-    "get_max_ram",
-    "get_max_shm",
     "serial_byte_size",
+    "npy_to_torch_dtype",
 ]
 
 
@@ -55,38 +54,29 @@ C_DTYPES = {
     torch.float64: ctypes.c_double,
 }
 
-NPY_TO_TORCH_DTYPES = {
-    np.bool: torch.bool,
-    "bool": torch.bool,
-    np.uint8: torch.uint8,
-    "uint8": torch.uint8,
-    np.int8: torch.int8,
-    "int8": torch.int8,
-    np.int16: torch.int16,
-    "int16": torch.int16,
-    np.int32: torch.int32,
-    "int32": torch.int32,
-    np.int64: torch.int64,
-    "int64": torch.int64,
-    np.float16: torch.float16,
-    "float16": torch.float16,
-    np.float32: torch.float32,
-    "float32": torch.float32,
-    np.float64: torch.float64,
-    "float64": torch.float64,
-    np.complex64: torch.complex64,
-    "complex64": torch.complex64,
-    np.complex128: torch.complex128,
-    "complex128": torch.complex128,
-}
+_SENTINEL = object()
 
 
-def npy_to_torch_dtype(dtype: str | np.dtype) -> torch.dtype:
-    """Converts numpy to torch data types."""
-    dtype = str(dtype)
-    return (
-        NPY_TO_TORCH_DTYPES[str(dtype)] if dtype in NPY_TO_TORCH_DTYPES.keys() else None
-    )
+def npy_to_torch_dtype(dtype: str | np.dtype | type) -> torch.dtype | None:
+    """Converts numpy dtype to torch dtype robustly."""
+    try:
+        name = np.dtype(dtype).name  # e.g. "uint8", "bool"
+    except Exception:
+        name = str(dtype)
+    mapping = {
+        "bool": torch.bool,
+        "uint8": torch.uint8,
+        "int8": torch.int8,
+        "int16": torch.int16,
+        "int32": torch.int32,
+        "int64": torch.int64,
+        "float16": torch.float16,
+        "float32": torch.float32,
+        "float64": torch.float64,
+        "complex64": torch.complex64,
+        "complex128": torch.complex128,
+    }
+    return mapping.get(name)
 
 
 class nbytes(float):
@@ -107,12 +97,17 @@ class nbytes(float):
         elif isinstance(n_bytes, str):
             unit = "".join(i for i in n_bytes if not (i.isdigit() or i in ["."]))
             unit = unit.strip()
-            units = cls.units[unit]
+            unit_ci = unit.upper()
+            if unit_ci not in cls.units:
+                raise ValueError(
+                    f"Unknown unit '{unit}'. Choose from {list(cls.units.keys())}."
+                )
+            units = cls.units[unit_ci]
+
             n_bytes = n_bytes.replace(unit, "").strip()
             if not n_bytes:
-                n_bytes = 0
-            n_bytes = float(n_bytes)
-            n_bytes = n_bytes * units
+                n_bytes = "0"
+            n_bytes = float(n_bytes) * units
         return float.__new__(cls, n_bytes)
 
     def __add__(self, other: int | float) -> "nbytes":
@@ -149,24 +144,25 @@ class nbytes(float):
 
     def as_str(self) -> str:
         """Parse to string in decimal units."""
-        for k in self.units:
-            if not k.endswith("B"):
-                continue
-            if 1 <= int(self) // self.units[k] < 999:
-                return f"{self / self.units[k]:.2f}{k}"
+        units = ["PB", "TB", "GB", "MB", "KB", "B"]
+        for u in units:
+            if self >= self.units[u]:
+                return f"{self / self.units[u]:.2f}{u}"
         return "0B"
 
     def as_bstr(self) -> str:
         """Parse to string in binary units."""
-        for k in self.units:
-            if not k.endswith("B") and 1 <= int(self) // self.units[k] < 999:
-                return f"{self / self.units[k]:.2f}{k}"
+        units = ["P", "T", "G", "M", "K", "b"]
+        for u in units:
+            if self >= self.units[u]:
+                return f"{self / self.units[u]:.2f}{u}"
         return "0B"
 
-    def to(self, unit: str) -> str:
+    def to(self, unit: str) -> "nbytes":
         """Convert to unit."""
-        if unit in self.units:
-            return self.__class__(self / self.units[unit])
+        unit_ci = unit.upper()
+        if unit_ci in self.units:
+            return self.__class__(self / self.units[unit_ci])
         else:
             raise ValueError(f"Unknown unit, choose from {list(self.units.keys())}.")
 
@@ -210,16 +206,6 @@ def lock(fn):
     return wrapper
 
 
-def get_max_ram() -> nbytes:
-    """Get the maximal size of total RAM."""
-    return nbytes(psutil.virtual_memory().total)
-
-
-def get_max_shm() -> nbytes:
-    """Get the maximal size of available shared memory."""
-    return nbytes(psutil.Process().memory_info().rss)
-
-
 def serial_byte_size(
     dct: Any,
     serializer: type[DictSerializer] = PickleSerializer,
@@ -238,7 +224,7 @@ class SlotState(Enum):
     INVALID = -1
     EMPTY = 0
     SET = 1
-    OOC = 2  # not in cache but valid dataset index
+    OOC = 2  # out of cache/capacity (valid dataset index  but not cacheable)
 
 
 class SharedArray:
@@ -278,10 +264,14 @@ class SharedArray:
 
         if dtype not in C_DTYPES:
             raise ValueError(
-                f"Unsupported dtype: {dtype}. Must be one of {C_DTYPES.keys()}"
+                f"Unsupported dtype: {dtype}. Must be one of {list(C_DTYPES.keys())}"
             )
+
+        self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
+
         slot_size = int(np.prod(shape[1:]))
-        slot_bytes = nbytes(slot_size * nbytes(dtype.itemsize))
+        elem_size = torch.empty((), dtype=dtype).element_size()
+        slot_bytes = nbytes(slot_size * elem_size)
         dataset_bytes = nbytes(shape[0] * slot_bytes)
         cache_bytes = self.cache_size.to("B")
         states_bytes = nbytes(shape[0] * torch.uint8.itemsize)
@@ -306,16 +296,18 @@ class SharedArray:
                 )
 
         mp_arr = mp.Array(C_DTYPES[dtype], n_slots * slot_size, lock=use_lock)  # type: ignore
-        shm_arr = np.ctypeslib.as_array(mp_arr.get_obj())
+        shm_arr = np.ctypeslib.as_array(mp_arr.get_obj() if hasattr(mp_arr, "get_obj") else mp_arr)
         shm_arr = shm_arr.reshape((n_slots, *shape[1:]))
         self._slots = torch.from_numpy(shm_arr)
         self._slots *= 0
 
-        mp_states_arr = mp.Array(C_DTYPES[torch.uint8], shape[0])  # type: ignore
+        mp_states_arr = mp.Array(C_DTYPES[torch.uint8], shape[0], lock=True)  # type: ignore
         shm_states_arr = np.ctypeslib.as_array(mp_states_arr.get_obj())
         self._shm_states = torch.from_numpy(shm_states_arr)
         self._shm_states *= 0
         self._shm_states[n_slots:] = SlotState.OOC.value
+        self._slot_bytes = slot_bytes
+        self._n_slots = n_slots
 
     @property
     def array(self) -> torch.Tensor:
@@ -336,13 +328,12 @@ class SharedArray:
     @property
     def cached_states(self) -> int:
         """Written states in cache."""
-        return int(sum([s == 1 for s in self.states]))
+        return int((self.states == SlotState.SET.value).sum().item())
 
     @property
     def cached_bytes(self) -> "nbytes":
         """Bytes written to cache."""
-        n_slots = len(self.array)
-        return self.cache_size * self.cached_states / n_slots
+        return nbytes(self._slot_bytes * self.cached_states)
 
     def get_state(self, index: int | None) -> tuple[SlotState, int | None]:
         """Get the slot state at specified index."""
@@ -354,20 +345,22 @@ class SharedArray:
             raise IndexError(
                 f"Index {index} out of range for dataset {list(self.states.shape)}"
             )
-        return SlotState(self.states[index].item()), index
+        return SlotState(int(self.states[index].item())), index
 
     def clear(self, index: int | None = None):
         """Clear the cache (optionally only at a specified index)."""
-        _, index = self.get_state(index)
         if index is None:
             self._slots *= 0
             self._shm_states *= 0
             self._shm_states[len(self) :] = SlotState.OOC.value
         else:
-            self[index] = torch.zeros(self._slots.shape[1:])
-            self._shm_states[index] = torch.zeros(self._shm_states.shape[1:])
-            if len(self) <= index:
-                self._shm_states[index] = SlotState.OOC.value
+            _, idx = self.get_state(index)
+            if idx is None:
+                return
+            self._slots[idx].zero_()
+            self._shm_states[idx] = 0
+            if len(self) <= idx:
+                self._shm_states[idx] = SlotState.OOC.value
 
     def clear_allocation(self):
         """Delete shared memory allocation."""
@@ -376,26 +369,34 @@ class SharedArray:
 
     def __getitem__(self, index: int | None) -> torch.Tensor | None:
         """Fetch sample tensor from cache if stored, otherwise returns None."""
-        state, index = self.get_state(index)
-        if state != SlotState.SET:
+        state, idx = self.get_state(index)
+        if state != SlotState.SET or idx is None:
             return None
-        return self.array[index]
+        return self.array[idx]
 
     def __setitem__(self, index: int | None, item: torch.Tensor):
         """Fill the cache at specified location."""
-        state, index = self.get_state(index)
-        if state == SlotState.OOC or state == SlotState.INVALID:
+        state, idx = self.get_state(index)
+        if (state == SlotState.OOC or state == SlotState.INVALID) or idx is None:
             return
         if state == SlotState.SET and not self.allow_overwrite:
             raise RuntimeError(
                 f"{self} is locked and does not allow overwrites at {index=}."
             )
-        self.array[index] = item
-        self.states[index] = SlotState.SET.value
+        if item.shape != self.array[idx].shape:
+            raise ValueError(
+                f"Shape mismatch: got {tuple(item.shape)} expected {tuple(self.array[idx].shape)}"
+            )
+        self._lock.acquire()
+        try:
+            self.array[idx] = item
+            self.states[idx] = SlotState.SET.value
+        finally:
+            self._lock.release()
 
     def __contains__(self, index: int | None) -> bool:
         """Test 'in' cache in shared memory."""
-        state, index = self.get_state(index)
+        state, _ = self.get_state(index)
         return state == SlotState.SET
 
     def __len__(self) -> int:
@@ -427,38 +428,33 @@ class SharedDict:
         serializer: DictSerializer = PickleSerializer(),
         use_lock: bool = True,
         allow_overwrite: bool = True,
-        verbose: bool = False,
         **kwargs,
     ):
         """Constructor.
 
         Args:
             descr: Descriptor ID for shared memory access.
-            size: Maximum cache size in MiB (if int or float); default "16.0 GiB".
+            size: Maximum cache size in GiB (if int or float); default "16.0 MiB".
             serializer: Serializer for the encoding of the dictionary data.
             use_lock: If True, applies a threading lock for multiprocessing.
             allow_overwrite: If True, cache slots can be overwritten.
-            verbose: Print information to the stdout.
             kwargs: Key-value dictionary pairs to load into memory.
 
         Note: If the dictionary is supposed to contain the keys
-          ['descr', 'size', 'sample_size', 'allow_overwrite', 'serlializer', 'verbose']
+          ['descr', 'cache_size', 'allow_overwrite', 'serializer']
+          use instead '__{key}'.
         """
         super().__init__()
         self.descr = descr
         self.allow_overwrite = True
         self.cache_size = (
-            nbytes(f"{size}M") if isinstance(size, int | float) else nbytes(size)
+            nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
         )
         if self.cache_size <= 5:
             raise ValueError("Chosen cache size is too small!")
         self.serializer = serializer
-        self._lock: mp.synchronize.Lock | DummyLock
-        if use_lock:
-            self._lock = Lock()
-        else:
-            self._lock = DummyLock()
-        self.verbose = verbose
+        self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
+        self._hdr_size = 8  # big-endian length header
         self.shm = self.get_allocation()
         self.clear()
         self.update(kwargs)
@@ -478,10 +474,12 @@ class SharedDict:
             name = self.descr
         if size is None or size == 0:
             size = self.cache_size
+        req_size = int(size) if not isinstance(size, nbytes) else int(size)
+        req_size = max(req_size, getattr(self, "_hdr_size", 8))  # ensure room for header
         try:
             shm = SharedMemory(name=name)
         except FileNotFoundError:
-            shm = SharedMemory(name=name, create=True, size=int(size))
+            shm = SharedMemory(name=name, create=True, size=req_size)
         return shm
 
     def clear_allocation(
@@ -504,15 +502,35 @@ class SharedDict:
         byte_data = self.serializer.dumps(data)
         if not hasattr(self, "shm"):
             self.get_allocation()
-        if len(byte_data) < self.cache_size:
-            self.shm.buf[: len(byte_data)] = byte_data
-        else:
+        cap = len(self.shm.buf)
+        total_len = self._hdr_size + len(byte_data)
+        if total_len > cap:
             return None
+        self.shm.buf[: self._hdr_size] = struct.pack(">Q", len(byte_data))
+        self.shm.buf[self._hdr_size : self._hdr_size + len(byte_data)] = byte_data
         return byte_data
 
     def read_buffer(self) -> dict:
         """Read the shared memory buffer."""
-        return self.serializer.loads(self.shm.buf.tobytes())
+        buf = self.shm.buf
+        if len(buf) < self._hdr_size:
+            return {}
+        try:
+            length = struct.unpack(">Q", self.shm.buf[: self._hdr_size])[0]
+        except struct.error:
+            raise RuntimeError("Failed to unpack header length.")
+        if length == 0:
+            return {}
+        end = self._hdr_size + length
+        if end > len(buf):
+            raise RuntimeError(
+                f"Buffer length mismatch (expected {end} but got {len(buf)})"
+            )
+        data = self.shm.buf[self._hdr_size : end].tobytes()
+        try:
+            return self.serializer.loads(data)
+        except Exception as e:
+            raise RuntimeError(f"Failed to deserialize buffer: {e}")
 
     @contextmanager
     @lock
@@ -538,7 +556,7 @@ class SharedDict:
     def __setitem__(self, key: str | int, value: Any):
         """Set item of dictionary in shared memory."""
         if not self.allow_overwrite:
-            return
+            raise RuntimeError("SharedDict is locked and does not allow overwrites.")
         with self.open_buffer() as dct:
             dct[key] = value
 
@@ -567,11 +585,11 @@ class SharedDict:
         """Test not equal dictionary in shared memory."""
         return self.read_buffer() != other
 
-    def __or__(self, other: Any) -> bool:
+    def __or__(self, other: Any) -> dict:
         """Test 'or' dictionary in shared memory."""
         return self.read_buffer() | other
 
-    def __ror__(self, other: Any) -> bool:
+    def __ror__(self, other: Any) -> dict:
         """Test 'or' dictionary in shared memory."""
         return other | self.read_buffer()
 
@@ -579,7 +597,7 @@ class SharedDict:
         """String of dictionary in shared memory."""
         return str(self.read_buffer()) + "@shm"
 
-    def __repr(self) -> str:
+    def __repr__(self) -> str:
         """Representation of dictionary in shared memory."""
         return repr(self.read_buffer()) + "@shm"
 
@@ -604,15 +622,15 @@ class SharedDict:
         with self.open_buffer() as dct:
             dct.update(other, **kwargs)
 
-    def setdefault(self, key: str | int, default: Any | None = None) -> dict:
+    def setdefault(self, key: str | int, default: Any | None = None) -> Any:
         """Setdefault the dictionary in shared memory."""
         with self.open_buffer() as dct:
             return dct.setdefault(key, default)
 
-    def pop(self, key: str | int, default: Any | None = None):
+    def pop(self, key: str | int, default: Any = _SENTINEL):
         """Pop the dictionary in shared memory."""
         with self.open_buffer() as dct:
-            if default is None or default is object():
+            if default is _SENTINEL:
                 return dct.pop(key)
             return dct.pop(key, default)
 
@@ -627,7 +645,7 @@ class SharedDictList:
     def __init__(
         self,
         n: int,
-        *sequence: list[int | float | bool | str | bytes | dict | None],
+        *sequence: int | float | bool | str | bytes | dict | None,
         descr: str = "shm_list",
         slot_size: int | float | str = "650b",
         size: int | float | str = "64M",
@@ -644,28 +662,25 @@ class SharedDictList:
             descr: Descriptor ID for shared memory access.
             slot_size: Size of a single list entry (should be big enough for even the
               biggest entry, otherwise a maximum size is estimated).
-            size: Maximum cache size in MiB (if int or float); default "16.0 GiB".
+            size: Maximum cache size in GiB (if int or float); default "64.0 MiB".
             serializer: Serializer for the encoding of the dictionary data.
             use_lock: If True, applies a threading lock for multiprocessing.
             allow_overwrite: If True, cache slots can be overwritten.
             verbose: Print information to the stdout.
 
         Note: If the dictionary is supposed to contain the keys
-          ['descr', 'size', 'sample_size', 'allow_overwrite', 'serlializer', 'verbose']
+          ['descr', 'cache_size', 'sample_size', 'allow_overwrite', 'serializer', 'verbose']
+          use instead '__{key}'.
         """
         super().__init__()
 
         self.descr = descr
         self.serializer = serializer
-        self._lock: mp.synchronize.Lock | DummyLock
-        if use_lock:
-            self._lock = Lock()
-        else:
-            self._lock = DummyLock()
+        self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
         self.allow_overwrite = True
         self.verbose = verbose
         self.cache_size = (
-            nbytes(f"{size}M") if isinstance(size, int | float) else nbytes(size)
+            nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
         )
         if sequence:
             slot_bytes = max(
@@ -699,7 +714,10 @@ class SharedDictList:
         self._slots, self._shm_states = self.get_allocation(
             name=self.descr, n_slots=n_slots, slot_size=int(slot_bytes), size=n
         )
+        self._slot_bytes = nbytes(slot_bytes)
         for i, d in enumerate(sequence):
+            if i >= len(self._slots):
+                break
             self[i] = d
         self.allow_overwrite = allow_overwrite
 
@@ -719,15 +737,19 @@ class SharedDictList:
             slot_size: Number of bytes each element should allocate in shared memory.
             size: Number of samples in the dataset.
             kwargs: Additional keywords for compatibility.
+
+        Returns:
+            shm_list: List in shared memory.
+            _shm_states: List slot states if newly allocated, None otherwise.
         """
         if name is None:
             name = self.descr
         try:
             shm_list = ShareableList(name=name)
         except FileNotFoundError:
-            shm_list = ShareableList([np.random.bytes(slot_size)] * n_slots, name=name)
+            shm_list = ShareableList([bytes(slot_size)] * n_slots, name=name)
         if not hasattr(self, "_shm_states"):
-            mp_states_arr = mp.Array(C_DTYPES[torch.uint8], size)  # type: ignore
+            mp_states_arr = mp.Array(C_DTYPES[torch.uint8], size, lock=True)  # type: ignore
             shm_states_arr = np.ctypeslib.as_array(mp_states_arr.get_obj())
             self._shm_states = torch.from_numpy(shm_states_arr)
             self._shm_states *= 0
@@ -767,13 +789,15 @@ class SharedDictList:
     @property
     def cached_states(self) -> int:
         """Written states in cache."""
-        return int(sum([s == 1 for s in self.states]))
+        return int((self.states == SlotState.SET.value).sum().item())
 
     @property
     def cached_bytes(self) -> "nbytes":
         """Bytes written to cache."""
         n_slots = len(self.slots)
-        return self.cache_size * self.cached_states / n_slots
+        if n_slots == 0:
+            return nbytes(0)
+        return nbytes(self._slot_bytes * self.cached_states)
 
     def get_state(self, index: int | None) -> tuple[SlotState, int | None]:
         """Get the slot state at specified index."""
@@ -785,39 +809,59 @@ class SharedDictList:
             raise IndexError(
                 f"Index {index} out of range for dataset {list(self.states.shape)}"
             )
-        return SlotState(self.states[index].item()), index
+        try:
+            state = SlotState(int(self.states[index].item()))
+        except Exception as e:
+            raise RuntimeError(f"Corrupt slot state value at index {index}: {self.states[index]}. {e}")
+        return state, index
 
     def __getitem__(
         self, index: int | None
     ) -> int | float | bool | str | bytes | dict | None:
         """Fetch sample data from cache if stored, otherwise returns None."""
-        state, index = self.get_state(index)
-        if state != SlotState.SET or index is None:
+        state, idx = self.get_state(index)
+        if state != SlotState.SET or idx is None:
             return None
-        data = self._slots[index]
+        data = self._slots[idx]
         if isinstance(data, bytes):
-            return self.serializer.loads(data)
+            try:
+                return self.serializer.loads(data)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to deserialize item at index {idx}: {e}"
+                )
         return data
 
     def __setitem__(
         self, index: int, item: int | float | bool | str | bytes | dict | None
     ):
         """Fill the cache at specified slot."""
-        state = self.get_state(index)
-        if state == SlotState.OOC:
+        state, idx = self.get_state(index)
+        if state == SlotState.OOC or idx is None:
             return
         if state == SlotState.SET and not self.allow_overwrite:
             raise RuntimeError(
-                f"{self} is locked and does not allow overwrites at {index=}."
+                f"{self} is locked and does not allow overwrites at index={idx}."
             )
         if isinstance(item, dict):
-            item = self.serializer.dumps(item)
-        self.slots[index] = item
-        self.states[index] = SlotState.SET.value
+            item_bytes = self.serializer.dumps(item)
+            if len(item_bytes) > self._slot_bytes:
+                raise RuntimeError(
+                    f"Serialized dict at index {idx} ({len(item_bytes)} bytes) "
+                    f"exceeds slot size ({self._slot_bytes} bytes). "
+                    f"Increase slot_size or reduce dict size."
+                )
+            item = item_bytes
+        self._lock.acquire()
+        try:
+            self.slots[idx] = item
+            self.states[idx] = SlotState.SET.value
+        finally:
+            self._lock.release()
 
     def __contains__(self, index: int) -> bool:
         """Test 'in' cache in shared memory."""
-        state = self.get_state(index)
+        state, _ = self.get_state(index)
         return state == SlotState.SET
 
     def __len__(self) -> int:

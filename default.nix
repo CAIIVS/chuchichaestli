@@ -3,17 +3,16 @@
   src ? ./.,
 }:
 let 
-  pythonPackage = pkgs.python312Packages.buildPythonApplication {
+  pythonPackage = pkgs.python313Packages.buildPythonApplication {
     pname = "chuchichaestli";
-    version = "0.2.10";
+    version = "0.2.14";
     format = "pyproject";
-    build-system = with pkgs.python312Packages; [hatchling];
-    propagatedBuildInputs = with pkgs.python312Packages; [
+    build-system = with pkgs.python313Packages; [hatchling];
+    propagatedBuildInputs = with pkgs.python313Packages; [
       numpy
       h5py
       torch
       torchvision
-      psutil
     ];
     src = src;
     doCheck = false;
