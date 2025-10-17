@@ -1,56 +1,14 @@
-"""ResNet block implementation.
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""ResNet block implementation."""
 
 import torch
 from torch import nn
 
 from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
-
-
-class Norm(nn.Module):
-    """Normalization layer implementation."""
-
-    def __init__(self, dimensions: int, norm_type: str, channels: int, num_groups: int):
-        """Initialize the normalization layer."""
-        super().__init__()
-        self.norm: nn.Module
-        match norm_type:
-            case "group":
-                self.norm = nn.GroupNorm(num_groups, channels)
-            case "instance" if dimensions == 1:
-                self.norm = nn.InstanceNorm1d(channels)
-            case "instance" if dimensions == 2:
-                self.norm = nn.InstanceNorm2d(channels)
-            case "instance" if dimensions == 3:
-                self.norm = nn.InstanceNorm3d(channels)
-            case "batch" if dimensions == 1:
-                self.norm = nn.BatchNorm1d(channels)
-            case "batch" if dimensions == 2:
-                self.norm = nn.BatchNorm2d(channels)
-            case "batch" if dimensions == 3:
-                self.norm = nn.BatchNorm3d(channels)
-
-    def forward(self, x: torch.Tensor):
-        """Forward pass through the normalization layer."""
-        return self.norm(x)
+from chuchichaestli.models.norm import Norm
 
 
 class ResidualBlock(nn.Module):
@@ -101,7 +59,7 @@ class ResidualBlock(nn.Module):
 
         self.dropout = nn.Dropout(res_dropout)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the residual block."""
         hh = self.conv1(self.act1(self.norm1(x)))
         idx = [slice(None), slice(None)] + [None] * self.dimensions

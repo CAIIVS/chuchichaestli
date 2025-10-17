@@ -1,22 +1,7 @@
-"""Implementation of Inversion by Direct Iteration (InDI).
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Implementation of Inversion by Direct Iteration (InDI)."""
 
 from collections.abc import Generator
 from typing import Any
@@ -29,9 +14,10 @@ from chuchichaestli.diffusion.ddpm.base import DiffusionProcess
 class InDI(DiffusionProcess):
     """Degradation process for inversion by direct iteration (InDI).
 
-    The InDI process is described in the paper "Inversion by Direct Iteration: An Alternative to
-    Denoising Diffusion for Image Restoration" by Delbracio and Milanfar.
-    See https://arxiv.org/abs/2303.11435.
+    As described in the paper:
+    "Inversion by Direct Iteration: An Alternative to Denoising Diffusion for Image Restoration"
+    by Delbracio and Milanfar (2023);
+    see https://arxiv.org/abs/2303.11435.
     """
 
     def __init__(
@@ -76,22 +62,37 @@ class InDI(DiffusionProcess):
         )
 
     def noise_step(
-        self, x: torch.Tensor, y: torch.Tensor, *args, **kwargs
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        timesteps: torch.Tensor | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Noise step for the diffusion process.
 
         Args:
             x: High quality sample, tensor of shape (batch_size, *).
             y: Corresponding low quality sample, tensor of shape (batch_size, *).
+            timesteps: Timesteps to sample noise from. If None, timesteps are sampled.
             *args: Additional arguments.
             **kwargs: Additional keyword arguments.
 
         Returns:
             Tuple of the sampled tensor, noise tensor and timesteps.
         """
-        timesteps = self.sample_timesteps(x.shape[0])
+        if timesteps is not None:
+            x = (
+                x.unsqueeze(0)
+                .expand(len(timesteps), *x.shape)
+                .reshape(-1, *x.shape[1:])
+            )
+            timesteps = (
+                timesteps.repeat_interleave(x.shape[0] // len(timesteps)) * self.delta
+            )
+        else:
+            timesteps = self.sample_timesteps(x.shape[0])
         timesteps = timesteps.view(-1, *([1] * (x.dim() - 1)))
-
         x_t = (1 - timesteps) * x + timesteps * y
         # TODO: Verify that this is correct.
         noise = x_t - x

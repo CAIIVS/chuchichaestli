@@ -1,37 +1,39 @@
-"""Test the downsampling module.
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Unit tests for the downsampling module."""
 
 import pytest
 import torch
-from chuchichaestli.models.downsampling import Downsample
+from chuchichaestli.models.downsampling import Downsample, DownsampleInterpolate
 
 
 @pytest.mark.parametrize("dimensions", [1, 2, 3])
 def test_forward(dimensions):
-    """Test the forward method of the downsample module."""
+    """Test the forward method of the `Downsample` module."""
     # Create dummy input tensor
     input_shape = (1, 16) + (32,) * dimensions
     output_shape = (1, 16) + (16,) * dimensions
     input_tensor = torch.randn(input_shape)
 
     upsample = Downsample(dimensions=dimensions, num_channels=16)
+
+    # Call the forward method
+    output_tensor = upsample.forward(input_tensor, None)
+
+    # Check the output tensor shape
+    assert output_tensor.shape == output_shape
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+def test_interpolate_forward(dimensions):
+    """Test the forward method of the `DownsampleInterpolate` module."""
+    # Create dummy input tensor
+    input_shape = (1, 16) + (32,) * dimensions
+    output_shape = (1, 16) + (16,) * dimensions
+    input_tensor = torch.randn(input_shape)
+
+    upsample = DownsampleInterpolate(dimensions=dimensions, num_channels=None)
 
     # Call the forward method
     output_tensor = upsample.forward(input_tensor, None)

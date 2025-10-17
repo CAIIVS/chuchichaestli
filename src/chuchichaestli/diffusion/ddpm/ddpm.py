@@ -1,37 +1,23 @@
-"""Implementation of the Diffusion Probabilistic Model (DDPM) noise process as described in the paper.
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Implementation of the Diffusion Probabilistic Model (DDPM) noise process."""
 
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
-
-from typing import Any
 from collections.abc import Generator
+from typing import Any
 
 import torch
 import torch.types
 
-from chuchichaestli.diffusion.ddpm.base import DiffusionProcess, SCHEDULES
+from chuchichaestli.diffusion.ddpm.base import SCHEDULES, DiffusionProcess
 
 
 class DDPM(DiffusionProcess):
     """Diffusion Probabilistic Model (DDPM) noise process.
 
-    The DDPM noise process is described in the paper "Denoising Diffusion Probabilistic Models" by Ho et al.
-    See https://arxiv.org/abs/2006.11239.
+    As described in the paper:
+    "Denoising Diffusion Probabilistic Models" by Ho et al. (2020);
+    see https://arxiv.org/abs/2006.11239.
     """
 
     def __init__(
@@ -64,20 +50,35 @@ class DDPM(DiffusionProcess):
         self.coef_outer = 1.0 / torch.sqrt(self.alpha)
 
     def noise_step(
-        self, x_t: torch.Tensor, condition: torch.Tensor | None = None, *args, **kwargs
+        self,
+        x_t: torch.Tensor,
+        condition: torch.Tensor | None = None,
+        timesteps: torch.Tensor | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Noise step for the diffusion process.
 
         Args:
             x_t: Tensor of shape (batch_size, *).
             condition: Tensor of shape (batch_size, *).
+            timesteps: Optional timesteps to sample noise for (will be sampled randomly if None).
             *args: Additional arguments.
             **kwargs: Additional keyword arguments.
 
         Returns:
             Tuple of the sampled tensor, noise tensor and timesteps.
         """
-        timesteps = self.sample_timesteps(x_t.shape[0])
+        if timesteps is not None:
+            x_t = (
+                x_t.unsqueeze(0)
+                .expand(len(timesteps), *x_t.shape)
+                .reshape(-1, *x_t.shape[1:])
+            )
+            timesteps = timesteps.repeat_interleave(x_t.shape[0] // len(timesteps))
+        else:
+            timesteps = self.sample_timesteps(x_t.shape[0])
+
         noise = self.sample_noise(x_t.shape)
 
         s_shape = [-1] + [1] * (x_t.dim() - 1)

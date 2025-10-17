@@ -1,25 +1,10 @@
-"""Implementation of the Brownian Bridge Diffusion Model.
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Implementation of the Brownian Bridge Diffusion Model."""
 
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
-
-from typing import Any
 from collections.abc import Generator
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -29,9 +14,11 @@ from chuchichaestli.diffusion.distributions import DistributionAdapter
 
 
 class BBDM(DiffusionProcess):
-    """Brownian Bridge Diffusion Model.
+    """Brownian Bridge Diffusion Model (BBDM).
 
-    C.f. https://openaccess.thecvf.com/content/CVPR2023/papers/Li_BBDM_Image-to-Image_Translation_With_Brownian_Bridge_Diffusion_Models_CVPR_2023_paper.pdf
+    As described in the paper:
+    "BBDM: Image-to-image Translation with Brownian Bridge Diffusion Models" by Li et al. (2022);
+     see https://arxiv.org/abs/2205.07680.
     """
 
     def __init__(
@@ -57,17 +44,31 @@ class BBDM(DiffusionProcess):
         self.s = s
 
     def noise_step(
-        self, x_0: Tensor, condition: Tensor, *args, **kwargs
+        self,
+        x_0: Tensor,
+        condition: Tensor,
+        timesteps: Tensor | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[Tensor, Tensor, Tensor]:
         """Noise step for the Brownian Bridge Diffusion Model.
 
         Args:
             x_0: Clean input tensor.
             condition: Condition tensor.
+            timesteps: Timesteps to use for the diffusion process.
             args: Additional positional arguments.
             kwargs: Additional keyword arguments.
         """
-        timesteps = self.sample_timesteps(x_0.shape[0])
+        if timesteps is not None:
+            x_0 = (
+                x_0.unsqueeze(0)
+                .expand(len(timesteps), *x_0.shape)
+                .reshape(-1, *x_0.shape[1:])
+            )
+            timesteps = timesteps.repeat_interleave(x_0.shape[0] // len(timesteps))
+        else:
+            timesteps = self.sample_timesteps(x_0.shape[0])
         noise = self.sample_noise(x_0.shape)
         s_shape = [-1] + [1] * (x_0.dim() - 1)
         m_t = (timesteps / self.num_time_steps).reshape(s_shape)

@@ -1,29 +1,14 @@
-"""UNet building blocks.
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""UNet building blocks."""
 
 import torch
 from torch import nn
-
 from chuchichaestli.models.attention import ATTENTION_MAP
 from chuchichaestli.models.resnet import ResidualBlock
 from chuchichaestli.utils import partialclass
+from typing import Literal
 
 
 class GaussianNoiseBlock(nn.Module):
@@ -49,11 +34,9 @@ class GaussianNoiseBlock(nn.Module):
           to the noise level.
         """
         super().__init__()
-        self.sigma = sigma
+        self.sigma = nn.Parameter(torch.tensor(sigma))
         self.detached = detached
         self.noise = torch.tensor(mu)
-        if device is not None:
-            self.noise = self.noise.to(device)
 
     def forward(
         self, x: torch.Tensor, *args, noise_at_inference: bool = False
@@ -74,10 +57,10 @@ class DownBlock(nn.Module):
         dimensions: int,
         in_channels: int,
         out_channels: int,
-        time_embedding: bool = True,
+        time_embedding: bool = False,
         time_channels: int = 32,
         res_args: dict = {},
-        attention: str | None = None,
+        attention: Literal["self_attention", "conv_attention"] | None = None,
         attn_args: dict = {},
     ):
         """Initialize the down block."""
@@ -101,7 +84,7 @@ class DownBlock(nn.Module):
             case _:
                 self.attn = None
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the down block."""
         x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
@@ -146,10 +129,10 @@ class MidBlock(nn.Module):
         self,
         dimensions: int,
         channels: int,
-        time_embedding: bool = True,
+        time_embedding: bool = False,
         time_channels: int = 32,
         res_args: dict = {},
-        attention: str | None = None,
+        attention: Literal["self_attention", "conv_attention"] | None = None,
         attn_args: dict = {},
     ):
         """Initialize the mid block."""
@@ -170,7 +153,7 @@ class MidBlock(nn.Module):
             case _:
                 self.attn = None
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the mid block."""
         x = self.attn(x, None) if self.attn else x
         x = self.res_block(x, t)
@@ -214,12 +197,13 @@ class UpBlock(nn.Module):
         dimensions: int,
         in_channels: int,
         out_channels: int,
-        time_embedding: bool = True,
+        time_embedding: bool = False,
         time_channels: int = 32,
         res_args: dict = {},
-        attention: str | None = None,
+        attention: Literal["self_attention", "conv_attention", "attention_gate"]
+        | None = None,
         attn_args: dict = {},
-        skip_connection_action: str | None = None,
+        skip_connection_action: Literal["concat", "avg", "add"] | None = None,
     ):
         """Initialize the up block."""
         super().__init__()
@@ -227,7 +211,7 @@ class UpBlock(nn.Module):
         if skip_connection_action == "concat":
             self.res_block = ResidualBlock(
                 dimensions,
-                in_channels + out_channels,
+                in_channels + in_channels,
                 out_channels,
                 time_embedding,
                 time_channels,
@@ -256,13 +240,13 @@ class UpBlock(nn.Module):
                 )
             case "attention_gate":
                 self.attn = ATTENTION_MAP[attention](
-                    dimensions, in_channels, out_channels, **attn_args
+                    dimensions, in_channels, in_channels, **attn_args
                 )
             case _:
                 self.attn = None
 
     def forward(
-        self, x: torch.Tensor, h: torch.Tensor, t: torch.Tensor
+        self, x: torch.Tensor, h: torch.Tensor, t: torch.Tensor | None = None
     ) -> torch.Tensor:
         """Forward pass through the up block."""
         x = self.attn(x, h) if self.attn else x
@@ -347,7 +331,6 @@ ConvAttnMidBlock = partialclass(
     "ConvAttnMidBlock", MidBlock, attention="conv_attention"
 )
 ConvAttnUpBlock = partialclass("ConvAttnUpBlock", UpBlock, attention="conv_attention")
-AttnUpBlock = partialclass("AttnUpBlock", UpBlock, attention="conv_attention")
 AttnGateUpBlock = partialclass("AttnGateUpBlock", UpBlock, attention="attention_gate")
 
 BLOCK_MAP = {

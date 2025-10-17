@@ -1,22 +1,7 @@
-"""Tests for DDPM.
-
-This file is part of Chuchichaestli.
-
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Unit tests for the DDPM module."""
 
 import pytest
 import torch
@@ -156,3 +141,17 @@ def test_seed():
 
     # Check the output shape
     assert output.shape == (2 * 4, 16) + (32,) * 2
+
+
+def test_noise_indices():
+    """Test the noise_step method of the DDPM class."""
+    # Create dummy input tensor
+    input_shape = (4, 16) + (32,) * 2
+    x_t = torch.randn(input_shape)
+
+    # Call the noise_step method
+    ddpm = DDPM(num_timesteps=10, schedule="exponential")
+    output = ddpm.noise_step(x_t, timesteps=torch.tensor([0, 1, 2, 3]))
+
+    # Check the output shape
+    assert output[2].shape[0] == 4 * 4  # 4 timesteps, 4 samples

@@ -1,0 +1,87 @@
+site_name: chuchichaestli
+site_description: Documentation of the chuchichaestli framework.
+copyright: Copyright &copy; 2024-present, Members of CAIIVS
+# site_url: https://chuchichaestli.github.io/
+repo_url: https://github.com/CAIIVS/chuchichaestli
+repo_name: CAIIVS/chuchichaestli
+edit_uri: edit/main/docs/
+# site_dir:
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Usage: usage.md
+  - API Reference: reference
+
+theme:
+  name: "material"
+  features:
+    - content.tabs.link
+    - content.code.annotate
+    - navigation.indexes
+    - navigation.instant
+    - content.code.copy
+  icon:
+    logo: fontawesome/solid/hexagon-nodes
+    repo: fontawesome/brands/github
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: "Switch to dark mode"
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: pink
+      accent: pink
+      toggle: 
+        icon: material/brightness-4
+        name: "Switch to light mode"
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.extra
+  - pymdownx.highlight
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          inventories:
+            - https://docs.python.org/3/objects.inv
+            - https://numpy.org/doc/stable/objects.inv
+            - https://docs.pytorch.org/docs/stable/objects.inv
+          options:
+            annotations_path: source
+            backlinks: tree
+            docstring_section_style: table
+            filters: ["(__call__|^[^_])"]
+            heading_level: 1
+            merge_init_into_class: true
+            parameter_headings: false
+            separate_signature: true
+            show_root_heading: true
+            show_signature_annotations: true
+            show_symbol_type_heading: false
+            show_symbol_type_toc: true
+            # show_submodules: true
+            # signature_crossrefs: true
+            summary: true
+            # find_stubs_package: true
+            # show_root_toc_entry: true
+            # show_root_members_full_path: true
+            # group_by_category: true
+            # show_category_heading: true
+            
+  - api-autonav:
+      modules: ["src/chuchichaestli"]
+      nav_section_title: "API Reference"
+      api_root_uri: "reference"
+      
+
+extra_css:
+  - stylesheets/extra.css
