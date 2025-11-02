@@ -641,7 +641,7 @@ def _create_info_hook(
         info.input_size, _ = info.calculate_size(inputs, batch_dim)
         info.output_size, elem_bytes = info.calculate_size(outputs, batch_dim)
         info.output_bytes = elem_bytes * prod(info.output_size)
-        info.visited = True
+        info._visited = True
         info.calculate_mult_adds()
 
     return hook

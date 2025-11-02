@@ -170,20 +170,20 @@ MermaidClassShapes = [
 ]
 
 MermaidClassProps = [
-    "stroke-width:3px",
-    "stroke-width:3px",
-    "stroke-width:2px",
-    "stroke-width:2px",
-    "stroke-width:3px",
-    "stroke-width:3px",
-    "stroke-width:3px",
-    "stroke-width:2px",
-    "stroke-width:3px",
-    "stroke-width:3px",
-    "stroke-width:3px",
-    "stroke-width:4px,stroke-dasharray: 5 5",
-    "stroke-width:4px,stroke-dasharray: 5 5",
-    "stroke-width:3px",
+    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:2px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:2px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:2px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:4px,stroke-dasharray: 5 5,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:4px,stroke-dasharray: 5 5,color:{color_variant('dark', shift=-30)}",
+    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
 ]
 
 MermaidStyleClasses = {
@@ -223,7 +223,7 @@ class MermaidDiagram:
         group_direction: DiagramDirections = "vertical",
         max_depth: int | None = None,
         positions: dict | None = None,
-        group_by: dict | None = None,
+        group_by: Literal["type", "depth", "level", "encoder_decoder"] | None = None,
         type_map: dict[str, str] | None = None,
         class_fn: Callable[[nn.Module], str | None] | None = None,
         layer_styles: dict[str, dict[str, str]] | None = None,
@@ -246,8 +246,10 @@ class MermaidDiagram:
             positions: Mapping of node IDs to custom positions.
             group_by: Strategy for grouping layers into subgraphs.
               Options:
-                  - 'layer': Group by first-level module names
                   - 'type': Group by layer type
+                  - 'depth': Group by graph depth.
+                  - 'level': Group by resolution level
+                  - 'encoder_decoder': Group by architectural functionality.
                   - None: No grouping (default)
             type_map: Mapping from default layer types to custom names.
             class_fn: Function to categorize unknown layers (or alternative to default layers).
@@ -377,6 +379,46 @@ class MermaidDiagram:
             graph = info_forward_pass(self.model)
         self.model_graph = graph
 
+    def _extract_level_number(self, name: str) -> int | None:
+        """Extract level number from layer name.
+        
+        Handles patterns like:
+        - down_blocks.0, down_blocks.1, etc.
+        - encoder_0, encoder_1, etc.
+        - level0, level1, etc.
+        - down.0, up.0, etc.
+        
+        Args:
+            name: Layer name
+            
+        Returns:
+            Extracted level number or None
+        """
+        import re
+        
+        # Try different patterns (ordered by specificity)
+        patterns = [
+            r'(?:down_blocks|up_blocks|down|up|encoder|decoder)\.(\d+)',  # blocks.0 style
+            r'(?:down_blocks|up_blocks|down|up|encoder|decoder)_(\d+)',   # blocks_0 style
+            r'level[_\.]?(\d+)',    # level0, level_0 style
+            r'block[_\.]?(\d+)',    # block0, block_0 style
+            r'layer[_\.]?(\d+)',    # layer0, layer_0 style
+            r'\.(\d+)\.',           # .0., .1. in middle of name
+            r'_(\d+)_',             # _0_, _1_ in middle of name
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, name)
+            if match:
+                return int(match.group(1))
+        
+        # Last resort: extract any digit at the end
+        match = re.search(r'(\d+)$', name)
+        if match:
+            return int(match.group(1))
+        
+        return None
+
     def _aggregate_components(self):
         """Build nodes and edges from the model graph."""
         if not self.model_graph:
@@ -404,10 +446,8 @@ class MermaidDiagram:
 
             if i > 0:
                 prev_node = self._nodes[i - 1]
-                if layer_info.depth < prev_node["layer_info"].depth:
-                    self._edges.append((prev_node["id"], node_id, "skip"))
-                else:
-                    self._edges.append((prev_node["id"], node_id, None))
+                self._edges.append((prev_node["id"], node_id, None))
+            
 
     def nodes(self, _reload: bool = False) -> list[dict[str, Any]]:
         """Get nodes from the model graph.
@@ -520,9 +560,20 @@ class MermaidDiagram:
         if self.group_by == "type":
             return self._get_layer_type(layer_info.module)
         elif self.group_by == "depth":
-            return f"depth_{layer_info.depth}"
+            return f"Depth {layer_info.depth}"
+        elif self.group_by == "level":
+            level = self._extract_level_number(layer_info.name)
+            if level is not None:
+                return f"Level {level}"
         elif self.group_by == "encoder_decoder":
             name_lower = layer_info.name.lower()
+            if "encoder" in name_lower or "down" in name_lower:
+                return "Encoder"
+            elif "decoder" in name_lower or "up" in name_lower:
+                return "Decoder"
+            elif "bottleneck" in name_lower or "mid" in name_lower:
+                return "Bottleneck"
+            return "I/O"
         else:
             return None
 
@@ -537,7 +588,7 @@ class MermaidDiagram:
         self,
         theme: str = "dark",
         variables: dict[str, str] = {
-            "primaryTextColor": f"{color_variant('dark', shift=-30)}"
+            "primaryTextColor": f"{color_variant('dark', shift=-30)}",
         },
     ) -> list[str]:
         """Generate configs defining global diagram settings."""
@@ -786,6 +837,7 @@ if __name__ == "__main__":
     mmd = mermaid_diagram(
         model,
         direction="LR",
+        group_by=None,
         show_names=True,
         show_params=False,
         show_shapes=False,
@@ -816,6 +868,6 @@ if __name__ == "__main__":
         print(mmd.generate(auto_connect=True))
         print()
         print("Save diagram:")
-        print(mmd.save("mermaid_diagram.png", 1080, 720, 4))
+        print(mmd.save("mermaid_diagram.png", 2160, 1440, 5))
         # print("Mermaid diagram string:")
         # print(mmd)
