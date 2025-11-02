@@ -73,17 +73,17 @@ convolutional, whereas the decoder includes a mixture of attention and
 from chuchichaestli.models.unet import UNet
 
 model = UNet(
-	dimensions=2,     # spatial dimensions
-	in_channels=3,    # input image channels such as RGB
-	n_channels=64,    # channels of first hidden layer
-	out_channels=3,   # output image channels such as RGB
-	down_block_types=("DownBlock")*4,      # simple residual blocks
-	up_block_types=("AttnUpBlock")*4,      # residual blocks with attention heads in front
+	dimensions=2,        # spatial dimensions
+	in_channels=3,       # input image channels such as RGB
+	n_channels=64,       # channels of first hidden layer
+	out_channels=3,      # output image channels such as RGB
+	down_block_types=("DownBlock",)*4,     # simple residual blocks
+	up_block_types=("AttnUpBlock",)*4,     # residual blocks with attention heads in front
 	block_out_channel_mults=(1, 2, 2, 4),  # channel multipliers with each level
-	res_act="prelu",  # parametric ReLU
-	res_dropout=0.4   # dropout for residual blocks
-	attn_n_heads=2    # number of attention heads per block,
-	skip_connection_action="concat"        # skip connections are concatenated in decoder
+	res_act_fn="prelu",  # parametric ReLU
+	res_dropout=0.4,     # dropout for residual blocks
+	attn_n_heads=2,      # number of attention heads per block,
+	skip_connection_action="concat",       # skip connections are concatenated in decoder
 )
 print(model)
 ```
