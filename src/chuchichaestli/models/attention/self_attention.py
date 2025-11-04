@@ -33,7 +33,7 @@ class SelfAttention(nn.Module):
         self.head_dim = head_dim
         self.dropout_p = dropout_p
 
-    def forward(self, x: torch.Tensor, _h: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass of the attention block."""
         in_shape = x.shape
         x = x.view(in_shape[0], in_shape[1], -1).permute(0, 2, 1)

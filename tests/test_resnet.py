@@ -5,7 +5,7 @@
 
 import pytest
 import torch
-from chuchichaestli.models.resnet import ResidualBlock
+from chuchichaestli.models.blocks import ResidualBlock
 
 
 @pytest.mark.parametrize(
@@ -25,7 +25,7 @@ from chuchichaestli.models.resnet import ResidualBlock
         (3, 32, 64, 16, 16, "mish", 0.1),
     ],
 )
-def test_forward_resnet(
+def test_forward_residual_block(
     dimensions,
     in_channels,
     out_channels,
@@ -54,6 +54,55 @@ def test_forward_resnet(
 
     # Call the forward method
     output_tensor = resnet.forward(input_tensor, t_embedding)
+
+    # Check the output tensor shape
+    assert output_tensor.shape == (1, out_channels) + (32,) * dimensions
+
+
+@pytest.mark.parametrize(
+    "dimensions, in_channels, out_channels, time_channels, res_groups, res_act_fn, res_dropout",
+    [
+        (1, 32, 32, 32, 16, "silu", 0.1),
+        (2, 32, 32, 32, 16, "silu", 0.1),
+        (3, 32, 32, 32, 16, "silu", 0.1),
+        (1, 48, 32, 32, 16, "silu", 0.1),
+        (2, 48, 32, 32, 16, "silu", 0.1),
+        (3, 48, 32, 32, 16, "silu", 0.1),
+        (1, 8, 16, 16, 4, "relu", 0.1),
+        (2, 8, 16, 16, 4, "relu", 0.1),
+        (3, 8, 16, 16, 4, "relu", 0.1),
+        (1, 32, 64, 16, 16, "mish", 0.1),
+        (2, 32, 64, 16, 16, "mish", 0.1),
+        (3, 32, 64, 16, 16, "mish", 0.1),
+    ],
+)
+def test_forward_residual_block_no_timeemb_and_alt_keys(
+    dimensions,
+    in_channels,
+    out_channels,
+    time_channels,
+    res_groups,
+    res_act_fn,
+    res_dropout,
+):
+    """Test the forward method of the ResidualBlock module."""
+    # Create dummy input tensor
+    input_shape = (1, in_channels) + (32,) * dimensions
+    input_tensor = torch.randn(input_shape)
+
+    resnet = ResidualBlock(
+        dimensions,
+        in_channels,
+        out_channels,
+        time_embedding=False,
+        time_channels=time_channels,
+        num_groups=res_groups,
+        act_fn=res_act_fn,
+        dropout_p=res_dropout,
+    )
+
+    # Call the forward method
+    output_tensor = resnet.forward(input_tensor)
 
     # Check the output tensor shape
     assert output_tensor.shape == (1, out_channels) + (32,) * dimensions

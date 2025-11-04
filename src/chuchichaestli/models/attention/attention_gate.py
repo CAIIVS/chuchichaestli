@@ -68,7 +68,7 @@ class AttentionGate(nn.Module):
         self.sigma1 = nn.ReLU()
         self.sigma2 = nn.Sigmoid()
 
-    def forward(self, x: torch.Tensor, g: torch.TensorType):
+    def forward(self, x: torch.Tensor, g: torch.Tensor):
         """Forward pass of the AttentionGate.
 
         Args:
