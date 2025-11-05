@@ -5,7 +5,29 @@
 
 from functools import partial
 from torch import nn
+from typing import Literal
 from collections.abc import Callable
+
+
+__all__ = ["ACTIVATION_FUNCTIONS"]
+
+
+ActivationTypes = Literal[
+    "swish",
+    "silu",
+    "mish",
+    "gelu",
+    "relu",
+    "leaky_relu",
+    "tanh",
+    "sigmoid",
+    "identity",
+    "prelu",
+    "leakyrelu",
+    "softplus",
+    "leakyrelu,0.1",
+    "leakyrelu,0.2",
+]
 
 
 ACTIVATION_FUNCTIONS: dict[str, Callable] = {

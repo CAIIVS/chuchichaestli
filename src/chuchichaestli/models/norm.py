@@ -11,11 +11,14 @@ from typing import Literal
 __all__ = ["Norm"]
 
 
+NormTypes = Literal["group", "instance", "batch", "adabatch"]
+
+
 class Norm(nn.Module):
     """Normalization layer implementation."""
 
     def __init__(
-        self, dimensions: int, norm_type: Literal["group", "instance", "batch", "adabatch"], channels: int, num_groups: int, **kwargs
+        self, dimensions: int, norm_type: NormTypes, channels: int, num_groups: int, **kwargs
     ):
         """Initialize the normalization layer."""
         super().__init__()

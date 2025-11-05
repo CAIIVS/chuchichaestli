@@ -6,6 +6,12 @@
 from chuchichaestli.models.attention.self_attention import SelfAttention
 from chuchichaestli.models.attention.conv_attention import ConvAttention
 from chuchichaestli.models.attention.attention_gate import AttentionGate
+from typing import Literal
+
+__all__ = ["ATTENTION_MAP"]
+
+AttentionTypes = Literal["self_attention", "conv_attention", "attention_gate"]
+AttentionDownTypes = Literal["self_attention", "conv_attention"]
 
 ATTENTION_MAP = {
     "self_attention": SelfAttention,
@@ -13,4 +19,4 @@ ATTENTION_MAP = {
     "attention_gate": AttentionGate,
 }
 
-__all__ = ["ATTENTION_MAP"]
+
