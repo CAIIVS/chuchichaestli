@@ -6,7 +6,7 @@
 import torch
 from torch.nn import Module
 from torch.nn import functional as F
-from chuchichaestli.models.maps import DIM_TO_CONVT_MAP, UPSAMPLE_MODE
+from chuchichaestli.models.maps import DIM_TO_CONV_MAP, DIM_TO_CONVT_MAP, UPSAMPLE_MODE
 from typing import Literal
 
 
@@ -35,30 +35,44 @@ class UpsampleInterpolate(Module):
         num_channels: int | None = None,
         factor: int | None = None,
         antialias: bool = False,
+        with_conv: bool = True,
+        **kwargs,
     ):
         """Initialize the upsampling layer."""
+        super().__init__()
+        conv_cls = DIM_TO_CONV_MAP[dimensions]
         self.dimensions = dimensions
         self.num_channels = num_channels
         self.factor = factor if factor is not None else 2
         self.align_corners = False
         self.antialias = antialias
+        kwargs.setdefault("kernel_size", 3)
+        kwargs.setdefault("stride", 1)
+        kwargs.setdefault("padding", "same")
+        if with_conv:
+            self.conv = conv_cls(
+                num_channels, num_channels, **kwargs
+            )
 
     @property
     def mode(self) -> Literal["linear", "bilinear", "trilinear", "nearest"]:
         """Interpolation mode."""
         return UPSAMPLE_MODE.get(self.dimensions, "nearest")
 
-    def forward(self, x: torch.Tensor, _t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the upsampling layer."""
         spatial_dims = x.shape[2:]
         output_dims = [s * self.factor for s in spatial_dims]
-        return F.interpolate(
+        x = F.interpolate(
             x,
             size=output_dims,
             mode=self.mode,
             align_corners=self.align_corners,
             antialias=self.antialias,
         )
+        if hasattr(self, "conv"):
+            x = self.conv(x)
+        return x
 
 
 UPSAMPLE_FUNCTIONS = {
