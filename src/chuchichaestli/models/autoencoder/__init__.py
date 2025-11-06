@@ -1,24 +1,11 @@
-"""VAE implementation and utilities.
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Autoencoder implementations and utilities."""
 
-This file is part of Chuchichaestli.
+from chuchichaestli.models.autoencoder.decoder import Decoder
+from chuchichaestli.models.autoencoder.encoder import Encoder
+from chuchichaestli.models.autoencoder.vae import VAE
+from chuchichaestli.models.autoencoder.vqvae import VQVAE
 
-Chuchichaestli is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Chuchichaestli is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Chuchichaestli.  If not, see <http://www.gnu.org/licenses/>.
-
-Developed by the Intelligent Vision Systems Group at ZHAW.
-"""
-
-from chuchichaestli.models.vae.vae import VAE
-from chuchichaestli.models.vae.vqvae import VQVAE
-
-__all__ = [VAE, VQVAE]
+__all__ = ["Decoder", "Encoder", "VAE", "VQVAE"]
