@@ -6,6 +6,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from chuchichaestli.models.norm import Norm, NormTypes
 
 
 class SelfAttention(nn.Module):
@@ -13,14 +14,23 @@ class SelfAttention(nn.Module):
 
     def __init__(
         self,
+        dimensions: int,
         n_channels: int,
         n_heads: int = 1,
         head_dim: int | None = None,
+        norm_type: NormTypes = "group",
+        groups: int = 32,
         dropout_p: float = 0.0,
         **kwargs,
     ):
         """Attention block implementation."""
         super().__init__()
+
+        self.norm = (
+            Norm(dimensions, norm_type, n_channels, groups)
+            if norm_type is not None
+            else None
+        )
 
         if head_dim is None:
             head_dim = n_channels // n_heads
@@ -36,6 +46,7 @@ class SelfAttention(nn.Module):
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass of the attention block."""
         in_shape = x.shape
+        x = self.norm(x) if self.norm is not None else x
         x = x.view(in_shape[0], in_shape[1], -1).permute(0, 2, 1)
 
         qkv = self.proj_in(x).view(in_shape[0], -1, self.n_heads, 3 * self.head_dim)
