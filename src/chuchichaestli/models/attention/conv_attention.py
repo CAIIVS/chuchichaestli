@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
-from chuchichaestli.models.norm import Norm
+from chuchichaestli.models.norm import Norm, NormTypes
 
 
 class ConvAttention(nn.Module):
@@ -20,7 +20,7 @@ class ConvAttention(nn.Module):
         self,
         dimensions: int,
         n_channels: int,
-        norm_type: str = "group",
+        norm_type: NormTypes = "group",
         groups: int = 32,
         kernel_size: int = 1,
         dropout_p: float = 0.0,
