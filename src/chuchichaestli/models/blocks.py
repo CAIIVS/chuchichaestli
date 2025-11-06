@@ -36,15 +36,19 @@ __all__ = [
     "ConvAttnMidBlock",
     "ConvAttnUpBlock",
     # Autoencoder blocks
-    "AutoEncoderDownBlock",
-    "AutoEncoderMidBlock",
-    "AutoEncoderUpBlock",
-    "AttnAutoEncoderDownBlock",
-    "AttnAutoEncoderMidBlock",
-    "AttnAutoEncoderUpBlock",
-    "ConvAttnAutoEncoderDownBlock",
-    "ConvAttnAutoEncoderMidBlock",
-    "ConvAttnAutoEncoderUpBlock",
+    "AutoencoderDownBlock",
+    "AutoencoderMidBlock",
+    "AutoencoderUpBlock",
+    "AttnAutoencoderDownBlock",
+    "AttnAutoencoderMidBlock",
+    "AttnAutoencoderUpBlock",
+    "ConvAttnAutoencoderDownBlock",
+    "ConvAttnAutoencoderMidBlock",
+    "ConvAttnAutoencoderUpBlock",
+    "EncoderOutBlock",
+    "VAEEncoderOutBlock",
+    "DecoderInBlock",
+    "VAEDecoderInBlock",
     # residual blocks
     "ResidualBlock",
     "ResidualBottleneck",
@@ -144,6 +148,7 @@ class BaseConvBlock(nn.Module):
         kernel_size: int = 4,
         stride: int = 2,
         padding: int = 1,
+        double_conv: bool = False,
         attention: AttentionDownTypes | None = None,
         attn_args: dict = {},
         **kwargs,
@@ -166,6 +171,7 @@ class BaseConvBlock(nn.Module):
             kernel_size: Kernel size for the conv block.
             stride: Stride for the conv block.
             padding: Padding size for the conv block.
+            double_conv: Whether to use two convolutional layers.
             attention: Attention descriptor; if None or unknown, no attention is used;
               one of ("self_attention", "conv_attention", "attention_gate").
             attn_args: Keyword arguments for an Attention module
@@ -198,9 +204,7 @@ class BaseConvBlock(nn.Module):
         if dropout and dropout_p is not None and dropout_p > 0:
             self.dropout = nn.Dropout(dropout_p)
         match attention:
-            case "self_attention":
-                self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
-            case "conv_attention":
+            case "self_attention" | "conv_attention":
                 self.attn = ATTENTION_MAP[attention](
                     dimensions, in_channels, **attn_args
                 )
@@ -219,6 +223,15 @@ class BaseConvBlock(nn.Module):
             **kwargs,
         )
 
+        if double_conv:
+            self.conv2 = DIM_TO_CONV_MAP[dimensions](
+                out_channels,
+                out_channels,
+                kernel_size=1,
+                stride=1,
+                padding="same",
+            )
+
     def forward(self, x: torch.Tensor, _h: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the convolutional block."""
         h = x
@@ -229,6 +242,7 @@ class BaseConvBlock(nn.Module):
         h = self.dropout(h) if self.dropout is not None else h
         h = self.attn(h, _h if _h is not None else h) if self.attn else h
         h = self.conv(h)
+        h = self.conv2(h) if hasattr(self, "conv2") else h
         if not self.norm_first:
             h = self.norm(h) if self.norm is not None else h
         if self.act_last:
@@ -529,9 +543,7 @@ class DownBlock(nn.Module):
         )
 
         match attention:
-            case "self_attention":
-                self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
-            case "conv_attention":
+            case "self_attention" | "conv_attention":
                 self.attn = ATTENTION_MAP[attention](
                     dimensions, in_channels, **attn_args
                 )
@@ -545,16 +557,15 @@ class DownBlock(nn.Module):
         return x
 
 
-class AutoEncoderDownBlock(DownBlock):
+class AutoencoderDownBlock(DownBlock):
     """Standard block for the encoder of an autoencoder (meant to increase/keep channel dimension).
 
     Includes (in following order):
         - Attention layer (optional; default: `None`)
-        - Residual block:
+        - Residual block (x1 or x2):
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
-            - time embedding (optional; default: `False`)
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - dropout (optional; default: `0.1`)
@@ -567,8 +578,6 @@ class AutoEncoderDownBlock(DownBlock):
         dimensions: int,
         in_channels: int,
         out_channels: int,
-        time_embedding: bool = False,
-        time_channels: int = 32,
         res_args: dict = {},
         attention: AttentionDownTypes | None = None,
         attn_args: dict = {},
@@ -578,14 +587,14 @@ class AutoEncoderDownBlock(DownBlock):
             dimensions,
             in_channels,
             out_channels,
-            time_embedding,
-            time_channels,
+            False,
+            None,
             res_args,
             attention,
             attn_args,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the encoder down block."""
         return super().forward(x)
 
@@ -628,9 +637,7 @@ class MidBlock(nn.Module):
             **res_args,
         )
         match attention:
-            case "self_attention":
-                self.attn = ATTENTION_MAP[attention](channels, **attn_args)
-            case "conv_attention":
+            case "self_attention" | "conv_attention":
                 self.attn = ATTENTION_MAP[attention](dimensions, channels, **attn_args)
             case _:
                 self.attn = None
@@ -642,7 +649,7 @@ class MidBlock(nn.Module):
         return x
 
 
-class AutoEncoderMidBlock(MidBlock):
+class AutoencoderMidBlock(MidBlock):
     """Standard block for the bottleneck of an autoencoder (meant to keep channel dimension).
 
     Includes (in following order):
@@ -651,7 +658,6 @@ class AutoEncoderMidBlock(MidBlock):
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
-            - time embedding (optional; default: `False`)
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - dropout (optional; default: `0.1`)
@@ -663,8 +669,6 @@ class AutoEncoderMidBlock(MidBlock):
         self,
         dimensions: int,
         channels: int,
-        time_embedding: bool = False,
-        time_channels: int = 32,
         res_args: dict = {},
         attention: AttentionDownTypes | None = None,
         attn_args: dict = {},
@@ -673,14 +677,14 @@ class AutoEncoderMidBlock(MidBlock):
         super().__init__(
             dimensions,
             channels,
-            time_embedding,
-            time_channels,
+            False,
+            None,
             res_args,
             attention,
             attn_args,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the encoder mid block."""
         return super().forward(x)
 
@@ -742,9 +746,7 @@ class UpBlock(nn.Module):
             )
 
         match attention:
-            case "self_attention":
-                self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
-            case "conv_attention":
+            case "self_attention" | "conv_attention":
                 self.attn = ATTENTION_MAP[attention](
                     dimensions, in_channels, **attn_args
                 )
@@ -780,7 +782,7 @@ class UpBlock(nn.Module):
         return x
 
 
-class AutoEncoderUpBlock(nn.Module):
+class AutoencoderUpBlock(nn.Module):
     """Standard block for the decoder of an autoencoder (meant to decrease/keep channel dimension).
 
     Includes (in following order):
@@ -789,7 +791,6 @@ class AutoEncoderUpBlock(nn.Module):
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
-            - time embedding (optional; default: `False`)
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - dropout (optional; default: `0.1`)
@@ -802,8 +803,6 @@ class AutoEncoderUpBlock(nn.Module):
         dimensions: int,
         in_channels: int,
         out_channels: int,
-        time_embedding: bool = False,
-        time_channels: int = 32,
         res_args: dict = {},
         attention: Literal["self_attention", "conv_attention"] | None = None,
         attn_args: dict = {},
@@ -814,15 +813,13 @@ class AutoEncoderUpBlock(nn.Module):
             dimensions,
             in_channels,
             out_channels,
-            time_embedding,
-            time_channels,
+            False,
+            None,
             **res_args,
         )
 
         match attention:
-            case "self_attention":
-                self.attn = ATTENTION_MAP[attention](in_channels, **attn_args)
-            case "conv_attention":
+            case "self_attention" | "conv_attention":
                 self.attn = ATTENTION_MAP[attention](
                     dimensions, in_channels, **attn_args
                 )
@@ -833,14 +830,14 @@ class AutoEncoderUpBlock(nn.Module):
             case _:
                 self.attn = None
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the up block."""
         x = self.attn(x, x) if self.attn else x
-        x = self.res_block(x, t)
+        x = self.res_block(x)
         return x
 
 
-# Encoding / Decoding blocks for U-Net/AutoEncoder
+# Encoding / Decoding blocks for U-Net/Autoencoder
 AttnDownBlock = partialclass(
     "AttnDownBlock",
     DownBlock,
@@ -990,9 +987,9 @@ AttnGateUpBlock = partialclass(
             - residual shortcut (with 1x1 conv if input and output channels differ)
     """,
 )
-AttnAutoEncoderDownBlock = partialclass(
-    "AttnAutoEncoderDownBlock",
-    AutoEncoderDownBlock,
+AttnAutoencoderDownBlock = partialclass(
+    "AttnAutoencoderDownBlock",
+    AutoencoderDownBlock,
     attention="self_attention",
     __doc__="""
     Attention block for the encoder of an autoencoder (meant to increase/keep channel dimension).
@@ -1003,7 +1000,6 @@ AttnAutoEncoderDownBlock = partialclass(
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
-            - time embedding (optional; default: `False`)
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - dropout (optional; default: `0.1`)
@@ -1011,9 +1007,9 @@ AttnAutoEncoderDownBlock = partialclass(
             - residual shortcut (with 1x1 conv if input and output channels differ)
     """,
 )
-AttnAutoEncoderMidBlock = partialclass(
-    "AttnAutoEncoderMidBlock",
-    AutoEncoderMidBlock,
+AttnAutoencoderMidBlock = partialclass(
+    "AttnAutoencoderMidBlock",
+    AutoencoderMidBlock,
     attention="self_attention",
     __doc__="""
     Attention block for the bottleneck of an autoencoder (meant to keep channel dimension).
@@ -1024,7 +1020,6 @@ AttnAutoEncoderMidBlock = partialclass(
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
-            - time embedding (optional; default: `False`)
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - dropout (optional; default: `0.1`)
@@ -1032,9 +1027,9 @@ AttnAutoEncoderMidBlock = partialclass(
             - residual shortcut (with 1x1 conv if input and output channels differ)
     """,
 )
-AttnAutoEncoderUpBlock = partialclass(
-    "AttnAutoEncoderUpBlock",
-    AutoEncoderUpBlock,
+AttnAutoencoderUpBlock = partialclass(
+    "AttnAutoencoderUpBlock",
+    AutoencoderUpBlock,
     attention="self_attention",
     __doc__="""
     Attention block for the decoder of an autoencoder (meant to decrease/keep channel dimension).
@@ -1045,7 +1040,6 @@ AttnAutoEncoderUpBlock = partialclass(
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
-            - time embedding (optional; default: `False`)
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - dropout (optional; default: `0.1`)
@@ -1053,9 +1047,9 @@ AttnAutoEncoderUpBlock = partialclass(
             - residual shortcut (with 1x1 conv if input and output channels differ)
     """,
 )
-ConvAttnAutoEncoderDownBlock = partialclass(
-    "ConvAttnAutoEncoderDownBlock",
-    AutoEncoderDownBlock,
+ConvAttnAutoencoderDownBlock = partialclass(
+    "ConvAttnAutoencoderDownBlock",
+    AutoencoderDownBlock,
     attention="conv_attention",
     __doc__="""
     Convolutional attention block for the encoder of an autoencoder (meant to increase/keep channel dimension).
@@ -1066,7 +1060,6 @@ ConvAttnAutoEncoderDownBlock = partialclass(
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
-            - time embedding (optional; default: `False`)
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - dropout (optional; default: `0.1`)
@@ -1074,9 +1067,9 @@ ConvAttnAutoEncoderDownBlock = partialclass(
             - residual shortcut (with 1x1 conv if input and output channels differ)
     """,
 )
-ConvAttnAutoEncoderMidBlock = partialclass(
-    "ConvAttnAutoEncoderMidBlock",
-    AutoEncoderMidBlock,
+ConvAttnAutoencoderMidBlock = partialclass(
+    "ConvAttnAutoencoderMidBlock",
+    AutoencoderMidBlock,
     attention="conv_attention",
     __doc__="""
     Convolutional attention block for the bottleneck of an autoencoder (meant to keep channel dimension).
@@ -1087,7 +1080,6 @@ ConvAttnAutoEncoderMidBlock = partialclass(
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
-            - time embedding (optional; default: `False`)
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - dropout (optional; default: `0.1`)
@@ -1095,9 +1087,9 @@ ConvAttnAutoEncoderMidBlock = partialclass(
             - residual shortcut (with 1x1 conv if input and output channels differ)
     """,
 )
-ConvAttnAutoEncoderUpBlock = partialclass(
-    "ConvAttnAutoEncoderUpBlock",
-    AutoEncoderUpBlock,
+ConvAttnAutoencoderUpBlock = partialclass(
+    "ConvAttnAutoencoderUpBlock",
+    AutoencoderUpBlock,
     attention="conv_attention",
     __doc__="""
     Convolutional attention block for the decoder of an autoencoder (meant to decrease/keep channel dimension).
@@ -1108,12 +1100,77 @@ ConvAttnAutoEncoderUpBlock = partialclass(
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
-            - time embedding (optional; default: `False`)
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - dropout (optional; default: `0.1`)
             - convolution (default: 3x3, stride 1)
             - residual shortcut (with 1x1 conv if input and output channels differ)
+    """,
+)
+EncoderOutBlock = partialclass(
+    "EncoderOutBlock",
+    BaseConvBlock,
+    act_fn="silu",
+    norm_type="group",
+    num_groups=8,
+    kernel_size=3,
+    stride=1,
+    padding="same",
+    __doc__="""
+    Convolutional output block for the encoder of an autoencoder.
+
+    Includes:
+        - normalization (default: `'group'`)
+        - activation (default: `'silu'`)
+        - convolution (default: 3x3, stride 1)
+    """,
+)
+VAEEncoderOutBlock = partialclass(
+    "VAEEncoderOutBlock",
+    BaseConvBlock,
+    act_fn="silu",
+    norm_type="group",
+    num_groups=8,
+    kernel_size=3,
+    stride=1,
+    padding="same",
+    double_conv=True,
+    __doc__="""
+    Convolutional output block for a VAE encoder.
+
+    Includes:
+        - normalization (default: `'group'`)
+        - activation (default: `'silu'`)
+        - convolution (default: 3x3, stride 1)
+        - convolution (default: 1x1, stride 1)
+    """,
+)
+DecoderInBlock = partialclass(
+    "DecoderInBlock",
+    BaseConvBlock,
+    kernel_size=3,
+    stride=1,
+    padding="same",
+    __doc__="""
+    Convolutional input block for the decoder of an autoencoder.
+
+    Includes:
+        - convolution (default: 3x3, stride 1)
+    """,
+)
+VAEDecoderInBlock = partialclass(
+    "DecoderInBlock",
+    BaseConvBlock,
+    kernel_size=3,
+    stride=1,
+    padding="same",
+    double_conv=True,
+    __doc__="""
+    Convolutional input block for the decoder of an autoencoder.
+
+    Includes:
+        - convolution (default: 3x3, stride 1)
+        - convolution (default: 1x1, stride 1)
     """,
 )
 
@@ -1510,15 +1567,19 @@ BLOCK_MAP: dict[str, Callable] = {
     "ConvAttnMidBlock": ConvAttnMidBlock,
     "ConvAttnUpBlock": ConvAttnUpBlock,
     # Autoencoder blocks
-    "AutoEncoderDownBlock": AutoEncoderDownBlock,
-    "AutoEncoderMidBlock": AutoEncoderMidBlock,
-    "AutoEncoderUpBlock": AutoEncoderUpBlock,
-    "AttnAutoEncoderDownBlock": AttnAutoEncoderDownBlock,
-    "AttnAutoEncoderMidBlock": AttnAutoEncoderMidBlock,
-    "AttnAutoEncoderUpBlock": AttnAutoEncoderUpBlock,
-    "ConvAttnAutoEncoderDownBlock": ConvAttnAutoEncoderDownBlock,
-    "ConvAttnAutoEncoderMidBlock": ConvAttnAutoEncoderMidBlock,
-    "ConvAttnAutoEncoderUpBlock": ConvAttnAutoEncoderUpBlock,
+    "AutoencoderDownBlock": AutoencoderDownBlock,
+    "AutoencoderMidBlock": AutoencoderMidBlock,
+    "AutoencoderUpBlock": AutoencoderUpBlock,
+    "AttnAutoencoderDownBlock": AttnAutoencoderDownBlock,
+    "AttnAutoencoderMidBlock": AttnAutoencoderMidBlock,
+    "AttnAutoencoderUpBlock": AttnAutoencoderUpBlock,
+    "ConvAttnAutoencoderDownBlock": ConvAttnAutoencoderDownBlock,
+    "ConvAttnAutoencoderMidBlock": ConvAttnAutoencoderMidBlock,
+    "ConvAttnAutoencoderUpBlock": ConvAttnAutoencoderUpBlock,
+    "EncoderOutBlock": EncoderOutBlock,
+    "VAEEncoderOutBlock": VAEEncoderOutBlock,
+    "DecoderInBlock": DecoderInBlock,
+    "VAEDecoderInBlock": VAEDecoderInBlock,
 }
 
 
