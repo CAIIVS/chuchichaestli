@@ -5,9 +5,16 @@
 
 from torch import nn
 
+from chuchichaestli.models.activations import ActivationTypes
+from chuchichaestli.models.blocks import (
+    BLOCK_MAP,
+    AutoencoderDownBlockTypes,
+    AutoencoderMidBlockTypes,
+    EncoderOutBlockTypes,
+)
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
-from chuchichaestli.models.blocks import BLOCK_MAP
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
+from chuchichaestli.models.norm import NormTypes
 from typing import Literal
 from collections.abc import Sequence
 
@@ -21,13 +28,7 @@ class Encoder(nn.Module):
         in_channels: int = 1,
         n_channels: int = 64,
         out_channels: int = 1,
-        down_block_types: Sequence[
-            Literal[
-                "AutoencoderDownBlock",
-                "AutoencoderAttnDownBlock",
-                "AutoencoderConvAttnDownBlock",
-            ]
-        ] = (
+        down_block_types: Sequence[AutoencoderDownBlockTypes] = (
             "AutoencoderDownBlock",
             "AutoencoderDownBlock",
             "AutoencoderDownBlock",
@@ -35,23 +36,18 @@ class Encoder(nn.Module):
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 2),
         num_layers_per_block: int = 2,
-        mid_block_types: Sequence[
-            Literal[
-                "AutoencoderMidBlock",
-                "AttnAutoencoderMidBlock",
-                "ConvAttnAutoencoderMidBlock",
-            ]
-        ] = (
+        mid_block_types: Sequence[AutoencoderMidBlockTypes] = (
             "AutoencoderMidBlock",
             "AttnAutoencoderMidBlock",
         ),
-        out_block_type: Literal[
-            "EncoderOutBlock", "VAEEncoderOutBlock"
-        ] = "EncoderOutBlock",
+        out_block_type: EncoderOutBlockTypes = "EncoderOutBlock",
         downsample_type: Literal["Downsample", "DownsampleInterpolate"] = "Downsample",
+        act_fn: ActivationTypes = "silu",
+        norm_type: NormTypes = "group",
+        num_groups: int = 8,
+        kernel_size: int = 3,
         res_args: dict = {},
         attn_args: dict = {},
-        in_out_args: dict = {},
         double_z: bool = True,
     ) -> None:
         """Constructor.
@@ -59,17 +55,22 @@ class Encoder(nn.Module):
         Args:
             dimensions: Number of dimensions.
             in_channels: Number of input channels.
-            n_channels: Number of channels for first block.
+            n_channels: Number of channels in the hidden layer.
             out_channels: Number of output channels (latent space; doubled if `double_z`).
             down_block_types: Type of down blocks to use for each level.
             block_out_channel_mults: Multiplier for output channels of each block.
             num_layers_per_block: Number of blocks per level (blocks are repeated if `>1`).
             mid_block_types: Type of blocks to use before the output.
             out_block_type: Type of block for output (latent space).
-            downsample_type: Type of downsampling block (see `chuchichaestli.models.downsampling` for details).
+            downsample_type: Type of downsampling block
+                (see `chuchichaestli.models.downsampling` for details).
+            act_fn: Activation function for the output layers
+                (see `chuchichaestli.models.activations` for details).
+            norm_type: Normalization type for the output layer.
+            num_groups: Number of groups for normalization in the output layer.
+            kernel_size: Kernel size for the output convolution.
             res_args: Arguments for residual blocks.
             attn_args: Arguments for attention blocks.
-            in_out_args: Arguments for input and output convolutions.
             double_z (bool): Whether to double the latent space.
         """
         super().__init__()
@@ -80,7 +81,7 @@ class Encoder(nn.Module):
         self.conv_in = DIM_TO_CONV_MAP[dimensions](
             in_channels,
             n_channels,
-            kernel_size=in_out_args.get("kernel_size", 3),
+            kernel_size=kernel_size,
             stride=1,
             padding="same",
         )
@@ -119,9 +120,10 @@ class Encoder(nn.Module):
             dimensions=dimensions,
             in_channels=outs,
             out_channels=conv_out_channels,
-            num_groups=in_out_args.get("num_groups", 8),
-            act_fn=in_out_args.get("act_fn", "silu"),
-            kernel_size=in_out_args.get("kernel_size", 3),
+            act_fn=act_fn,
+            norm_type=norm_type,
+            num_groups=num_groups,
+            kernel_size=kernel_size,
             stride=1,
             padding="same",
         )

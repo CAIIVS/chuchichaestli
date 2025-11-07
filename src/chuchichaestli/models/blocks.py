@@ -81,6 +81,24 @@ __all__ = [
     "GaussianNoiseBlock",
 ]
 
+UNetDownBlockTypes = Literal["DownBlock", "AttnDownBlock", "ConvAttnDownBlock"]
+UNetMidBlockTypes = Literal["MidBlock", "AttnMidBlock", "ConvAttnMidBlock"]
+UNetUpBlockTypes = Literal[
+    "UpBlock", "AttnUpBlock", "ConvAttnUpBlock", "AttnGateUpBlock"
+]
+
+AutoencoderDownBlockTypes = Literal[
+    "AutoencoderDownBlock", "AutoencoderAttnDownBlock", "AutoencoderConvAttnDownBlock"
+]
+AutoencoderMidBlockTypes = Literal[
+    "AutoencoderMidBlock", "AttnAutoencoderMidBlock", "ConvAttnAutoencoderMidBlock"
+]
+AutoencoderUpBlockTypes = Literal[
+    "AutoencoderUpBlock", "AutoencoderAttnUpBlock", "AutoencoderConvAttnUpBlock"
+]
+EncoderOutBlockTypes = Literal["EncoderOutBlock", "VAEEncoderOutBlock"]
+DecoderInBlockTypes = Literal["DecoderInBlock", "VAEDecoderInBlock"]
+
 
 class GaussianNoiseBlock(nn.Module):
     """Gaussian noise regularization block."""
@@ -346,7 +364,13 @@ class ResidualBlock(nn.Module):
         )
 
         self.shortcut = (
-            conv_cls(in_channels, out_channels, kernel_size=1, stride=res_stride, bias=res_bias)
+            conv_cls(
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=res_stride,
+                bias=res_bias,
+            )
             if in_channels != out_channels or res_stride != 1
             else nn.Identity()
         )
@@ -478,7 +502,13 @@ class ResidualBottleneck(nn.Module):
         self.conv3 = conv_cls(n_channels, out_channels, kernel_size=1, bias=res_bias)
 
         self.shortcut = (
-            conv_cls(in_channels, out_channels, kernel_size=1, stride=res_stride, bias=res_bias)
+            conv_cls(
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=res_stride,
+                bias=res_bias,
+            )
             if in_channels != out_channels or res_stride != 1
             else nn.Identity()
         )

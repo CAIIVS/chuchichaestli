@@ -5,9 +5,16 @@
 
 import torch
 from torch import nn
+from chuchichaestli.models.activations import ActivationTypes
+from chuchichaestli.models.blocks import (
+    BLOCK_MAP,
+    NormActConvBlock,
+    AutoencoderUpBlockTypes,
+    AutoencoderMidBlockTypes,
+    DecoderInBlockTypes,
+)
+from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
-from chuchichaestli.models.blocks import BLOCK_MAP, CONV_BLOCK_MAP
-from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from typing import Literal
 from collections.abc import Sequence
 
@@ -21,13 +28,12 @@ class Decoder(nn.Module):
         in_channels: int = 1,
         n_channels: int = 512,
         out_channels: int = 1,
-        up_block_types: Sequence[
-            Literal[
-                "AutoencoderUpBlock",
-                "AutoencoderAttnUpBlock",
-                "AutoencoderConvAttnUpBlock",
-            ]
-        ] = (
+        in_block_type: DecoderInBlockTypes = "DecoderInBlock",
+        mid_block_types: Sequence[AutoencoderMidBlockTypes] = (
+            "AutoencoderMidBlock",
+            "AttnAutoencoderMidBlock",
+        ),
+        up_block_types: Sequence[AutoencoderUpBlockTypes] = (
             "AutoencoderUpBlock",
             "AutoencoderUpBlock",
             "AutoencoderUpBlock",
@@ -35,23 +41,15 @@ class Decoder(nn.Module):
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 2),
         num_layers_per_block: int = 3,
-        mid_block_types: Sequence[
-            Literal[
-                "AutoencoderMidBlock",
-                "AttnAutoencoderMidBlock",
-                "ConvAttnAutoencoderMidBlock",
-            ]
-        ] = (
-            "AutoencoderMidBlock",
-            "AttnAutoencoderMidBlock",
-        ),
-        in_block_type: Literal[
-            "DecoderInBlock", "VAEDecoderInBlock"
-        ] = "DecoderInBlock",
-        upsample_type: Literal["Upsample", "UpsampleInterpolate"] = "UpsampleInterpolate",
+        upsample_type: Literal[
+            "Upsample", "UpsampleInterpolate"
+        ] = "UpsampleInterpolate",
+        act_fn: ActivationTypes = "silu",
+        norm_type: NormTypes = "group",
+        num_groups: int = 8,
+        kernel_size: int = 3,
         res_args: dict = {},
         attn_args: dict = {},
-        in_out_args: dict = {},
     ) -> None:
         """Decoder implementation.
 
@@ -60,15 +58,19 @@ class Decoder(nn.Module):
             in_channels: Number of input channels (latent space).
             n_channels: Number of channels for first block.
             out_channels: Number of output channels.
+            in_block_type: Type of block for output (latent space).
+            mid_block_types: Type of blocks to use before the output.
             up_block_types: Type of up blocks to use for each level.
             block_out_channel_mults: Multiplier for output channels of each block.
             num_layers_per_block: Number of blocks per level (blocks are repeated if `>1`).
-            mid_block_types: Type of blocks to use before the output.
-            in_block_type: Type of block for output (latent space).
             upsample_type: Type of upsampling block (see `chuchichaestli.models.upsampling` for details).
+            act_fn: Activation function for the output layers
+                (see `chuchichaestli.models.activations` for details).
+            norm_type: Normalization type for the output layer.
+            num_groups: Number of groups for normalization in the output layer.
+            kernel_size: Kernel size for the output convolution.
             res_args: Arguments for residual blocks.
             attn_args: Arguments for attention blocks.
-            in_out_args: Arguments for input and output convolutions.
         """
         super().__init__()
 
@@ -79,7 +81,7 @@ class Decoder(nn.Module):
             dimensions=dimensions,
             in_channels=in_channels,
             out_channels=n_channels,
-            **in_out_args,
+            kernel_size=kernel_size,
         )
 
         self.mid_blocks = nn.ModuleList([])
@@ -110,16 +112,16 @@ class Decoder(nn.Module):
             if i < n_mults - 1:
                 self.up_blocks.append(upsample_cls(dimensions, outs))
 
-        self.conv_out = CONV_BLOCK_MAP["NormActConvBlock"](
+        self.out_block = NormActConvBlock(
             dimensions=dimensions,
             in_channels=outs,
             out_channels=out_channels,
-            act_fn=in_out_args.get("act_fn", "silu"),
-            norm_type=in_out_args.get("norm_type", "group"),
-            num_groups=in_out_args.get("num_groups", 4),
-            kernel_size=in_out_args.get("kernel_size", 3),
+            act_fn=act_fn,
+            norm_type=norm_type,
+            num_groups=num_groups,
+            kernel_size=kernel_size,
             stride=1,
-            padding="same"
+            padding="same",
         )
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
@@ -129,5 +131,5 @@ class Decoder(nn.Module):
             z = block(z)
         for block in self.up_blocks:
             z = block(z)
-        z = self.conv_out(z)
+        z = self.out_block(z)
         return z
