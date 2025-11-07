@@ -7,10 +7,14 @@ import warnings
 import torch
 from torch import nn
 
-from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
+from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
     BLOCK_MAP,
+    CONV_BLOCK_MAP,
     GaussianNoiseBlock,
+    UNetDownBlockTypes,
+    UNetMidBlockTypes,
+    UNetUpBlockTypes,
 )
 from chuchichaestli.models.downsampling import (
     DOWNSAMPLE_FUNCTIONS,
@@ -18,7 +22,7 @@ from chuchichaestli.models.downsampling import (
     DownsampleInterpolate,
 )
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
-from chuchichaestli.models.norm import Norm
+from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
     DeepSinusoidalTimeEmbedding,
@@ -56,20 +60,14 @@ class UNet(nn.Module):
         in_channels: int = 1,
         n_channels: int = 32,
         out_channels: int = 1,
-        down_block_types: Sequence[
-            Literal["DownBlock", "AttnDownBlock", "ConvAttnDownBlock"]
-        ] = (
+        down_block_types: Sequence[UNetDownBlockTypes] = (
             "DownBlock",
             "DownBlock",
             "AttnDownBlock",
             "AttnDownBlock",
         ),
-        mid_block_type: Literal[
-            "MidBlock", "AttnMidBlock", "ConvAttnMidBlock"
-        ] = "MidBlock",
-        up_block_types: Sequence[
-            Literal["UpBlock", "AttnUpBlock", "ConvAttnUpBlock", "AttnGateUpBlock"]
-        ] = (
+        mid_block_type: UNetMidBlockTypes = "MidBlock",
+        up_block_types: Sequence[UNetUpBlockTypes] = (
             "UpBlock",
             "UpBlock",
             "AttnUpBlock",
@@ -79,18 +77,8 @@ class UNet(nn.Module):
         num_blocks_per_level: int = 1,
         upsample_type: Literal["Upsample", "UpsampleInterpolate"] = "Upsample",
         downsample_type: Literal["Downsample", "DownsampleInterpolate"] = "Downsample",
-        act: Literal[
-            "silu",
-            "swish",
-            "mish",
-            "gelu",
-            "relu",
-            "prelu",
-            "leakyrelu",
-            "leakyrelu,0.1",
-            "leakyrelu,0.2",
-            "softplus",
-        ] = "silu",
+        act_fn: ActivationTypes = "silu",
+        norm_type: NormTypes = "group",
         groups: int = 8,
         in_kernel_size: int = 3,
         out_kernel_size: int = 3,
@@ -103,40 +91,18 @@ class UNet(nn.Module):
         t_emb_dim: int = 32,
         t_emb_flip: bool = False,
         t_emb_shift: float = 1.0,
-        t_emb_act_fn: Literal[
-            "silu",
-            "swish",
-            "mish",
-            "gelu",
-            "relu",
-            "prelu",
-            "leakyrelu",
-            "leakyrelu,0.1",
-            "leakyrelu,0.2",
-            "softplus",
-        ] = "silu",
+        t_emb_act_fn: ActivationTypes = "silu",
         t_emb_post_act: bool = False,
         t_emb_condition_dim: int | None = None,
-        res_act_fn: Literal[
-            "silu",
-            "swish",
-            "mish",
-            "gelu",
-            "relu",
-            "prelu",
-            "leakyrelu",
-            "leakyrelu,0.1",
-            "leakyrelu,0.2",
-            "softplus",
-        ] = "silu",
+        res_act_fn: ActivationTypes = "silu",
         res_dropout: float = 0.1,
-        res_norm_type: Literal["group", "instance", "batch", "adabatch"] = "group",
+        res_norm_type: NormTypes = "group",
         res_groups: int = 32,
         res_kernel_size: int = 3,
         attn_head_dim: int = 32,
         attn_n_heads: int = 1,
         attn_dropout_p: float = 0.0,
-        attn_norm_type: Literal["group", "instance", "batch", "adabatch"] = "group",
+        attn_norm_type: NormTypes = "group",
         attn_groups: int = 32,
         attn_kernel_size: int = 1,
         attn_gate_inter_channels: int = 32,
@@ -154,55 +120,58 @@ class UNet(nn.Module):
             n_channels: Number of channels in the first block.
             out_channels: Number of output channels.
             down_block_types: Types of down blocks as a list, starting at the
-              first block (in the highest level).
+                first block (in the highest level).
             mid_block_type: Type of mid block.
             up_block_types: Types of up blocks as a list, starting with the last
-              block (lowest level).
+                block (lowest level).
             block_out_channel_mults: Output channel multipliers for each block.
-            num_blocks_per_level: Number of blocks per level (blocks are repeated if `>1`).
-            upsample_type: Type of upsampling block (see `chuchichaestli.models.upsampling` for details).
-            downsample_type: Type of downsampling block (see `chuchichaestli.models.downsampling` for details).
-            act: Activation function for the output layer (see
-              `chuchichaestli.models.activations` for details).
+            num_blocks_per_level: Number of blocks per level
+                (blocks are repeated if `>1`).
+            upsample_type: Type of upsampling block
+                (see `chuchichaestli.models.upsampling` for details).
+            downsample_type: Type of downsampling block
+                (see `chuchichaestli.models.downsampling` for details).
+            act_fn: Activation function for the output layer
+                (see `chuchichaestli.models.activations` for details).
+            norm_type: Normalization type for the output layer.
             groups: Number of groups for group normalization in the output layer.
             in_kernel_size: Kernel size for the input convolution.
             out_kernel_size: Kernel size for the output convolution.
             time_embedding: Whether to use a time embedding.
             time_channels: Number of time channels.
-            t_emb_dim: The dimension for the deep embedding (takes only
-              effect if `time_embedding='DeepSinusoidalTimeEmbedding'`).
+            t_emb_dim: The dimension for the deep embedding (takes only effect
+                if `time_embedding='DeepSinusoidalTimeEmbedding'`).
             t_emb_flip: Whether to flip the sine to cosine in the time embedding.
             t_emb_shift: The downscale frequency shift for the time embedding.
             t_emb_act_fn: Activation function for the time embedding.
-            t_emb_post_act: Whether to use an activation function
-              at the end of the time embedding.
+            t_emb_post_act: Whether to use an activation at the end of the time embedding.
             t_emb_condition_dim: The condition dimension for the time embedding.
             res_act_fn: Activation function for the residual blocks
-              (see `chuchichaestli.models.activations` for details).
+                (see `chuchichaestli.models.activations` for details).
             res_dropout: Dropout rate for the residual blocks.
             res_norm_type: Normalization type for the residual block
-              (see `chuchichaestli.models.norm` for details).
+                (see `chuchichaestli.models.norm` for details).
             res_groups: Number of groups for the residual block normalization (if group norm).
             res_kernel_size: Kernel size for the residual blocks.
             attn_head_dim: Dimension of the attention heads.
             attn_n_heads: Number of attention heads.
             attn_dropout_p: Dropout probability of the scaled dot product attention.
             attn_norm_type: Normalization type for the convolutional attention block
-              (see `chuchichaestli.models.norm` for details).
+                (see `chuchichaestli.models.norm` for details).
             attn_groups: Number of groups for the convolutional attention block normalization
-              (if `attn_norm_type` is `"group"`).
+                (if `attn_norm_type` is `"group"`).
             attn_kernel_size: Kernel size for the convolutional attention block.
             attn_gate_inter_channels: Number of intermediate channels for the attention gate
-              (if `up_block_types` contains `"AttnGateUpBlock"`).
+                (if `up_block_types` contains `"AttnGateUpBlock"`).
             skip_connection_action: Action to take for the skip connection.
-              If `None`, no skip connections are used.
+                If `None`, no skip connections are used.
             skip_connection_to_all_blocks: If `True`, the U-Net builds skip connections
-              to all blocks in a level, otherwise only to the first block in a level.
+                to all blocks in a level, otherwise only to the first block in a level.
             add_noise: Add a Gaussian noise regularizer block in the bottleneck (before or after).
-              Can be "up" (after the bottleneck) or "down" (before the bottleneck).
+                Can be "up" (after the bottleneck) or "down" (before the bottleneck).
             noise_sigma: Std. relative (to the magnitude of the input) for the noise generation.
             noise_detached: If True, the input is detached for the noise generation.
-              Note, this should generally be `True`, otherwise the noise is learnable.
+                Note, this should generally be `True`, otherwise the noise is learnable.
         """
         super().__init__()
 
@@ -336,10 +305,16 @@ class UNet(nn.Module):
                 )
 
         # Output layer
-        self.norm = Norm(dimensions, res_norm_type, outs, groups)
-        self.act = ACTIVATION_FUNCTIONS[act]()
-        self.conv_out = conv_cls(
-            outs, out_channels, kernel_size=out_kernel_size, padding="same"
+        self.out_block = CONV_BLOCK_MAP["NormActConvBlock"](
+            dimensions=dimensions,
+            in_channels=outs,
+            out_channels=out_channels,
+            act_fn=act_fn,
+            norm_type=norm_type,
+            num_groups=groups,
+            kernel_size=out_kernel_size,
+            stride=1,
+            padding="same",
         )
 
     def _validate_inputs(
@@ -402,5 +377,5 @@ class UNet(nn.Module):
                 x = up_block(x, hs, t_emb)
             else:
                 x = up_block(x=x, h=None, t=t_emb)
-        x = self.conv_out(self.act(self.norm(x)))
+        x = self.out_block(x)
         return x
