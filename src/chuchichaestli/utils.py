@@ -4,8 +4,9 @@
 """Various utility functions for chuchichaestli."""
 
 import sys
+import torch
 from functools import partialmethod, wraps
-from collections.abc import Callable
+from collections.abc import Sequence, Iterable, Callable
 
 
 def partialclass(name: str, cls: type[object], *args, **kwargs):
@@ -50,3 +51,16 @@ def alias_kwargs(key: str | dict[str, str], alias: str | None = None) -> Callabl
             return result
         return wrapper
     return decorator
+
+
+def prod(num_list: Iterable[int] | torch.Size) -> int:
+    """Calculate the product of all elements in an iterable (analogous to built-in sum).
+
+    Args:
+        num_list: List with numerical values to be multiplied.
+    """
+    result = 1
+    if isinstance(num_list, Iterable):
+        for item in num_list:
+            result *= prod(item) if isinstance(item, Iterable) else item
+    return result
