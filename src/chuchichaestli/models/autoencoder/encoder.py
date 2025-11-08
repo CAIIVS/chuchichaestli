@@ -71,11 +71,15 @@ class Encoder(nn.Module):
             kernel_size: Kernel size for the output convolution.
             res_args: Arguments for residual blocks.
             attn_args: Arguments for attention blocks.
-            double_z (bool): Whether to double the latent space.
+            double_z: Whether to double the latent space.
         """
         super().__init__()
 
         downsample_cls = DOWNSAMPLE_FUNCTIONS[downsample_type]
+        if len(block_out_channel_mults) < len(down_block_types):
+            block_out_channel_mults += (1,) * (len(down_block_types) - len(block_out_channel_mults))
+        elif len(block_out_channel_mults) > len(down_block_types):
+            block_out_channel_mults = block_out_channel_mults[:len(down_block_types)]
         n_mults = len(block_out_channel_mults)
 
         self.conv_in = DIM_TO_CONV_MAP[dimensions](
@@ -90,7 +94,7 @@ class Encoder(nn.Module):
         ins = n_channels
         for i in range(n_mults):
             outs = ins * block_out_channel_mults[i]
-
+            stage = nn.Sequential()
             for _ in range(num_layers_per_block):
                 down_block = BLOCK_MAP[down_block_types[i]](
                     dimensions=dimensions,
@@ -99,8 +103,9 @@ class Encoder(nn.Module):
                     res_args=res_args,
                     attn_args=attn_args,
                 )
-                self.down_blocks.append(down_block)
+                stage.append(down_block)
                 ins = outs
+            self.down_blocks.append(stage)
 
             if i < n_mults - 1:
                 self.down_blocks.append(downsample_cls(dimensions, ins))
@@ -115,11 +120,11 @@ class Encoder(nn.Module):
             )
             self.mid_blocks.append(mid_block)
 
-        conv_out_channels = 2 * out_channels if double_z else out_channels
+        self.out_channels = 2 * out_channels if double_z else out_channels
         self.out_block = BLOCK_MAP[out_block_type](
             dimensions=dimensions,
             in_channels=outs,
-            out_channels=conv_out_channels,
+            out_channels=self.out_channels,
             act_fn=act_fn,
             norm_type=norm_type,
             num_groups=num_groups,
@@ -127,6 +132,12 @@ class Encoder(nn.Module):
             stride=1,
             padding="same",
         )
+        self.levels = (len(self.down_blocks) + 1) // 2
+
+    @property
+    def f(self) -> int:
+        """Compression factor of the encoder."""
+        return 2 ** max(self.levels - 1, 0)
 
     def forward(self, x):
         """Forward pass."""

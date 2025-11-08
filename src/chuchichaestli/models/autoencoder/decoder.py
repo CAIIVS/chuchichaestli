@@ -75,6 +75,10 @@ class Decoder(nn.Module):
         super().__init__()
 
         upsample_cls = UPSAMPLE_FUNCTIONS[upsample_type]
+        if len(block_out_channel_mults) < len(up_block_types):
+            block_out_channel_mults += (1,) * (len(up_block_types) - len(block_out_channel_mults))
+        elif len(block_out_channel_mults) > len(up_block_types):
+            block_out_channel_mults = block_out_channel_mults[:len(up_block_types)]
         n_mults = len(block_out_channel_mults)
 
         self.in_block = BLOCK_MAP[in_block_type](
@@ -98,6 +102,7 @@ class Decoder(nn.Module):
         ins = n_channels
         for i in range(n_mults):
             outs = ins // block_out_channel_mults[i]
+            stage = nn.Sequential()
             for _ in range(num_layers_per_block):
                 up_block = BLOCK_MAP[up_block_types[i]](
                     dimensions=dimensions,
@@ -106,8 +111,9 @@ class Decoder(nn.Module):
                     res_args=res_args,
                     attn_args=attn_args,
                 )
-                self.up_blocks.append(up_block)
+                stage.append(up_block)
                 ins = outs
+            self.up_blocks.append(stage)
 
             if i < n_mults - 1:
                 self.up_blocks.append(upsample_cls(dimensions, outs))
@@ -123,6 +129,12 @@ class Decoder(nn.Module):
             stride=1,
             padding="same",
         )
+        self.levels = (len(self.up_blocks) + 1) // 2
+
+    @property
+    def f(self) -> int:
+        """Expansion factor of the decoder."""
+        return 2 ** max(self.levels - 1, 0)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         """Decoding forward pass."""

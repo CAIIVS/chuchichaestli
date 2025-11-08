@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""A flexible variational autoencoder implementation."""
+"""A highly-customizable autoencoder implementation."""
 
 import torch
 from torch import nn
 from torch.distributions import MultivariateNormal, kl
 from chuchichaestli.models.activations import ActivationTypes
-from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
+from chuchichaestli.models.autoencoder.decoder import Decoder
+from chuchichaestli.models.autoencoder.encoder import Encoder
 from chuchichaestli.models.blocks import (
     AutoencoderDownBlockTypes,
     AutoencoderMidBlockTypes,
@@ -15,20 +16,21 @@ from chuchichaestli.models.blocks import (
     EncoderOutBlockTypes,
     DecoderInBlockTypes,
 )
+from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
+from chuchichaestli.utils import prod
 from typing import Literal
 from collections.abc import Sequence
 
 
-class VAE(Autoencoder):
-    """Flexible variational autoencoder implementation.
+class Autoencoder(nn.Module):
+    """Flexible autoencoder implementation.
 
     The architecture consists of an encoder-decoder structure.
     The encoder chains several residual and downsampling blocks.
     Each downsampling block separates the encoder into spatially hierarchical levels.
     The encoder ends in bottleneck blocks (optionally including attention blocks
     and a convolutional layer) and projects the input into latent space.
-    Latent mean and variance are sampled from a Gaussian and passed to the decoder.
     The decoder is built with residual convolutional and upsampling blocks, and
     expands from the latent space to the image domain.
     """
@@ -90,6 +92,7 @@ class VAE(Autoencoder):
         decoder_norm_type: NormTypes = "group",
         decoder_groups: int = 8,
         decoder_kernel_size: int = 3,
+        double_z: bool = False,
     ):
         """Initializes the VAE model with the given parameters.
 
@@ -145,49 +148,127 @@ class VAE(Autoencoder):
             decoder_kernel_size: Kernel size for the output convolution in the decoder.
             double_z: Whether to double the latent space.
         """
-        super().__init__(
+        super().__init__()
+
+        self.double_z = double_z
+        self.channel_mults = prod(block_out_channel_mults)
+
+        if encoder_out_block_type == "DeepCompressionEncoderOutBlock":
+            assert dimensions == 2, (
+                "DeepCompressionEncoderOutBlock only supports 2D data."
+            )
+
+        res_args = {
+            "res_act_fn": res_act_fn,
+            "res_dropout": res_dropout,
+            "res_groups": res_groups,
+            "res_norm_type": res_norm_type,
+            "res_kernel_size": res_kernel_size,
+        }
+
+        attn_args = {
+            "n_heads": attn_n_heads,
+            "head_dim": attn_head_dim,
+            "dropout_p": attn_dropout_p,
+            "norm_type": attn_norm_type,
+            "groups": attn_groups,
+        }
+
+        self.encoder = Encoder(
             dimensions=dimensions,
             in_channels=in_channels,
             n_channels=n_channels,
-            latent_dim=latent_dim,
-            out_channels=out_channels,
+            out_channels=latent_dim,
             down_block_types=down_block_types,
-            down_layers_per_block=down_layers_per_block,
-            downsample_type=downsample_type,
-            encoder_mid_block_types=encoder_mid_block_types,
-            encoder_out_block_type=encoder_out_block_type,
-            decoder_in_block_type=decoder_in_block_type,
-            decoder_mid_block_types=decoder_mid_block_types,
-            up_block_types=up_block_types,
-            up_layers_per_block=up_layers_per_block,
-            upsample_type=upsample_type,
             block_out_channel_mults=block_out_channel_mults,
-            use_latent_proj=use_latent_proj,
-            use_latent_deproj=use_latent_deproj,
-            res_act_fn=res_act_fn,
-            res_dropout=res_dropout,
-            res_norm_type=res_norm_type,
-            res_groups=res_groups,
-            res_kernel_size=res_kernel_size,
-            attn_head_dim=attn_head_dim,
-            attn_n_heads=attn_n_heads,
-            attn_dropout_p=attn_dropout_p,
-            attn_norm_type=attn_norm_type,
-            attn_groups=attn_groups,
-            attn_kernel_size=attn_kernel_size,
-            encoder_act_fn=encoder_act_fn,
-            encoder_norm_type=encoder_norm_type,
-            encoder_groups=encoder_groups,
-            encoder_kernel_size=encoder_kernel_size,
-            decoder_act_fn=decoder_act_fn,
-            decoder_norm_type=decoder_norm_type,
-            decoder_groups=decoder_groups,
-            decoder_kernel_size=decoder_kernel_size,
-            double_z=True,
+            num_layers_per_block=down_layers_per_block,
+            mid_block_types=encoder_mid_block_types,
+            out_block_type=encoder_out_block_type,
+            downsample_type=downsample_type,
+            act_fn=encoder_act_fn,
+            norm_type=encoder_norm_type,
+            num_groups=encoder_groups,
+            kernel_size=encoder_kernel_size,
+            res_args=res_args,
+            attn_args=attn_args,
+            double_z=double_z,
         )
-        self.softplus = nn.Softplus()
+        self.decoder = Decoder(
+            dimensions=dimensions,
+            in_channels=latent_dim,
+            n_channels=self.channel_mults * n_channels,
+            out_channels=out_channels,
+            up_block_types=up_block_types,
+            in_block_type=decoder_in_block_type,
+            block_out_channel_mults=block_out_channel_mults,
+            num_layers_per_block=up_layers_per_block,
+            mid_block_types=decoder_mid_block_types,
+            upsample_type=upsample_type,
+            act_fn=decoder_act_fn,
+            norm_type=decoder_norm_type,
+            num_groups=decoder_groups,
+            kernel_size=decoder_kernel_size,
+            res_args=res_args,
+            attn_args=attn_args,
+        )
+        self.latent_proj = (
+            DIM_TO_CONV_MAP[dimensions](
+                self.latent_dim * (2 if self.double_z else 1),
+                self.latent_dim * (2 if self.double_z else 1),
+                kernel_size=1,
+                stride=1,
+                padding="same",
+            )
+            if use_latent_proj
+            else None
+        )
+        self.latent_deproj = (
+            DIM_TO_CONV_MAP[dimensions](
+                self.latent_dim,
+                self.latent_dim,
+                kernel_size=1,
+                stride=1,
+                padding="same",
+            )
+            if use_latent_deproj
+            else None
+        )
 
-    def encode(self, x: torch.Tensor, eps: float = 1e-12) -> MultivariateNormal:
+    @property
+    def latent_dim(self) -> int:
+        """Latent channel dimension."""
+        if self.double_z:
+            return self.encoder.out_channels // 2
+        else:
+            return self.encoder.out_channels
+
+    @property
+    def levels(self) -> tuple[int, int]:
+        """Number of stages in the encoder and decoder."""
+        return self.encoder.levels, self.decoder.levels
+
+    @property
+    def f_comp(self) -> int:
+        """Spatial compression factor of the encoder (number of spatial downsampling layers)."""
+        return self.encoder.f
+
+    @property
+    def f_exp(self) -> int:
+        """Spatial expansion factor of the decoder (number of spatial upsampling layers)."""
+        return self.decoder.f
+
+    def compute_latent_shape(self, input_shape: tuple[int, ...], no_batch_dim: bool = False):
+        """Compute the shape of the latent space."""
+        batch_dim = input_shape[0] if not no_batch_dim else None
+        channel_dim = input_shape[1]
+        spatial_dims = tuple(dim // self.f_comp for dim in input_shape[2:])
+        if batch_dim is None: 
+            shape = (channel_dim, *spatial_dims)
+        else:
+            shape = (batch_dim, self.latent_dim, *spatial_dims)
+        return shape
+
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
         """Encode the input.
 
         Args:
@@ -199,27 +280,21 @@ class VAE(Autoencoder):
         """
         z = self.encoder(x)
         z = self.latent_proj(z) if self.latent_proj is not None else z
-        mean, log_var = z.chunk(2, dim=1)
-        scale = self.softplus(log_var) + eps
-        scale_tril = torch.diag_embed(scale)
-        return MultivariateNormal(mean, scale_tril=scale_tril)
+        return z
 
-    def forward(
-        self, x: torch.Tensor, sample_posterior: bool = True, eps: float = 1e-12
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass through the model."""
-        posterior = self.encode(x, eps=eps)
-        if sample_posterior:
-            z = posterior.rsample()
-        else:
-            z = posterior.mode()
-        return self.decode(z), posterior
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        """Decode the input.
 
-    @staticmethod
-    def kl_divergence(posterior: torch.distributions.MultivariateNormal):
-        """Compute the KL divergence between posterior and a multivariate Gaussian."""
-        zeros = torch.zeros_like(posterior.mean)
-        eye = torch.eye(posterior.mean.shape[-1])
-        return kl.kl_divergence(
-            posterior, MultivariateNormal(zeros, eye)
-        )
+        Args:
+            z: Input latent tensor.
+
+        Returns:
+            Image reconstructed from latent code.
+        """
+        h = self.latent_deproj(z) if self.latent_deproj is not None else z
+        return self.decoder(h)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the model, i.e. encode and decode."""
+        code = self.encode(x)
+        return self.decode(code)
