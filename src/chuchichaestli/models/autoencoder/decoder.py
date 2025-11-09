@@ -14,8 +14,8 @@ from chuchichaestli.models.blocks import (
     DecoderInBlockTypes,
 )
 from chuchichaestli.models.norm import NormTypes
-from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
-from typing import Literal
+from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS, UpsampleTypes
+from chuchichaestli.utils import prod
 from collections.abc import Sequence
 
 
@@ -40,17 +40,16 @@ class Decoder(nn.Module):
             "AutoencoderUpBlock",
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 2),
-        num_layers_per_block: int = 3,
-        upsample_type: Literal[
-            "Upsample", "UpsampleInterpolate"
-        ] = "UpsampleInterpolate",
+        num_layers_per_block: int | Sequence[int] = 3,
+        upsample_type: UpsampleTypes = "UpsampleInterpolate",
         act_fn: ActivationTypes = "silu",
         norm_type: NormTypes = "group",
         num_groups: int = 8,
         kernel_size: int = 3,
         res_args: dict = {},
         attn_args: dict = {},
-    ) -> None:
+        in_shortcut: bool = False,
+    ):
         """Decoder implementation.
 
         Args:
@@ -71,15 +70,21 @@ class Decoder(nn.Module):
             kernel_size: Kernel size for the output convolution.
             res_args: Arguments for residual blocks.
             attn_args: Arguments for attention blocks.
+            in_shortcut: Whether to use a shortcut for the input block.
         """
         super().__init__()
 
         upsample_cls = UPSAMPLE_FUNCTIONS[upsample_type]
         if len(block_out_channel_mults) < len(up_block_types):
-            block_out_channel_mults += (1,) * (len(up_block_types) - len(block_out_channel_mults))
+            block_out_channel_mults += (1,) * (
+                len(up_block_types) - len(block_out_channel_mults)
+            )
         elif len(block_out_channel_mults) > len(up_block_types):
-            block_out_channel_mults = block_out_channel_mults[:len(up_block_types)]
+            block_out_channel_mults = block_out_channel_mults[: len(up_block_types)]
         n_mults = len(block_out_channel_mults)
+        self.channel_mults = prod(block_out_channel_mults)
+        if isinstance(num_layers_per_block, int):
+            num_layers_per_block = (num_layers_per_block,) * n_mults
 
         self.in_block = BLOCK_MAP[in_block_type](
             dimensions=dimensions,
@@ -101,9 +106,11 @@ class Decoder(nn.Module):
         self.up_blocks = nn.ModuleList([])
         ins = n_channels
         for i in range(n_mults):
-            outs = ins // block_out_channel_mults[i]
+            outs = ins
+            if upsample_type != "UpsampleShuffle":
+                outs = int(ins // block_out_channel_mults[i])
             stage = nn.Sequential()
-            for _ in range(num_layers_per_block):
+            for _ in range(num_layers_per_block[i]):
                 up_block = BLOCK_MAP[up_block_types[i]](
                     dimensions=dimensions,
                     in_channels=ins,
@@ -116,8 +123,18 @@ class Decoder(nn.Module):
             self.up_blocks.append(stage)
 
             if i < n_mults - 1:
-                self.up_blocks.append(upsample_cls(dimensions, outs))
-
+                if upsample_type != "UpsampleShuffle":
+                    self.up_blocks.append(upsample_cls(dimensions, outs))
+                else:
+                    self.up_blocks.append(
+                        upsample_cls(
+                            dimensions,
+                            ins,
+                            outs := int(ins // block_out_channel_mults[i]),
+                        )
+                    )
+                    ins = outs
+        self.levels = (len(self.up_blocks) + 1) // 2
         self.out_block = NormActConvBlock(
             dimensions=dimensions,
             in_channels=outs,
@@ -129,7 +146,8 @@ class Decoder(nn.Module):
             stride=1,
             padding="same",
         )
-        self.levels = (len(self.up_blocks) + 1) // 2
+        self.in_shortcut = in_shortcut
+        self.shortcut_repeats = n_channels // in_channels
 
     @property
     def f(self) -> int:
@@ -138,7 +156,15 @@ class Decoder(nn.Module):
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         """Decoding forward pass."""
-        z = self.in_block(z)
+        if self.in_shortcut:
+            shortcut = z.repeat_interleave(
+                self.shortcut_repeats,
+                dim=1,
+                output_size=z.shape[1] * self.shortcut_repeats,
+            )
+            z = self.in_block(z) + shortcut
+        else:
+            z = self.in_block(z)
         for block in self.mid_blocks:
             z = block(z)
         for block in self.up_blocks:
