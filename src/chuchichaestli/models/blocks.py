@@ -45,13 +45,22 @@ __all__ = [
     "ConvAttnAutoencoderDownBlock",
     "ConvAttnAutoencoderMidBlock",
     "ConvAttnAutoencoderUpBlock",
+    "DCAutoencoderDownBlock",
+    "AttnDCAutoencoderDownBlock",
+    "ConvAttnDCAutoencoderDownBlock",
+    "DCAutoencoderUpBlock",
+    "AttnDCAutoencoderUpBlock",
+    "ConvAttnDCAutoencoderUpBlock",
     "EncoderOutBlock",
     "VAEEncoderOutBlock",
+    "DCEncoderOutBlock",
     "DecoderInBlock",
     "VAEDecoderInBlock",
+    "DCDecoderInBlock",
     # residual blocks
     "ResidualBlock",
     "ResidualBottleneck",
+    "LiteResidualBlock",
     # convolutional blocks
     "ConvDownBlock",
     "ConvDownsampleBlock",
@@ -81,6 +90,7 @@ __all__ = [
     "GaussianNoiseBlock",
 ]
 
+ResidualBlockTypes = Literal["ResidualBlock", "ResidualBottleneck", "LiteResidualBlock"]
 UNetDownBlockTypes = Literal["DownBlock", "AttnDownBlock", "ConvAttnDownBlock"]
 UNetMidBlockTypes = Literal["MidBlock", "AttnMidBlock", "ConvAttnMidBlock"]
 UNetUpBlockTypes = Literal[
@@ -88,16 +98,28 @@ UNetUpBlockTypes = Literal[
 ]
 
 AutoencoderDownBlockTypes = Literal[
-    "AutoencoderDownBlock", "AutoencoderAttnDownBlock", "AutoencoderConvAttnDownBlock"
+    "AutoencoderDownBlock",
+    "AutoencoderAttnDownBlock",
+    "AutoencoderConvAttnDownBlock",
+    "DCAutoencoderDownBlock",
+    "AttnDCAutoencoderDownBlock",
+    "ConvAttnDCAutoencoderDownBlock",
 ]
 AutoencoderMidBlockTypes = Literal[
     "AutoencoderMidBlock", "AttnAutoencoderMidBlock", "ConvAttnAutoencoderMidBlock"
 ]
 AutoencoderUpBlockTypes = Literal[
-    "AutoencoderUpBlock", "AutoencoderAttnUpBlock", "AutoencoderConvAttnUpBlock"
+    "AutoencoderUpBlock",
+    "AutoencoderAttnUpBlock",
+    "AutoencoderConvAttnUpBlock",
+    "DCAutoencoderUpBlock",
+    "AttnDCAutoencoderUpBlock",
+    "ConvAttnDCAutoencoderUpBlock",
 ]
-EncoderOutBlockTypes = Literal["EncoderOutBlock", "VAEEncoderOutBlock"]
-DecoderInBlockTypes = Literal["DecoderInBlock", "VAEDecoderInBlock"]
+EncoderOutBlockTypes = Literal[
+    "EncoderOutBlock", "VAEEncoderOutBlock", "DCEncoderOutBlock"
+]
+DecoderInBlockTypes = Literal["DecoderInBlock", "VAEDecoderInBlock", "DCDecoderInBlock"]
 
 
 class GaussianNoiseBlock(nn.Module):
@@ -302,9 +324,9 @@ class ResidualBlock(nn.Module):
         time_embedding: bool = False,
         time_channels: int = 32,
         res_groups: int = 32,
-        res_act_fn: str = "silu",
+        res_act_fn: ActivationTypes = "silu",
         res_dropout: float = 0.1,
-        res_norm_type: str = "group",
+        res_norm_type: NormTypes = "group",
         res_kernel_size: int = 3,
         res_stride: int = 1,
         res_bias: bool = True,
@@ -337,6 +359,7 @@ class ResidualBlock(nn.Module):
             kwargs: Additional or alternative keyword arguments.
         """
         super().__init__()
+
         act_cls = ACTIVATION_FUNCTIONS[res_act_fn]
         conv_cls = DIM_TO_CONV_MAP[dimensions]
 
@@ -533,6 +556,126 @@ class ResidualBottleneck(nn.Module):
         return hh + self.shortcut(x)
 
 
+class LiteResidualBlock(nn.Module):
+    """Lightweight residual block (with 2 convolutional layers) including a skip connection.
+
+    Includes (in following order):
+        - convolution (default: 3x3, stride 1)
+        - activation (default: `'relu6'`)
+        - dropout (optional; default: `0.1`)
+        - convolution (default: 3x3, stride 1)
+        - normalization (default: `'group'`)
+        - residual shortcut (with 1x1 conv if input and output channels differ)
+    """
+
+    @alias_kwargs(
+        {
+            "res_groups": "num_groups",
+            "res_act_fn": "act_fn",
+            "res_dropout": "dropout_p",
+            "res_norm_type": "norm_type",
+            "res_kernel_size": "kernel_size",
+            "res_stride": "stride",
+            "res_bias": "bias",
+        }
+    )
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        time_embedding: bool = False,
+        time_channels: int = 32,
+        res_groups: int = 32,
+        res_act_fn: ActivationTypes = "relu6",
+        res_dropout: float = 0.1,
+        res_norm_type: NormTypes = "rms",
+        res_kernel_size: int = 3,
+        res_stride: int = 1,
+        res_bias: bool = True,
+        **kwargs,
+    ):
+        """Initialize the residual block.
+
+        Args:
+            dimensions: Number of dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            time_embedding: Whether to accept time embedding input.
+            time_channels: Channels of the time embedding.
+            res_groups: Number of groups for the residual block normalization,
+                if `norm_type == 'group'`.
+            res_act_fn: Activation function.
+            res_dropout: Dropout probability.
+            res_norm_type: Normalization type.
+            res_kernel_size: Kernel size for the residual block.
+            res_stride: Stride of the residual block.
+            res_bias: Bias for convolutional layers.
+            num_groups: Number of groups; alternative input for `res_groups`.
+            act_fn: Activation function; alternative input for `res_act_fn`.
+            norm_type: Normalization type; alternative input for `res_norm_type`.
+            dropout_p: Dropout probability; alternative input for `res_dropout`.
+            kernel_size: Kernel size for the residual block;
+                alternative input for `res_kernel_size`.
+            stride: Stride of the residual block; alternative input for `res_stride`.
+            bias: Bias for convolutions; alternative input for `res_bias`.
+            kwargs: Additional or alternative keyword arguments.
+        """
+        super().__init__()
+
+        act_cls = ACTIVATION_FUNCTIONS[res_act_fn]
+        conv_cls = DIM_TO_CONV_MAP[dimensions]
+
+        self.dimensions = dimensions
+
+        self.act = act_cls()
+        self.conv1 = conv_cls(
+            in_channels,
+            out_channels,
+            kernel_size=res_kernel_size,
+            padding="same" if res_stride == 1 else (res_kernel_size - 1) // 2,
+            stride=res_stride,
+            bias=res_bias,
+        )
+        self.conv2 = conv_cls(
+            out_channels,
+            out_channels,
+            kernel_size=res_kernel_size,
+            padding="same",
+            bias=res_bias,
+        )
+        self.norm = Norm(dimensions, res_norm_type, out_channels, res_groups)
+
+        self.shortcut = (
+            conv_cls(
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=res_stride,
+                bias=res_bias,
+            )
+            if in_channels != out_channels or res_stride != 1
+            else nn.Identity()
+        )
+
+        self.time_embedding = time_embedding
+        if time_embedding:
+            self.time_proj = nn.Linear(time_channels, out_channels)
+            self.time_act = act_cls()
+
+        self.dropout = nn.Dropout(res_dropout) if res_dropout > 0 else None
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
+        """Forward pass through the residual block."""
+        hh = self.act(self.conv1(x))
+        idx = [slice(None), slice(None)] + [None] * self.dimensions
+        if self.time_embedding:
+            hh += self.time_proj(self.time_act(t))[tuple(idx)]
+        hh = self.dropout(hh) if self.dropout is not None else hh
+        hh = self.norm(self.conv2(hh))
+        return hh + self.shortcut(x)
+
+
 class DownBlock(nn.Module):
     """Standard block for the encoder of a U-Net (meant to increase/keep channel dimension).
 
@@ -560,10 +703,11 @@ class DownBlock(nn.Module):
         res_args: dict = {},
         attention: AttentionDownTypes | None = None,
         attn_args: dict = {},
+        res_block_type: ResidualBlockTypes = "ResidualBlock",
     ):
         """Initialize the down block."""
         super().__init__()
-        self.res_block = ResidualBlock(
+        self.res_block = RESIDUAL_BLOCK_MAP[res_block_type](
             dimensions,
             in_channels,
             out_channels,
@@ -592,7 +736,7 @@ class AutoencoderDownBlock(DownBlock):
 
     Includes (in following order):
         - Attention layer (optional; default: `None`)
-        - Residual block (x1 or x2):
+        - Residual block:
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
             - convolution (default: 3x3, stride 1)
@@ -611,6 +755,7 @@ class AutoencoderDownBlock(DownBlock):
         res_args: dict = {},
         attention: AttentionDownTypes | None = None,
         attn_args: dict = {},
+        res_block_type: ResidualBlockTypes = "ResidualBlock",
     ):
         """Initialize the encoder down block."""
         super().__init__(
@@ -622,6 +767,7 @@ class AutoencoderDownBlock(DownBlock):
             res_args,
             attention,
             attn_args,
+            res_block_type,
         )
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
@@ -655,10 +801,11 @@ class MidBlock(nn.Module):
         res_args: dict = {},
         attention: AttentionDownTypes | None = None,
         attn_args: dict = {},
+        res_block_type: ResidualBlockTypes = "ResidualBlock",
     ):
         """Initialize the mid block."""
         super().__init__()
-        self.res_block = ResidualBlock(
+        self.res_block = RESIDUAL_BLOCK_MAP[res_block_type](
             dimensions,
             channels,
             channels,
@@ -702,6 +849,7 @@ class AutoencoderMidBlock(MidBlock):
         res_args: dict = {},
         attention: AttentionDownTypes | None = None,
         attn_args: dict = {},
+        res_block_type: ResidualBlockTypes = "ResidualBlock",
     ):
         """Initialize the encoder mid block."""
         super().__init__(
@@ -712,6 +860,7 @@ class AutoencoderMidBlock(MidBlock):
             res_args,
             attention,
             attn_args,
+            res_block_type,
         )
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
@@ -748,12 +897,13 @@ class UpBlock(nn.Module):
         attention: AttentionTypes | None = None,
         attn_args: dict = {},
         skip_connection_action: Literal["concat", "avg", "add"] | None = None,
+        res_block_type: ResidualBlockTypes = "ResidualBlock",
     ):
         """Initialize the up block."""
         super().__init__()
         self.skip_connection_action = skip_connection_action
         if skip_connection_action == "concat":
-            self.res_block = ResidualBlock(
+            self.res_block = RESIDUAL_BLOCK_MAP[res_block_type](
                 dimensions,
                 in_channels + in_channels,
                 out_channels,
@@ -762,7 +912,7 @@ class UpBlock(nn.Module):
                 **res_args,
             )
         elif skip_connection_action in ["avg", "add", None]:
-            self.res_block = ResidualBlock(
+            self.res_block = RESIDUAL_BLOCK_MAP[res_block_type](
                 dimensions,
                 in_channels,
                 out_channels,
@@ -836,10 +986,11 @@ class AutoencoderUpBlock(nn.Module):
         res_args: dict = {},
         attention: Literal["self_attention", "conv_attention"] | None = None,
         attn_args: dict = {},
+        res_block_type: ResidualBlockTypes = "ResidualBlock",
     ):
         """Initialize the up block."""
         super().__init__()
-        self.res_block = ResidualBlock(
+        self.res_block = RESIDUAL_BLOCK_MAP[res_block_type](
             dimensions,
             in_channels,
             out_channels,
@@ -1017,6 +1168,7 @@ AttnGateUpBlock = partialclass(
             - residual shortcut (with 1x1 conv if input and output channels differ)
     """,
 )
+
 AttnAutoencoderDownBlock = partialclass(
     "AttnAutoencoderDownBlock",
     AutoencoderDownBlock,
@@ -1137,6 +1289,118 @@ ConvAttnAutoencoderUpBlock = partialclass(
             - residual shortcut (with 1x1 conv if input and output channels differ)
     """,
 )
+
+DCAutoencoderDownBlock = partialclass(
+    "DCAutoencoderDownBlock",
+    AutoencoderDownBlock,
+    res_block_type="LiteResidualBlock",
+    __doc__="""
+    Convolutional block for the encoder of a deep-compression autoencoder.
+
+    Includes:
+        - Residual block:
+            - convolution (default: 3x3, stride 1)
+            - activation (default: `'relu6'`)
+            - dropout (optional; default: `0.1`)
+            - convolution (default: 3x3, stride 1)
+            - normalization (default: `'group'`)
+            - residual shortcut (with 1x1 conv if input and output channels differ)
+    """,
+)
+DCAutoencoderUpBlock = partialclass(
+    "DCAutoencoderUpBlock",
+    AutoencoderUpBlock,
+    res_block_type="LiteResidualBlock",
+    __doc__="""
+    Convolutional block for the decoder of a deep-compression autoencoder.
+
+    Includes:
+        - Residual block:
+            - convolution (default: 3x3, stride 1)
+            - activation (default: `'relu6'`)
+            - dropout (optional; default: `0.1`)
+            - convolution (default: 3x3, stride 1)
+            - normalization (default: `'group'`)
+            - residual shortcut (with 1x1 conv if input and output channels differ)
+    """,
+)
+AttnDCAutoencoderDownBlock = partialclass(
+    "DCAutoencoderDownBlock",
+    AutoencoderDownBlock,
+    attention="self_attention",
+    res_block_type="LiteResidualBlock",
+    __doc__="""
+    Convolutional block for the encoder of a deep-compression autoencoder.
+
+    Includes:
+        - Attention layer (default: `'self_attention'`)
+        - Residual block:
+            - convolution (default: 3x3, stride 1)
+            - activation (default: `'relu6'`)
+            - dropout (optional; default: `0.1`)
+            - convolution (default: 3x3, stride 1)
+            - normalization (default: `'group'`)
+            - residual shortcut (with 1x1 conv if input and output channels differ)
+    """,
+)
+AttnDCAutoencoderUpBlock = partialclass(
+    "DCAutoencoderUpBlock",
+    AutoencoderUpBlock,
+    attention="self_attention",
+    res_block_type="LiteResidualBlock",
+    __doc__="""
+    Convolutional block for the decoder of a deep-compression autoencoder.
+
+    Includes:
+        - Attention layer (default: `'self_attention'`)
+        - Residual block:
+            - convolution (default: 3x3, stride 1)
+            - activation (default: `'relu6'`)
+            - dropout (optional; default: `0.1`)
+            - convolution (default: 3x3, stride 1)
+            - normalization (default: `'group'`)
+            - residual shortcut (with 1x1 conv if input and output channels differ)
+    """,
+)
+ConvAttnDCAutoencoderDownBlock = partialclass(
+    "DCAutoencoderDownBlock",
+    AutoencoderDownBlock,
+    attention="conv_attention",
+    res_block_type="LiteResidualBlock",
+    __doc__="""
+    Convolutional block for the encoder of a deep-compression autoencoder.
+
+    Includes:
+        - Attention layer (default: `'conv_attention'`)
+        - Residual block:
+            - convolution (default: 3x3, stride 1)
+            - activation (default: `'relu6'`)
+            - dropout (optional; default: `0.1`)
+            - convolution (default: 3x3, stride 1)
+            - normalization (default: `'group'`)
+            - residual shortcut (with 1x1 conv if input and output channels differ)
+    """,
+)
+ConvAttnDCAutoencoderUpBlock = partialclass(
+    "DCAutoencoderUpBlock",
+    AutoencoderUpBlock,
+    attention="conv_attention",
+    res_block_type="LiteResidualBlock",
+    __doc__="""
+    Convolutional block for the decoder of a deep-compression autoencoder.
+
+    Includes:
+        - Attention layer (default: `'conv_attention'`)
+        - Residual block:
+            - convolution (default: 3x3, stride 1)
+            - activation (default: `'relu6'`)
+            - dropout (optional; default: `0.1`)
+            - convolution (default: 3x3, stride 1)
+            - normalization (default: `'group'`)
+            - residual shortcut (with 1x1 conv if input and output channels differ)
+    """,
+)
+
 EncoderOutBlock = partialclass(
     "EncoderOutBlock",
     BaseConvBlock,
@@ -1175,6 +1439,22 @@ VAEEncoderOutBlock = partialclass(
         - convolution (default: 1x1, stride 1)
     """,
 )
+DCEncoderOutBlock = partialclass(
+    "DCEncoderOutBlock",
+    BaseConvBlock,
+    act=False,
+    norm=False,
+    kernel_size=3,
+    stride=1,
+    padding="same",
+    double_conv=False,
+    __doc__="""
+    Convolutional output block for a DCAE encoder.
+
+    Includes:
+        - convolution (default: 3x3, stride 1)
+    """,
+)
 DecoderInBlock = partialclass(
     "DecoderInBlock",
     BaseConvBlock,
@@ -1201,6 +1481,22 @@ VAEDecoderInBlock = partialclass(
     Includes:
         - convolution (default: 3x3, stride 1)
         - convolution (default: 1x1, stride 1)
+    """,
+)
+DCDecoderInBlock = partialclass(
+    "DCDecoderInBlock",
+    BaseConvBlock,
+    act=False,
+    norm=False,
+    kernel_size=3,
+    stride=1,
+    padding="same",
+    double_conv=False,
+    __doc__="""
+    Convolutional input block for a DCAE decoder.
+
+    Includes:
+        - convolution (default: 3x3, stride 1)
     """,
 )
 
@@ -1606,16 +1902,25 @@ BLOCK_MAP: dict[str, Callable] = {
     "ConvAttnAutoencoderDownBlock": ConvAttnAutoencoderDownBlock,
     "ConvAttnAutoencoderMidBlock": ConvAttnAutoencoderMidBlock,
     "ConvAttnAutoencoderUpBlock": ConvAttnAutoencoderUpBlock,
+    "DCAutoencoderDownBlock": DCAutoencoderDownBlock,
+    "AttnDCAutoencoderDownBlock": AttnDCAutoencoderDownBlock,
+    "ConvAttnDCAutoencoderDownBlock": ConvAttnDCAutoencoderDownBlock,
+    "DCAutoencoderUpBlock": DCAutoencoderUpBlock,
+    "AttnDCAutoencoderUpBlock": AttnDCAutoencoderUpBlock,
+    "ConvAttnDCAutoencoderUpBlock": ConvAttnDCAutoencoderUpBlock,
     "EncoderOutBlock": EncoderOutBlock,
     "VAEEncoderOutBlock": VAEEncoderOutBlock,
+    "DCEncoderOutBlock": DCEncoderOutBlock,
     "DecoderInBlock": DecoderInBlock,
     "VAEDecoderInBlock": VAEDecoderInBlock,
+    "DCDecoderInBlock": DCDecoderInBlock,
 }
 
 
 CONV_BLOCK_MAP: dict[str, Callable] = {
     "ResidualBlock": ResidualBlock,
     "ResidualBottleneck": ResidualBottleneck,
+    "LiteResidualBlock": LiteResidualBlock,
     "ConvDownBlock": ConvDownBlock,
     "ConvDownsampleBlock": ConvDownsampleBlock,
     "AttnConvDownBlock": AttnConvDownBlock,
@@ -1646,4 +1951,5 @@ CONV_BLOCK_MAP: dict[str, Callable] = {
 RESIDUAL_BLOCK_MAP = {
     "ResidualBlock": ResidualBlock,
     "ResidualBottleneck": ResidualBottleneck,
+    "LiteResidualBlock": LiteResidualBlock,
 }
