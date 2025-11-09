@@ -23,9 +23,7 @@ from chuchichaestli.models.autoencoder import VAE
         (3, 1, 8, 4, 3),
     ],
 )
-def test_vae_init(
-        dimensions, in_channels, n_channels, latent_dim, out_channels
-):
+def test_vae_init(dimensions, in_channels, n_channels, latent_dim, out_channels):
     """Test the VAE module initialization."""
     model = VAE(
         dimensions=dimensions,
@@ -45,22 +43,28 @@ def test_vae_init(
 @pytest.mark.parametrize(
     "dimensions,in_channels,n_channels,latent_dim,out_channels,down_block_types,up_block_types",
     [
-        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (1, 1, 16, 8, 1, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (2, 1, 16, 8, 1, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (3, 1, 16, 8, 1, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (1, 1, 32, 4, 3, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (2, 1, 32, 4, 3, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (3, 1, 32, 4, 3, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
+        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (1, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (2, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (3, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (1, 1, 32, 4, 3, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (2, 1, 32, 4, 3, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (3, 1, 32, 4, 3, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
     ],
 )
 def test_vae_blocks(
-        dimensions, in_channels, n_channels, latent_dim, out_channels, down_block_types, up_block_types,
+    dimensions,
+    in_channels,
+    n_channels,
+    latent_dim,
+    out_channels,
+    down_block_types,
+    up_block_types,
 ):
     """Test the VAE module."""
     model = VAE(
@@ -72,10 +76,10 @@ def test_vae_blocks(
         down_block_types=down_block_types,
         up_block_types=up_block_types,
         use_latent_proj=True,
-        use_latent_deproj=True,        
+        use_latent_deproj=True,
     )
     wh = 16
-    shape = (1, in_channels) + (wh,)*dimensions
+    shape = (1, in_channels) + (wh,) * dimensions
     sample = torch.randn(shape)
     out, posterior = model(sample)
     assert isinstance(out, torch.Tensor)
@@ -85,22 +89,28 @@ def test_vae_blocks(
 @pytest.mark.parametrize(
     "dimensions,in_channels,n_channels,latent_dim,out_channels,down_block_types,up_block_types",
     [
-        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (1, 1, 16, 8, 1, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (2, 1, 16, 8, 1, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (3, 1, 16, 8, 1, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (1, 1, 32, 4, 3, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (2, 1, 32, 4, 3, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (3, 1, 32, 4, 3, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
+        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (1, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (2, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (3, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (1, 1, 32, 4, 3, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (2, 1, 32, 4, 3, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (3, 1, 32, 4, 3, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
     ],
 )
 def test_vae_latent_dim(
-        dimensions, in_channels, n_channels, latent_dim, out_channels, down_block_types, up_block_types,
+    dimensions,
+    in_channels,
+    n_channels,
+    latent_dim,
+    out_channels,
+    down_block_types,
+    up_block_types,
 ):
     """Test the VAE module (latent dim)."""
     model = VAE(
@@ -112,11 +122,11 @@ def test_vae_latent_dim(
         down_block_types=down_block_types,
         up_block_types=up_block_types,
         use_latent_proj=True,
-        use_latent_deproj=True,        
+        use_latent_deproj=True,
     )
     wh = 16
-    shape = (1, in_channels) + (wh,)*dimensions
-    spatial_dims = (wh // model.f_comp,)*dimensions
+    shape = (1, in_channels) + (wh,) * dimensions
+    spatial_dims = (wh // model.f_comp,) * dimensions
     assert model.levels == (len(down_block_types), len(up_block_types))
     assert model.f_comp == 2 ** (len(down_block_types) - 1)
     assert model.f_exp == 2 ** (len(up_block_types) - 1)
@@ -126,22 +136,28 @@ def test_vae_latent_dim(
 @pytest.mark.parametrize(
     "dimensions,in_channels,n_channels,latent_dim,out_channels,down_block_types,up_block_types",
     [
-        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (1, 1, 16, 8, 1, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (2, 1, 16, 8, 1, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (3, 1, 16, 8, 1, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (1, 1, 32, 4, 3, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (2, 1, 32, 4, 3, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (3, 1, 32, 4, 3, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
+        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (1, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (2, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (3, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (1, 1, 32, 4, 3, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (2, 1, 32, 4, 3, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (3, 1, 32, 4, 3, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
     ],
 )
 def test_vae_forward(
-        dimensions, in_channels, n_channels, latent_dim, out_channels, down_block_types, up_block_types,
+    dimensions,
+    in_channels,
+    n_channels,
+    latent_dim,
+    out_channels,
+    down_block_types,
+    up_block_types,
 ):
     """Test the VAE module (forward pass)."""
     model = VAE(
@@ -153,37 +169,47 @@ def test_vae_forward(
         down_block_types=down_block_types,
         up_block_types=up_block_types,
         use_latent_proj=True,
-        use_latent_deproj=True,        
+        use_latent_deproj=True,
     )
     wh = 16
-    shape = (1, in_channels) + (wh,)*dimensions
+    shape = (1, in_channels) + (wh,) * dimensions
     sample = torch.randn(shape)
     out, posterior = model(sample)
     assert isinstance(out, torch.Tensor)
     assert isinstance(posterior, torch.distributions.MultivariateNormal)
-    assert out.shape == (1, out_channels, *(model.f_exp/model.f_comp*wh,)*dimensions)
+    assert out.shape == (
+        1,
+        out_channels,
+        *(model.f_exp / model.f_comp * wh,) * dimensions,
+    )
     print(out.shape, posterior.mode.shape)
 
 
 @pytest.mark.parametrize(
     "dimensions,in_channels,n_channels,latent_dim,out_channels,down_block_types,up_block_types",
     [
-        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (1, 3, 16, 8, 3, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (2, 3, 16, 8, 3, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (3, 3, 16, 8, 3, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (1, 1, 32, 4, 1, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (2, 1, 32, 4, 1, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (3, 1, 32, 4, 1, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
+        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (1, 3, 16, 8, 3, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (2, 3, 16, 8, 3, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (3, 3, 16, 8, 3, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (1, 1, 32, 4, 1, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (2, 1, 32, 4, 1, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (3, 1, 32, 4, 1, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
     ],
 )
 def test_vae_backward(
-        dimensions, in_channels, n_channels, latent_dim, out_channels, down_block_types, up_block_types,
+    dimensions,
+    in_channels,
+    n_channels,
+    latent_dim,
+    out_channels,
+    down_block_types,
+    up_block_types,
 ):
     """Test the VAE module (backward pass)."""
     model = VAE(
@@ -195,10 +221,10 @@ def test_vae_backward(
         down_block_types=down_block_types,
         up_block_types=up_block_types,
         use_latent_proj=True,
-        use_latent_deproj=True,        
+        use_latent_deproj=True,
     )
     wh = 32
-    shape = (1, in_channels) + (wh,)*dimensions
+    shape = (1, in_channels) + (wh,) * dimensions
     sample = torch.randn(shape)
     out, posterior = model(sample)
     loss = nn.functional.mse_loss(out, sample)
@@ -211,22 +237,28 @@ def test_vae_backward(
 @pytest.mark.parametrize(
     "dimensions,in_channels,n_channels,latent_dim,out_channels,down_block_types,up_block_types",
     [
-        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",)*5, ("AutoencoderUpBlock",)*5,),
-        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",)*3, ("AutoencoderUpBlock",)*3,),
-        (1, 3, 16, 8, 3, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (2, 3, 16, 8, 3, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (3, 3, 16, 8, 3, ("AutoencoderDownBlock",)*2, ("AutoencoderUpBlock",)*2,),
-        (1, 1, 32, 4, 1, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (2, 1, 32, 4, 1, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
-        (3, 1, 32, 4, 1, ("AutoencoderDownBlock",)*1, ("AutoencoderUpBlock",)*1,),
+        (1, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (2, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (3, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
+        (1, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (2, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (3, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (1, 3, 16, 8, 3, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (2, 3, 16, 8, 3, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (3, 3, 16, 8, 3, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
+        (1, 1, 32, 4, 1, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (2, 1, 32, 4, 1, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
+        (3, 1, 32, 4, 1, ("AutoencoderDownBlock",) * 1, ("AutoencoderUpBlock",) * 1),
     ],
 )
 def test_vae_kl_div(
-        dimensions, in_channels, n_channels, latent_dim, out_channels, down_block_types, up_block_types,
+    dimensions,
+    in_channels,
+    n_channels,
+    latent_dim,
+    out_channels,
+    down_block_types,
+    up_block_types,
 ):
     """Test the VAE kl_divergence."""
     model = VAE(
@@ -238,10 +270,10 @@ def test_vae_kl_div(
         down_block_types=down_block_types,
         up_block_types=up_block_types,
         use_latent_proj=True,
-        use_latent_deproj=True,        
+        use_latent_deproj=True,
     )
     wh = 32
-    shape = (1, in_channels) + (wh,)*dimensions
+    shape = (1, in_channels) + (wh,) * dimensions
     sample = torch.randn(shape)
     out, posterior = model(sample)
     loss = nn.functional.mse_loss(out, sample)

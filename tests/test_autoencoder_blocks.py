@@ -53,12 +53,14 @@ def test_autoencoder_blocks(
         else isinstance(block.res_block.shortcut, nn.Conv1d | nn.Conv2d | nn.Conv3d)
     )
 
+
 def test_inspect_autoencoder_down_block():
     """Inspect AutoencoderDownBlock."""
     w, h = 512, 512
     block = AutoencoderDownBlock(2, 32, 64)
     try:
         from torchinfo import summary
+
         summary(
             block,
             (1, 32, w, h),
@@ -78,12 +80,7 @@ def test_inspect_autoencoder_down_block():
         (3, 1, 64, 4),
     ],
 )
-def test_autoencoder_encoder(
-    dimensions,
-    in_channels,
-    n_channels,
-    out_channels
-):
+def test_autoencoder_encoder(dimensions, in_channels, n_channels, out_channels):
     """Test Encoder module."""
     encoder = Encoder(dimensions, in_channels, n_channels, out_channels)
     assert encoder.levels == 4  # 4 stages (each w/ 2 res blocks) + 3 downsamplings
@@ -96,6 +93,7 @@ def test_autoencoder_encoder_inspect():
     encoder = Encoder(dimensions, in_channels, n_channels, out_channels)
     try:
         from torchinfo import summary
+
         summary(
             encoder,
             (1, in_channels, 512, 512),
@@ -115,12 +113,7 @@ def test_autoencoder_encoder_inspect():
         (3, 4, 512, 1),
     ],
 )
-def test_autoencoder_decoder(
-    dimensions,
-    in_channels,
-    n_channels,
-    out_channels
-):
+def test_autoencoder_decoder(dimensions, in_channels, n_channels, out_channels):
     """Test Decoder module."""
     decoder = Decoder(dimensions, in_channels, n_channels, out_channels)
     assert decoder.levels == 4  # 4 stages (w/ each 3 residual blocks) + 3 downsamplings
@@ -133,6 +126,7 @@ def test_autoencoder_decoder_inspect():
     decoder = Decoder(dimensions, in_channels, n_channels, out_channels)
     try:
         from torchinfo import summary
+
         summary(
             decoder,
             (1, in_channels, 4, 4),
