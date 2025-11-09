@@ -20,6 +20,9 @@ from typing import Literal
 from collections.abc import Sequence
 
 
+__all__ = ["VAE"]
+
+
 class VAE(Autoencoder):
     """Flexible variational autoencoder implementation.
 

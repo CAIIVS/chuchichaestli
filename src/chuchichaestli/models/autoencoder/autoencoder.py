@@ -23,6 +23,9 @@ from typing import Literal
 from collections.abc import Sequence
 
 
+__all__ = ["Autoencoder"]
+
+
 class Autoencoder(nn.Module):
     """Flexible autoencoder implementation.
 
@@ -153,11 +156,6 @@ class Autoencoder(nn.Module):
         self.double_z = double_z
         self.channel_mults = prod(block_out_channel_mults)
 
-        if encoder_out_block_type == "DeepCompressionEncoderOutBlock":
-            assert dimensions == 2, (
-                "DeepCompressionEncoderOutBlock only supports 2D data."
-            )
-
         res_args = {
             "res_act_fn": res_act_fn,
             "res_dropout": res_dropout,
@@ -260,10 +258,9 @@ class Autoencoder(nn.Module):
     def compute_latent_shape(self, input_shape: tuple[int, ...], no_batch_dim: bool = False):
         """Compute the shape of the latent space."""
         batch_dim = input_shape[0] if not no_batch_dim else None
-        channel_dim = input_shape[1]
         spatial_dims = tuple(dim // self.f_comp for dim in input_shape[2:])
         if batch_dim is None: 
-            shape = (channel_dim, *spatial_dims)
+            shape = (self.latent_dim, *spatial_dims)
         else:
             shape = (batch_dim, self.latent_dim, *spatial_dims)
         return shape
@@ -291,8 +288,8 @@ class Autoencoder(nn.Module):
         Returns:
             Image reconstructed from latent code.
         """
-        h = self.latent_deproj(z) if self.latent_deproj is not None else z
-        return self.decoder(h)
+        z = self.latent_deproj(z) if self.latent_deproj is not None else z
+        return self.decoder(z)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the model, i.e. encode and decode."""

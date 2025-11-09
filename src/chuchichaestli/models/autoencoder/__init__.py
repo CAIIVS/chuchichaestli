@@ -7,7 +7,7 @@ from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
 from chuchichaestli.models.autoencoder.decoder import Decoder
 from chuchichaestli.models.autoencoder.encoder import Encoder
 from chuchichaestli.models.autoencoder.vae import VAE
-# from chuchichaestli.models.autoencoder.vqvae import VQVAE
+from chuchichaestli.models.autoencoder.vqvae import VQVAE
 # from chuchichaestli.models.autoencoder.dcae import DCAE
 
 __all__ = [
@@ -15,6 +15,6 @@ __all__ = [
     "Encoder",
     "Autoencoder",
     "VAE",
-    # "VQVAE",
+    "VQVAE",
     # "DCAE",
 ]
