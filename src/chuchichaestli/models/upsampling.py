@@ -4,13 +4,22 @@
 """Upsampling modules for 1, 2, and 3D inputs."""
 
 import torch
-from torch.nn import Module
+from torch import nn
 from torch.nn import functional as F
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP, DIM_TO_CONVT_MAP, UPSAMPLE_MODE
 from typing import Literal
 
 
-class Upsample(Module):
+__all__ = [
+    "Upsample",
+    "UpsampleInterpolate",
+    "UpsampleShuffle",
+]
+
+UpsampleTypes = Literal["Upsample", "UpsampleInterpolate", "UpsampleShuffle"]
+
+
+class Upsample(nn.Module):
     """Upsampling layer for 1D, 2D, and 3D inputs."""
 
     def __init__(self, dimensions: int, num_channels: int):
@@ -26,7 +35,7 @@ class Upsample(Module):
         return self.conv(x)
 
 
-class UpsampleInterpolate(Module):
+class UpsampleInterpolate(nn.Module):
     """Upsampling layer for 1D, 2D, and 3D inputs implemented with interpolation."""
 
     def __init__(
@@ -75,7 +84,42 @@ class UpsampleInterpolate(Module):
         return x
 
 
+class UpsampleShuffle(nn.Module):
+    """Upsampling layer for 1D, 2D, and 3D inputs implemented with pixel shuffling."""
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        factor: int | None = None,
+        **kwargs,
+    ):
+        """Initialize the upsampling layer."""
+        super().__init__()
+        conv_cls = DIM_TO_CONV_MAP[dimensions]
+        self.dimensions = dimensions
+        self.factor = factor if factor is not None else 2
+        r2 = self.factor**2
+        self.repeats = out_channels * r2 // in_channels
+        kwargs.setdefault("kernel_size", 3)
+        kwargs.setdefault("stride", 1)
+        kwargs.setdefault("padding", "same")
+        self.conv = conv_cls(
+            in_channels, out_channels * r2, **kwargs
+        )
+        self.pixel_shuffle = nn.PixelShuffle(self.factor)
+
+    def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
+        """Forward pass through the upsampling layer."""
+        h = self.pixel_shuffle(self.conv(x))
+        shortcut = x.repeat_interleave(self.repeats, dim=1, output_size=x.shape[1] * self.repeats)
+        shortcut = self.pixel_shuffle(shortcut)
+        return h + shortcut
+
+
 UPSAMPLE_FUNCTIONS = {
     "Upsample": Upsample,
     "UpsampleInterpolate": UpsampleInterpolate,
+    "UpsampleShuffle": UpsampleShuffle,
 }
