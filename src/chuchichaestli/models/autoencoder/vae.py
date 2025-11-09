@@ -15,8 +15,9 @@ from chuchichaestli.models.blocks import (
     EncoderOutBlockTypes,
     DecoderInBlockTypes,
 )
+from chuchichaestli.models.downsampling import DownsampleTypes
 from chuchichaestli.models.norm import NormTypes
-from typing import Literal
+from chuchichaestli.models.upsampling import UpsampleTypes
 from collections.abc import Sequence
 
 
@@ -49,8 +50,8 @@ class VAE(Autoencoder):
             "AutoencoderDownBlock",
             "AutoencoderDownBlock",
         ),
-        down_layers_per_block: int = 2,
-        downsample_type: Literal["Downsample", "DownsampleInterpolate"] = "Downsample",
+        down_layers_per_block: int | Sequence[int] = 2,
+        downsample_type: DownsampleTypes = "Downsample",
         encoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (
             "AutoencoderMidBlock",
             "AttnAutoencoderMidBlock",
@@ -67,15 +68,13 @@ class VAE(Autoencoder):
             "AutoencoderUpBlock",
             "AutoencoderUpBlock",
         ),
-        up_layers_per_block: int = 3,
-        upsample_type: Literal[
-            "Upsample", "UpsampleInterpolate"
-        ] = "UpsampleInterpolate",
+        up_layers_per_block: int | Sequence[int] = 3,
+        upsample_type: UpsampleTypes = "UpsampleInterpolate",
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 2),
         use_latent_proj: bool = True,
         use_latent_deproj: bool = True,
         res_act_fn: ActivationTypes = "silu",
-        res_dropout: float = 0.1,
+        res_dropout: float = 0.0,
         res_norm_type: NormTypes = "group",
         res_groups: int = 8,
         res_kernel_size: int = 3,

@@ -16,8 +16,10 @@ from chuchichaestli.models.blocks import (
     EncoderOutBlockTypes,
     DecoderInBlockTypes,
 )
+from chuchichaestli.models.downsampling import DownsampleTypes
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
+from chuchichaestli.models.upsampling import UpsampleTypes
 from chuchichaestli.utils import prod
 from typing import Literal
 from collections.abc import Sequence
@@ -51,8 +53,8 @@ class Autoencoder(nn.Module):
             "AutoencoderDownBlock",
             "AutoencoderDownBlock",
         ),
-        down_layers_per_block: int = 2,
-        downsample_type: Literal["Downsample", "DownsampleInterpolate"] = "Downsample",
+        down_layers_per_block: int | Sequence[int] = 2,
+        downsample_type: DownsampleTypes = "Downsample",
         encoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (
             "AutoencoderMidBlock",
             "AttnAutoencoderMidBlock",
@@ -69,15 +71,14 @@ class Autoencoder(nn.Module):
             "AutoencoderUpBlock",
             "AutoencoderUpBlock",
         ),
-        up_layers_per_block: int = 3,
-        upsample_type: Literal[
-            "Upsample", "UpsampleInterpolate"
-        ] = "UpsampleInterpolate",
+        up_layers_per_block: int | Sequence[int] = 3,
+        upsample_type: UpsampleTypes = "UpsampleInterpolate",
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 2),
+        decoder_block_out_channel_mults: Sequence[int] | None = None,
         use_latent_proj: bool = True,
         use_latent_deproj: bool = True,
         res_act_fn: ActivationTypes = "silu",
-        res_dropout: float = 0.1,
+        res_dropout: float = 0.0,
         res_norm_type: NormTypes = "group",
         res_groups: int = 8,
         res_kernel_size: int = 3,
@@ -91,10 +92,12 @@ class Autoencoder(nn.Module):
         encoder_norm_type: NormTypes = "group",
         encoder_groups: int = 8,
         encoder_kernel_size: int = 3,
+        encoder_out_shortcut: bool = False,
         decoder_act_fn: ActivationTypes = "silu",
         decoder_norm_type: NormTypes = "group",
         decoder_groups: int = 8,
         decoder_kernel_size: int = 3,
+        decoder_in_shortcut: bool = False,
         double_z: bool = False,
     ):
         """Initializes the VAE model with the given parameters.
@@ -120,6 +123,7 @@ class Autoencoder(nn.Module):
             upsample_type: Type of upsampling block
                 (see `chuchichaestli.models.upsampling` for details).
             block_out_channel_mults: Multiplier for output channels of each level block.
+            decoder_block_out_channel_mults: Multiplier for output channels of each decoder level.
             use_latent_proj: Whether to use a linear layer between encoder and latent space.
             use_latent_deproj: Whether to use a linear layer between latent space and decoder.
             res_act_fn: Activation function for the residual blocks
@@ -143,18 +147,27 @@ class Autoencoder(nn.Module):
                 (see `chuchichaestli.models.norm` for details).
             encoder_groups: Number of groups for normalization in the output layer of the encoder.
             encoder_kernel_size: Kernel size for the output convolution in the encoder.
+            encoder_out_shortcut: Whether to use an encoder shortcut.
             decoder_act_fn: Activation function for the input/output layers in the decoder
                 (see `chuchichaestli.models.activations` for details).
             decoder_norm_type: Normalization type for the decoder's output block
                 (see `chuchichaestli.models.norm` for details).
             decoder_groups: Number of groups for normalization in the input/output layer of the decoder.
             decoder_kernel_size: Kernel size for the output convolution in the decoder.
+            decoder_in_shortcut: Whether to use a decoder shortcut.
             double_z: Whether to double the latent space.
         """
         super().__init__()
 
+        if encoder_out_block_type == "DCEncoderOutBlock":
+            assert (
+                dimensions == 2
+            ), "Deep-compression autoencoding is only supported for 2D data."
+
         self.double_z = double_z
         self.channel_mults = prod(block_out_channel_mults)
+        if decoder_block_out_channel_mults is None:
+            decoder_block_out_channel_mults = block_out_channel_mults
 
         res_args = {
             "res_act_fn": res_act_fn,
@@ -190,6 +203,7 @@ class Autoencoder(nn.Module):
             res_args=res_args,
             attn_args=attn_args,
             double_z=double_z,
+            out_shortcut=encoder_out_shortcut,
         )
         self.decoder = Decoder(
             dimensions=dimensions,
@@ -198,7 +212,7 @@ class Autoencoder(nn.Module):
             out_channels=out_channels,
             up_block_types=up_block_types,
             in_block_type=decoder_in_block_type,
-            block_out_channel_mults=block_out_channel_mults,
+            block_out_channel_mults=decoder_block_out_channel_mults,
             num_layers_per_block=up_layers_per_block,
             mid_block_types=decoder_mid_block_types,
             upsample_type=upsample_type,
@@ -208,6 +222,7 @@ class Autoencoder(nn.Module):
             kernel_size=decoder_kernel_size,
             res_args=res_args,
             attn_args=attn_args,
+            in_shortcut=decoder_in_shortcut,
         )
         self.latent_proj = (
             DIM_TO_CONV_MAP[dimensions](
