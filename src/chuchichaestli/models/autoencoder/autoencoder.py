@@ -278,11 +278,13 @@ class Autoencoder(nn.Module):
         """Spatial expansion factor of the decoder (number of spatial upsampling layers)."""
         return self.decoder.f
 
-    def compute_latent_shape(self, input_shape: tuple[int, ...], no_batch_dim: bool = False):
+    def compute_latent_shape(
+        self, input_shape: tuple[int, ...], no_batch_dim: bool = False
+    ):
         """Compute the shape of the latent space."""
         batch_dim = input_shape[0] if not no_batch_dim else None
         spatial_dims = tuple(dim // self.f_comp for dim in input_shape[2:])
-        if batch_dim is None: 
+        if batch_dim is None:
             shape = (self.latent_dim, *spatial_dims)
         else:
             shape = (batch_dim, self.latent_dim, *spatial_dims)

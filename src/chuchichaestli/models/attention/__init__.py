@@ -11,8 +11,12 @@ from typing import Literal
 
 __all__ = ["ATTENTION_MAP"]
 
-AttentionTypes = Literal["self_attention", "conv_attention", "attention_gate", "lite_multiscale_attention"]
-AttentionDownTypes = Literal["self_attention", "conv_attention", "lite_multiscale_attention"]
+AttentionTypes = Literal[
+    "self_attention", "conv_attention", "attention_gate", "lite_multiscale_attention"
+]
+AttentionDownTypes = Literal[
+    "self_attention", "conv_attention", "lite_multiscale_attention"
+]
 
 ATTENTION_MAP = {
     "self_attention": SelfAttention,
@@ -20,5 +24,3 @@ ATTENTION_MAP = {
     "attention_gate": AttentionGate,
     "lite_multiscale_attention": LiteMultiscaleAttention,
 }
-
-

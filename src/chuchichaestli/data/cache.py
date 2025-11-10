@@ -267,7 +267,9 @@ class SharedArray:
                 f"Unsupported dtype: {dtype}. Must be one of {list(C_DTYPES.keys())}"
             )
 
-        self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
+        self._lock: mp.synchronize.Lock | DummyLock = (
+            Lock() if use_lock else DummyLock()
+        )
 
         slot_size = int(np.prod(shape[1:]))
         elem_size = torch.empty((), dtype=dtype).element_size()
@@ -296,7 +298,9 @@ class SharedArray:
                 )
 
         mp_arr = mp.Array(C_DTYPES[dtype], n_slots * slot_size, lock=use_lock)  # type: ignore
-        shm_arr = np.ctypeslib.as_array(mp_arr.get_obj() if hasattr(mp_arr, "get_obj") else mp_arr)
+        shm_arr = np.ctypeslib.as_array(
+            mp_arr.get_obj() if hasattr(mp_arr, "get_obj") else mp_arr
+        )
         shm_arr = shm_arr.reshape((n_slots, *shape[1:]))
         self._slots = torch.from_numpy(shm_arr)
         self._slots *= 0
@@ -453,7 +457,9 @@ class SharedDict:
         if self.cache_size <= 5:
             raise ValueError("Chosen cache size is too small!")
         self.serializer = serializer
-        self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
+        self._lock: mp.synchronize.Lock | DummyLock = (
+            Lock() if use_lock else DummyLock()
+        )
         self._hdr_size = 8  # big-endian length header
         self.shm = self.get_allocation()
         self.clear()
@@ -475,7 +481,9 @@ class SharedDict:
         if size is None or size == 0:
             size = self.cache_size
         req_size = int(size) if not isinstance(size, nbytes) else int(size)
-        req_size = max(req_size, getattr(self, "_hdr_size", 8))  # ensure room for header
+        req_size = max(
+            req_size, getattr(self, "_hdr_size", 8)
+        )  # ensure room for header
         try:
             shm = SharedMemory(name=name)
         except FileNotFoundError:
@@ -676,7 +684,9 @@ class SharedDictList:
 
         self.descr = descr
         self.serializer = serializer
-        self._lock: mp.synchronize.Lock | DummyLock = Lock() if use_lock else DummyLock()
+        self._lock: mp.synchronize.Lock | DummyLock = (
+            Lock() if use_lock else DummyLock()
+        )
         self.allow_overwrite = True
         self.verbose = verbose
         self.cache_size = (
@@ -812,7 +822,9 @@ class SharedDictList:
         try:
             state = SlotState(int(self.states[index].item()))
         except Exception as e:
-            raise RuntimeError(f"Corrupt slot state value at index {index}: {self.states[index]}. {e}")
+            raise RuntimeError(
+                f"Corrupt slot state value at index {index}: {self.states[index]}. {e}"
+            )
         return state, index
 
     def __getitem__(
@@ -827,9 +839,7 @@ class SharedDictList:
             try:
                 return self.serializer.loads(data)
             except Exception as e:
-                raise RuntimeError(
-                    f"Failed to deserialize item at index {idx}: {e}"
-                )
+                raise RuntimeError(f"Failed to deserialize item at index {idx}: {e}")
         return data
 
     def __setitem__(

@@ -89,7 +89,9 @@ class Encoder(nn.Module):
         if isinstance(num_layers_per_block, int):
             num_layers_per_block = (num_layers_per_block,) * n_mults
         elif len(num_layers_per_block) < len(down_block_types):
-            num_layers_per_block += (num_layers_per_block[-1],) * (len(down_block_types) - len(num_layers_per_block))
+            num_layers_per_block += (num_layers_per_block[-1],) * (
+                len(down_block_types) - len(num_layers_per_block)
+            )
 
         self.conv_in = DIM_TO_CONV_MAP[dimensions](
             in_channels,

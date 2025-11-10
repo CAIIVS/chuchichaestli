@@ -148,7 +148,7 @@ class Pool(nn.Module):
         if adaptive:
             pool_type = "Adaptive" + pool_type
             out = kwargs.get("output_size", None)
-            kwargs = {"output_size": out if out is not None else (1,)*dimensions}
+            kwargs = {"output_size": out if out is not None else (1,) * dimensions}
         pool_cls = DIM_TO_POOL_MAP[dimensions][pool_type]
         self.pool = pool_cls(**kwargs)
 

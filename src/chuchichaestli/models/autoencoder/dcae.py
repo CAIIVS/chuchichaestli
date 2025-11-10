@@ -40,20 +40,17 @@ class DCAE(Autoencoder):
         down_block_types: Sequence[AutoencoderDownBlockTypes] = (
             "DCAutoencoderDownBlock",
         )
-        * 3 + (
-            "EfficientViTBlock",
-        ) * 3,
+        * 3
+        + ("EfficientViTBlock",) * 3,
         down_layers_per_block: int | Sequence[int] = (2, 2, 2, 3, 3, 3),
         downsample_type: DownsampleTypes = "DownsampleUnshuffle",
         encoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (),
         encoder_out_block_type: EncoderOutBlockTypes = "DCEncoderOutBlock",
         decoder_in_block_type: DecoderInBlockTypes = "DCDecoderInBlock",
         decoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (),
-        up_block_types: Sequence[AutoencoderUpBlockTypes] = (
-            "DCAutoencoderUpBlock",
-        ) * 3 + (
-            "EfficientViTBlock",
-        ) * 3,
+        up_block_types: Sequence[AutoencoderUpBlockTypes] = ("DCAutoencoderUpBlock",)
+        * 3
+        + ("EfficientViTBlock",) * 3,
         up_layers_per_block: int | Sequence[int] = 3,
         upsample_type: UpsampleTypes = "UpsampleShuffle",
         block_out_channel_mults: Sequence[int] = (2, 2, 1, 2, 1),

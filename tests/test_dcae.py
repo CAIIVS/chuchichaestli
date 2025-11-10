@@ -28,7 +28,6 @@ def test_dcae_init(dimensions, in_channels, n_channels, latent_dim, out_channels
         attn_groups=8,
         res_groups=8,
         decoder_groups=8,
-        
     )
     assert isinstance(model.encoder, nn.Module)
     assert isinstance(model.decoder, nn.Module)

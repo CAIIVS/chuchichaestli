@@ -59,9 +59,7 @@ class UpsampleInterpolate(nn.Module):
         kwargs.setdefault("stride", 1)
         kwargs.setdefault("padding", "same")
         if with_conv:
-            self.conv = conv_cls(
-                num_channels, num_channels, **kwargs
-            )
+            self.conv = conv_cls(num_channels, num_channels, **kwargs)
 
     @property
     def mode(self) -> Literal["linear", "bilinear", "trilinear", "nearest"]:
@@ -105,15 +103,15 @@ class UpsampleShuffle(nn.Module):
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 1)
         kwargs.setdefault("padding", "same")
-        self.conv = conv_cls(
-            in_channels, out_channels * r2, **kwargs
-        )
+        self.conv = conv_cls(in_channels, out_channels * r2, **kwargs)
         self.pixel_shuffle = nn.PixelShuffle(self.factor)
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the upsampling layer."""
         h = self.pixel_shuffle(self.conv(x))
-        shortcut = x.repeat_interleave(self.repeats, dim=1, output_size=x.shape[1] * self.repeats)
+        shortcut = x.repeat_interleave(
+            self.repeats, dim=1, output_size=x.shape[1] * self.repeats
+        )
         shortcut = self.pixel_shuffle(shortcut)
         return h + shortcut
 

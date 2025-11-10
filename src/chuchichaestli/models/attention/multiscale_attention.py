@@ -32,19 +32,21 @@ def _conv_layer(
     # Due to circular import issues this cannot be imported from `chuchichaestli.models.blocks`
     # TODO: migrate blocks and use base class to fix this
     conv_cls = DIM_TO_CONV_MAP[dimensions]
-    block = nn.Sequential(conv_cls(
-        in_channels,
-        out_channels,
-        kernel_size=kernel_size,
-        stride=stride,
-        padding=padding,
-        bias=bias,
-    ))
+    block = nn.Sequential(
+        conv_cls(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=bias,
+        )
+    )
     if act_fn is not None:
         block.append(ACTIVATION_FUNCTIONS[act_fn]())
     if norm_type is not None:
         if norm_type == "group" and (
-                in_channels % num_groups != 0 or in_channels < num_groups
+            in_channels % num_groups != 0 or in_channels < num_groups
         ):
             if in_channels % 2 == 0:
                 num_groups = in_channels // 2
@@ -87,7 +89,9 @@ class LiteMultiscaleAttention(nn.Module):
     ):
         """Initialize lightweight multi-scale attention block."""
         super().__init__()
-        n_heads = int(in_channels // head_dim * heads_mult) if n_heads is None else n_heads
+        n_heads = (
+            int(in_channels // head_dim * heads_mult) if n_heads is None else n_heads
+        )
         self.dim = head_dim
         self.total_dim = n_heads * head_dim
         self.eps = eps
@@ -123,29 +127,32 @@ class LiteMultiscaleAttention(nn.Module):
             kernel_size=1,
             stride=1,
             padding="same",
-            bias=bias[1]
+            bias=bias[1],
         )
         self.attn_act = ACTIVATION_FUNCTIONS["relu"]()
-        self.scale_aggregation = nn.ModuleList([
-            nn.Sequential(
-                conv_cls(
-                    self.total_dim * 3,
-                    self.total_dim * 3,
-                    scale,
-                    padding="same",
-                    groups=self.total_dim * 3,
-                    bias=bias[0],
-                ),
-                conv_cls(
-                    self.total_dim * 3,
-                    self.total_dim * 3,
-                    1,
-                    padding="same",
-                    groups=3 * self.dim,
-                    bias=bias[0],
+        self.scale_aggregation = nn.ModuleList(
+            [
+                nn.Sequential(
+                    conv_cls(
+                        self.total_dim * 3,
+                        self.total_dim * 3,
+                        scale,
+                        padding="same",
+                        groups=self.total_dim * 3,
+                        bias=bias[0],
+                    ),
+                    conv_cls(
+                        self.total_dim * 3,
+                        self.total_dim * 3,
+                        1,
+                        padding="same",
+                        groups=3 * self.dim,
+                        bias=bias[0],
+                    ),
                 )
-            ) for scale in scales
-        ])
+                for scale in scales
+            ]
+        )
 
     def _relu_lin_attn(self, qkv: torch.Tensor) -> torch.Tensor:
         """Lightweight linear attention with activated query and key."""
@@ -154,7 +161,7 @@ class LiteMultiscaleAttention(nn.Module):
         B = qkv.shape[0]
         spatial_dims = qkv.shape[2:]
         spatial_size = spatial_dims.numel()
-        qkv = qkv.reshape(B, -1, 3*self.dim, spatial_size)
+        qkv = qkv.reshape(B, -1, 3 * self.dim, spatial_size)
         q, k, v = qkv.chunk(chunks=3, dim=2)
         q = self.attn_act(q)
         k = self.attn_act(k)
@@ -178,7 +185,7 @@ class LiteMultiscaleAttention(nn.Module):
         B = qkv.shape[0]
         spatial_dims = qkv.shape[2:]
         spatial_size = spatial_dims.numel()
-        qkv = qkv.reshape(B, -1, 3*self.dim, spatial_size)
+        qkv = qkv.reshape(B, -1, 3 * self.dim, spatial_size)
         q, k, v = qkv.chunk(chunks=3, dim=2)
         q = self.attn_act(q)
         k = self.attn_act(k)
@@ -188,7 +195,7 @@ class LiteMultiscaleAttention(nn.Module):
         if dtype in [torch.float16, torch.bfloat16]:
             att_map = att_map.float()
         att_map = att_map / (torch.sum(att_map, dim=2, keepdim=True) + self.eps)
-        
+
         if self.training and self.attn_dropout is not None:
             att_map = self.attn_dropout(att_map)
 

@@ -6,7 +6,14 @@
 import pytest
 import torch
 from chuchichaestli.models.blocks import ResidualBlock, ResidualBottleneck
-from chuchichaestli.models.resnet import ResNet, ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
+from chuchichaestli.models.resnet import (
+    ResNet,
+    ResNet18,
+    ResNet34,
+    ResNet50,
+    ResNet101,
+    ResNet152,
+)
 
 
 @pytest.mark.parametrize(
@@ -167,7 +174,7 @@ def test_forward_residual_block_with_stride(
     assert res.norm2.norm.__class__.__name__.lower() == "groupnorm"
     assert res.dropout.p == res_dropout
     # Check the output tensor shape
-    assert output_tensor.shape == (1, out_channels) + (whd//res_stride,) * dimensions
+    assert output_tensor.shape == (1, out_channels) + (whd // res_stride,) * dimensions
 
 
 @pytest.mark.parametrize(
@@ -268,11 +275,31 @@ def test_ResNet():
 @pytest.mark.parametrize(
     "cls,dimensions,out_channels",
     [
-        (ResNet18, 2, 1000,),
-        (ResNet34, 2, 1000,),
-        (ResNet50, 2, 1000,),
-        (ResNet101, 2, 1000,),
-        (ResNet152, 2, 1000,),
+        (
+            ResNet18,
+            2,
+            1000,
+        ),
+        (
+            ResNet34,
+            2,
+            1000,
+        ),
+        (
+            ResNet50,
+            2,
+            1000,
+        ),
+        (
+            ResNet101,
+            2,
+            1000,
+        ),
+        (
+            ResNet152,
+            2,
+            1000,
+        ),
     ],
 )
 def test_ResNetNN(cls, dimensions, out_channels):

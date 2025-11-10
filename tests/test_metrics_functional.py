@@ -14,7 +14,7 @@ def patch_tensor_to(monkeypatch):
     monkeypatch.setattr(torch.Tensor, "to", lambda self, device=None, **k: self)
     yield
 
-    
+
 def test_mse_perfect_match():
     """Test that MSE is zero for identical tensors."""
     data = torch.ones(2, 1, 8, 8)
@@ -45,7 +45,7 @@ def test_mse_with_nan():
     pred = torch.tensor([[[[1.0, 2.0], [2.0, 1.0]]]])
     val = functional.mse(data, pred)
     # Only 3 valid positions: (1-1)^2, (1-2)^2, (1-1)^2 -> 0 + 1 + 0 = 1/3
-    assert torch.isclose(val, torch.tensor(1/3))
+    assert torch.isclose(val, torch.tensor(1 / 3))
 
 
 def test_mse_3d():
@@ -63,7 +63,7 @@ def test_psnr_perfect():
     val = functional.psnr(data, pred, data_range=1.0)
     assert val == float("inf") or torch.isinf(val)
 
-    
+
 def test_psnr_complete_mismatch():
     """Test that PSNR is zero for completely different tensors."""
     data = torch.ones(1, 1, 8, 8)
@@ -71,7 +71,7 @@ def test_psnr_complete_mismatch():
     val = functional.psnr(data, pred, data_range=None)
     assert torch.isclose(val, torch.tensor(0.0))
 
-    
+
 def test_psnr_almost_identical():
     """Test that PSNR is high for almost identical tensors."""
     data = torch.ones(1, 1, 8, 8)
@@ -79,7 +79,7 @@ def test_psnr_almost_identical():
     val = functional.psnr(data, pred, data_range=1.0)
     assert val > 80
 
-    
+
 def test_psnr_3d():
     """Test PSNR for 3D tensors."""
     data = torch.ones(2, 1, 5, 5, 5)
@@ -119,7 +119,7 @@ def test_ssim_perfect_2d():
     val = functional.ssim(data, pred, data_range=1.0)
     assert abs(val - 1.0) < 1e-5
 
-    
+
 def test_ssim_mismatch_2d():
     """Test that SSIM is low for completely different 2D tensors."""
     data = torch.ones(1, 1, 16, 16)
@@ -136,7 +136,7 @@ def test_ssim_no_reduction():
     assert isinstance(val, torch.Tensor)
     assert len(val) == 4
 
-    
+
 def test_ssim_perfect_3d():
     """Test that SSIM is 1.0 for identical 3D tensors."""
     data = torch.ones(1, 1, 8, 8, 8)
@@ -144,7 +144,7 @@ def test_ssim_perfect_3d():
     val = functional.ssim(data, pred, data_range=1.0, kernel_size=3)
     assert abs(float(val) - 1.0) < 1e-5
 
-    
+
 def test_ssim_mismatch_3d():
     """Test that SSIM is low for completely different 3D tensors."""
     data = torch.ones(1, 1, 8, 8, 8)
@@ -155,10 +155,13 @@ def test_ssim_mismatch_3d():
 
 def test_lpips_runs(monkeypatch):
     """Test that LPIPS runs without requiring a real model."""
-    
+
     class DummyLPIPS:
-        def __init__(self, *a, **k): pass
-        def __call__(self, data, pred): return torch.tensor(0.5)
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, data, pred):
+            return torch.tensor(0.5)
 
     monkeypatch.setattr(functional, "LPIPSLoss", DummyLPIPS)
     data = torch.ones(1, 3, 16, 16)
@@ -171,8 +174,11 @@ def test_lpips_3d(monkeypatch):
     """Test that LPIPS works for 3D tensors."""
 
     class DummyLPIPS:
-        def __init__(self, *a, **k): pass
-        def __call__(self, data, pred): return torch.tensor(0.42)
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, data, pred):
+            return torch.tensor(0.42)
 
     monkeypatch.setattr(functional, "LPIPSLoss", DummyLPIPS)
     data = torch.ones(1, 3, 8, 8, 8)

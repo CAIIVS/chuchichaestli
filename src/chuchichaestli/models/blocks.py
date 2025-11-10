@@ -10,7 +10,7 @@ from chuchichaestli.models.attention import (
     ATTENTION_MAP,
     AttentionTypes,
     AttentionDownTypes,
-    LiteMultiscaleAttention
+    LiteMultiscaleAttention,
 )
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import Norm, NormTypes
@@ -99,7 +99,9 @@ __all__ = [
     "GaussianNoiseBlock",
 ]
 
-ResidualBlockTypes = Literal["ResidualBlock", "ResidualBottleneck", "LiteResidualBlock", "GLUMBResBlock"]
+ResidualBlockTypes = Literal[
+    "ResidualBlock", "ResidualBottleneck", "LiteResidualBlock", "GLUMBResBlock"
+]
 ConvBlockTypes = Literal[
     "GLUMBConvBlock",
     "GLUMBResBlock",
@@ -437,7 +439,7 @@ class MBConvBlock(nn.Module):
             stride=1,
             padding="same",
             bias=bias[2],
-            **kwargs
+            **kwargs,
         )
         self.dropout: nn.Module | None = None
         if dropout_p is not None and dropout_p > 0:
@@ -523,13 +525,17 @@ class MBResBlock(MBConvBlock):
         )
         if isinstance(bias, bool):
             bias = (bias, bias, bias)
-        self.shortcut = DIM_TO_CONV_MAP[dimensions](
-            in_channels,
-            out_channels,
-            kernel_size=1,
-            stride=stride,
-            bias=bias[1],
-        ) if in_channels != out_channels or stride != 1 else nn.Identity()
+        self.shortcut = (
+            DIM_TO_CONV_MAP[dimensions](
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=stride,
+                bias=bias[1],
+            )
+            if in_channels != out_channels or stride != 1
+            else nn.Identity()
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the block."""
@@ -643,7 +649,7 @@ class GLUMBConvBlock(nn.Module):
             stride=1,
             padding="same",
             bias=bias[2],
-            **kwargs
+            **kwargs,
         )
         self.dropout: nn.Module | None = None
         if dropout_p is not None and dropout_p > 0:
@@ -735,13 +741,17 @@ class GLUMBResBlock(GLUMBConvBlock):
         )
         if isinstance(bias, bool):
             bias = (bias, bias, bias)
-        self.shortcut = DIM_TO_CONV_MAP[dimensions](
-            in_channels,
-            out_channels,
-            kernel_size=1,
-            stride=stride,
-            bias=bias[1],
-        ) if in_channels != out_channels or stride != 1 else nn.Identity()
+        self.shortcut = (
+            DIM_TO_CONV_MAP[dimensions](
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=stride,
+                bias=bias[1],
+            )
+            if in_channels != out_channels or stride != 1
+            else nn.Identity()
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the block."""
@@ -809,13 +819,17 @@ class LMAResBlock(LiteMultiscaleAttention):
         )
         if isinstance(bias, bool):
             bias = (bias, bias)
-        self.shortcut = DIM_TO_CONV_MAP[dimensions](
-            in_channels,
-            out_channels,
-            kernel_size=1,
-            stride=1,
-            bias=bias[1],
-        ) if in_channels != out_channels else nn.Identity()
+        self.shortcut = (
+            DIM_TO_CONV_MAP[dimensions](
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=1,
+                bias=bias[1],
+            )
+            if in_channels != out_channels
+            else nn.Identity()
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the block."""
@@ -827,7 +841,7 @@ class EfficientViTBlock(nn.Module):
 
     Includes:
         - context residual block (lightweight multi-scale linear attention)
-        - local residual block (gated linear unit mobile inverted bottleneck) 
+        - local residual block (gated linear unit mobile inverted bottleneck)
     """
 
     def __init__(
@@ -892,7 +906,7 @@ class EfficientViTBlock(nn.Module):
             "dropout_p": dropout_p,
             "eps": eps,
             **context_args,
-            **(attn_args["context_args"] if "context_args" in attn_args else {})
+            **(attn_args["context_args"] if "context_args" in attn_args else {}),
         }
 
         local_args = {
@@ -902,20 +916,14 @@ class EfficientViTBlock(nn.Module):
             "bias": bias,
             "dropout_p": dropout_p,
             **local_args,
-            **(attn_args["local_args"] if "local_args" in attn_args else {})
+            **(attn_args["local_args"] if "local_args" in attn_args else {}),
         }
-        
+
         self.context_block = ATTN_BLOCK_MAP[context_block_type](
-            dimensions,
-            in_channels,
-            in_channels,
-            **context_args
+            dimensions, in_channels, in_channels, **context_args
         )
         self.local_block = CONV_BLOCK_MAP[local_block_type](
-            dimensions,
-            in_channels,
-            out_channels,
-            **local_args
+            dimensions, in_channels, out_channels, **local_args
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -923,7 +931,7 @@ class EfficientViTBlock(nn.Module):
         h = self.context_block(x)
         h = self.local_block(h)
         return h
-        
+
 
 class ResidualBlock(nn.Module):
     """Residual block (with 2 convolutional layers) including a residual skip connection.

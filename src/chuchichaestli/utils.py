@@ -38,6 +38,7 @@ def alias_kwargs(key: str | dict[str, str], alias: str | None = None) -> Callabl
         key = (key,)
     if isinstance(alias, str):
         alias = (alias,)
+
     def decorator(func: Callable):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -49,7 +50,9 @@ def alias_kwargs(key: str | dict[str, str], alias: str | None = None) -> Callabl
                     del kwargs[a]
             result = func(*args, **kwargs)
             return result
+
         return wrapper
+
     return decorator
 
 

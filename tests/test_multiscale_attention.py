@@ -8,6 +8,7 @@ import torch
 from torch import nn
 from chuchichaestli.models.attention.multiscale_attention import LiteMultiscaleAttention
 
+
 @pytest.mark.parametrize(
     "dimensions,in_channels,out_channels",
     [
@@ -20,7 +21,7 @@ from chuchichaestli.models.attention.multiscale_attention import LiteMultiscaleA
         (1, 32, 16),
         (2, 32, 16),
         (3, 32, 16),
-     ]
+    ],
 )
 def test_lma_init(dimensions, in_channels, out_channels):
     """Test LiteMultiscaleAttention block init."""
@@ -29,7 +30,7 @@ def test_lma_init(dimensions, in_channels, out_channels):
         in_channels,
         out_channels,
         act_fn=("silu", "silu"),
-        norm_type=("batch", "batch")
+        norm_type=("batch", "batch"),
     )
     assert isinstance(block.scale_aggregation, nn.ModuleList)
     assert isinstance(block.proj_out, nn.Module)
@@ -47,7 +48,7 @@ def test_lma_init(dimensions, in_channels, out_channels):
         (1, 32, 16),
         (2, 32, 16),
         (3, 32, 16),
-     ]
+    ],
 )
 def test_lma_forward(dimensions, in_channels, out_channels):
     """Test LiteMultiscaleAttention block forward pass."""
@@ -56,7 +57,7 @@ def test_lma_forward(dimensions, in_channels, out_channels):
         in_channels,
         out_channels,
         act_fn=("silu", "silu"),
-        norm_type=("batch", "batch")
+        norm_type=("batch", "batch"),
     )
     wh = 16
     shape = (1, in_channels) + (wh,) * dimensions
@@ -79,7 +80,7 @@ def test_lma_forward(dimensions, in_channels, out_channels):
         (1, 32, 16),
         (2, 32, 16),
         (3, 32, 16),
-     ]
+    ],
 )
 def test_lma_backward(dimensions, in_channels, out_channels):
     """Test LiteMultiscaleAttention block backward pass."""
@@ -88,7 +89,7 @@ def test_lma_backward(dimensions, in_channels, out_channels):
         in_channels,
         out_channels,
         act_fn=("silu", "silu"),
-        norm_type=("batch", "batch")
+        norm_type=("batch", "batch"),
     )
     wh = 16
     shape = (1, in_channels) + (wh,) * dimensions
@@ -108,10 +109,11 @@ def test_lma_inspect():
         in_channels,
         out_channels,
         act_fn=("silu", "silu"),
-        norm_type=("batch", "batch")
+        norm_type=("batch", "batch"),
     )
     try:
         from torchinfo import summary
+
         wh = 16
         summary(
             block,

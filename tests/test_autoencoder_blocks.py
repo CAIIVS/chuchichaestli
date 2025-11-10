@@ -220,6 +220,7 @@ def test_glumbconv_block_inspect():
     )
     try:
         from torchinfo import summary
+
         wh = 16
         summary(
             block,
@@ -236,14 +237,11 @@ def test_efficientvit_block_inspect():
     """Test EfficientViTBlock."""
     dimensions, in_channels, out_channels, expansion = 2, 64, 64, 4
     block = EfficientViTBlock(
-        dimensions,
-        in_channels,
-        out_channels,
-        
-        expansion=expansion
+        dimensions, in_channels, out_channels, expansion=expansion
     )
     try:
         from torchinfo import summary
+
         wh = 16
         summary(
             block,

@@ -5,7 +5,12 @@
 
 import pytest
 import torch
-from chuchichaestli.models.downsampling import Downsample, MaxPool, AdaptiveMaxPool, DownsampleInterpolate
+from chuchichaestli.models.downsampling import (
+    Downsample,
+    MaxPool,
+    AdaptiveMaxPool,
+    DownsampleInterpolate,
+)
 
 
 @pytest.mark.parametrize("dimensions", [1, 2, 3])
