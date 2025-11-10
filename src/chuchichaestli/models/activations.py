@@ -14,6 +14,7 @@ __all__ = ["ACTIVATION_FUNCTIONS"]
 
 ActivationTypes = Literal[
     "swish",
+    "hswish",
     "silu",
     "mish",
     "gelu",
@@ -33,6 +34,7 @@ ActivationTypes = Literal[
 
 ACTIVATION_FUNCTIONS: dict[str, Callable] = {
     "swish": nn.SiLU,
+    "hswish": nn.Hardswish,
     "silu": nn.SiLU,
     "mish": nn.Mish,
     "gelu": nn.GELU,
