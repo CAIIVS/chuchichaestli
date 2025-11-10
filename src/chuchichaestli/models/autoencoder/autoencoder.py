@@ -5,7 +5,6 @@
 
 import torch
 from torch import nn
-from torch.distributions import MultivariateNormal, kl
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.autoencoder.decoder import Decoder
 from chuchichaestli.models.autoencoder.encoder import Encoder
@@ -21,7 +20,6 @@ from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.upsampling import UpsampleTypes
 from chuchichaestli.utils import prod
-from typing import Literal
 from collections.abc import Sequence
 
 
@@ -88,6 +86,9 @@ class Autoencoder(nn.Module):
         attn_norm_type: NormTypes = "group",
         attn_groups: int = 32,
         attn_kernel_size: int = 1,
+        attn_scales: Sequence[int] = (5,),
+        context_args: dict = {},
+        local_args: dict = {},
         encoder_act_fn: ActivationTypes = "silu",
         encoder_norm_type: NormTypes = "group",
         encoder_groups: int = 8,
@@ -141,6 +142,9 @@ class Autoencoder(nn.Module):
             attn_groups: Number of groups for the convolutional attention block normalization
                 (if `attn_norm_type` is `"group"`).
             attn_kernel_size: Kernel size for the convolutional attention block.
+            attn_scales: Scales for the multi-scale attention block.
+            context_args: Keyword arguments for the context block in a transformer module.
+            local_args: Keyword arguments for the local block in a transformer module.
             encoder_act_fn: Activation function for the output layers in the encoder
                 (see `chuchichaestli.models.activations` for details).
             encoder_norm_type: Normalization type for the encoder's output block
@@ -183,6 +187,10 @@ class Autoencoder(nn.Module):
             "dropout_p": attn_dropout_p,
             "norm_type": attn_norm_type,
             "groups": attn_groups,
+            "num_groups": attn_groups,
+            "scales": attn_scales,
+            "context_args": context_args,
+            "local_args": local_args,
         }
 
         self.encoder = Encoder(

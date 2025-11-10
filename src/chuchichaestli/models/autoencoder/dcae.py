@@ -3,9 +3,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A flexible deep-compression autoencoder implementation."""
 
-import torch
-from torch import nn
-from torch.distributions import MultivariateNormal, kl
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
 from chuchichaestli.models.blocks import (
@@ -43,14 +40,20 @@ class DCAE(Autoencoder):
         down_block_types: Sequence[AutoencoderDownBlockTypes] = (
             "DCAutoencoderDownBlock",
         )
-        * 6,
+        * 3 + (
+            "EfficientViTBlock",
+        ) * 3,
         down_layers_per_block: int | Sequence[int] = (2, 2, 2, 3, 3, 3),
         downsample_type: DownsampleTypes = "DownsampleUnshuffle",
         encoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (),
         encoder_out_block_type: EncoderOutBlockTypes = "DCEncoderOutBlock",
         decoder_in_block_type: DecoderInBlockTypes = "DCDecoderInBlock",
         decoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (),
-        up_block_types: AutoencoderUpBlockTypes = ("DCAutoencoderUpBlock",) * 6,
+        up_block_types: Sequence[AutoencoderUpBlockTypes] = (
+            "DCAutoencoderUpBlock",
+        ) * 3 + (
+            "EfficientViTBlock",
+        ) * 3,
         up_layers_per_block: int | Sequence[int] = 3,
         upsample_type: UpsampleTypes = "UpsampleShuffle",
         block_out_channel_mults: Sequence[int] = (2, 2, 1, 2, 1),
@@ -62,9 +65,12 @@ class DCAE(Autoencoder):
         attn_head_dim: int = 32,
         attn_n_heads: int = 1,
         attn_dropout_p: float = 0.0,
-        attn_norm_type: NormTypes = "group",
+        attn_norm_type: NormTypes | Sequence[NormTypes] | None = "rms",
         attn_groups: int = 32,
         attn_kernel_size: int = 1,
+        attn_scales: Sequence[int] = (5,),
+        context_args: dict = dict(norm_type=(None, "rms")),
+        local_args: dict = dict(norm_type=((None, None, "rms"))),
         encoder_act_fn: ActivationTypes = "silu",
         encoder_norm_type: NormTypes = "rms",
         encoder_groups: int = 8,
@@ -114,6 +120,9 @@ class DCAE(Autoencoder):
             attn_groups: Number of groups for the convolutional attention block normalization
                 (if `attn_norm_type` is `"group"`).
             attn_kernel_size: Kernel size for the convolutional attention block.
+            attn_scales: Scales for the multi-scale attention block.
+            context_args: Keyword arguments for the context block in a transformer module.
+            local_args: Keyword arguments for the local block in a transformer module.
             encoder_act_fn: Activation function for the output layers in the encoder
                 (see `chuchichaestli.models.activations` for details).
             encoder_norm_type: Normalization type for the encoder's output block
@@ -160,6 +169,9 @@ class DCAE(Autoencoder):
             attn_norm_type=attn_norm_type,
             attn_groups=attn_groups,
             attn_kernel_size=attn_kernel_size,
+            attn_scales=attn_scales,
+            context_args=context_args,
+            local_args=local_args,
             encoder_act_fn=encoder_act_fn,
             encoder_norm_type=encoder_norm_type,
             encoder_groups=encoder_groups,
