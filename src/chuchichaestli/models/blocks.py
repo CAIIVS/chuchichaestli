@@ -10,12 +10,13 @@ from chuchichaestli.models.attention import (
     ATTENTION_MAP,
     AttentionTypes,
     AttentionDownTypes,
+    LiteMultiscaleAttention
 )
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import Norm, NormTypes
 from chuchichaestli.utils import partialclass, alias_kwargs
 from math import gcd
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Literal
 
 
@@ -57,11 +58,16 @@ __all__ = [
     "DecoderInBlock",
     "VAEDecoderInBlock",
     "DCDecoderInBlock",
+    # gated blocks
+    "GLUMBConvBlock",
+    "GLUMBResBlock",
     # residual blocks
     "ResidualBlock",
     "ResidualBottleneck",
     "LiteResidualBlock",
+    "MBResBlock",
     # convolutional blocks
+    "MBConvBlock",
     "ConvDownBlock",
     "ConvDownsampleBlock",
     "AttnConvDownBlock",
@@ -86,11 +92,47 @@ __all__ = [
     "NormActConvDownsampleBlock",
     "NormActAttnConvDownBlock",
     "NormActAttnConvDownsampleBlock",
+    # transformer blocks
+    "LMAResBlock",
+    "EfficientViTBlock",
     # other blocks
     "GaussianNoiseBlock",
 ]
 
-ResidualBlockTypes = Literal["ResidualBlock", "ResidualBottleneck", "LiteResidualBlock"]
+ResidualBlockTypes = Literal["ResidualBlock", "ResidualBottleneck", "LiteResidualBlock", "GLUMBResBlock"]
+ConvBlockTypes = Literal[
+    "GLUMBConvBlock",
+    "GLUMBResBlock",
+    "ResidualBlock",
+    "ResidualBottleneck",
+    "LiteResidualBlock",
+    "ConvDownBlock",
+    "ConvDownsampleBlock",
+    "AttnConvDownBlock",
+    "AttnConvDownsampleBlock",
+    "ConvBlock",
+    "AttnConvBlock",
+    "NormConvBlock",
+    "NormAttnConvBlock",
+    "NormConvDownBlock",
+    "NormConvDownsampleBlock",
+    "NormAttnConvDownBlock",
+    "NormAttnConvDownsampleBlock",
+    "ActConvBlock",
+    "ActAttnConvBlock",
+    "ActConvDownBlock",
+    "ActConvDownsampleBlock",
+    "ActAttnConvDownBlock",
+    "ActAttnConvDownsampleBlock",
+    "NormActConvBlock",
+    "NormActAttnConvBlock",
+    "NormActConvDownBlock",
+    "NormActConvDownsampleBlock",
+    "NormActAttnConvDownBlock",
+    "NormActAttnConvDownsampleBlock",
+]
+AttnBlockTypes = Literal["LMAResBlock"]
+TransfomerBlockTypes = Literal["EfficientViTBlock"]
 UNetDownBlockTypes = Literal["DownBlock", "AttnDownBlock", "ConvAttnDownBlock"]
 UNetMidBlockTypes = Literal["MidBlock", "AttnMidBlock", "ConvAttnMidBlock"]
 UNetUpBlockTypes = Literal[
@@ -104,6 +146,7 @@ AutoencoderDownBlockTypes = Literal[
     "DCAutoencoderDownBlock",
     "AttnDCAutoencoderDownBlock",
     "ConvAttnDCAutoencoderDownBlock",
+    "EfficientViTBlock",
 ]
 AutoencoderMidBlockTypes = Literal[
     "AutoencoderMidBlock", "AttnAutoencoderMidBlock", "ConvAttnAutoencoderMidBlock"
@@ -115,6 +158,7 @@ AutoencoderUpBlockTypes = Literal[
     "DCAutoencoderUpBlock",
     "AttnDCAutoencoderUpBlock",
     "ConvAttnDCAutoencoderUpBlock",
+    "EfficientViTBlock",
 ]
 EncoderOutBlockTypes = Literal[
     "EncoderOutBlock", "VAEEncoderOutBlock", "DCEncoderOutBlock"
@@ -196,7 +240,7 @@ class BaseConvBlock(nn.Module):
         """Initialize a convolutional block with various components.
 
         Args:
-            dimensions: Number of dimensions.
+            dimensions: Number of spatial dimensions.
             in_channels: Number of input channels.
             out_channels: Number of output channels.
             act: Use an activation function in the block.
@@ -290,8 +334,599 @@ class BaseConvBlock(nn.Module):
         return h
 
 
+class MBConvBlock(nn.Module):
+    """Mobile Inverted Bottleneck convolutional block.
+
+    Includes:
+        - inverted convolutional block
+            - convolution (default: 1x1, stride 1)
+            - normalization (default: `'batch'`)
+            - activation (default: `'relu6'`)
+        - depth-wise convolutional block
+            - convolution (default: 3x3, stride 1)
+            - normalization (default: `'batch'`)
+            - activation (default: `relu6`)
+        - dropout (optional; default: `0`)
+        - point-wise convolutional block
+            - convolution (default: 1x1, stride 1)
+            - normalization (default: `'batch'`)
+            - activation (optional)
+    """
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        expansion: float = 4,
+        act_fn: ActivationTypes | Sequence[ActivationTypes | None] | None = (
+            "relu6",
+            "relu6",
+            None,
+        ),
+        norm_type: NormTypes | Sequence[NormTypes | None] | None = "batch",
+        dropout_p: float | Sequence[float] | None = None,
+        kernel_size: int = 3,
+        stride: int = 1,
+        padding: int = 1,
+        bias: bool | Sequence[bool] = False,
+        **kwargs,
+    ):
+        """Initialize a convolutional block with various components.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            expansion: Channel expansion factor in the bottleneck layer.
+            act_fn: Activation function(s).
+            norm_type: Normalization type(s) for the conv blocks.
+            dropout_p: Dropout probability of the block.
+            kernel_size: Kernel size for the conv block.
+            stride: Stride for the conv block.
+            padding: Padding size for the conv block.
+            bias: Whether to use bias(es) for the convolutional layers.
+            kwargs: Additional keyword arguments for the convolutional layers.
+        """
+        super().__init__()
+        n_channels = round(expansion * in_channels)
+        if isinstance(norm_type, str) or norm_type is None:
+            norm_type = (norm_type, norm_type, norm_type)
+        if isinstance(act_fn, str) or act_fn is None:
+            act_fn = (act_fn, act_fn, act_fn)
+        if isinstance(bias, bool):
+            bias = (bias, bias, bias)
+        self.conv_inverted = BaseConvBlock(
+            dimensions,
+            in_channels,
+            n_channels * 2,
+            act_fn=act_fn[0],
+            act_last=True,
+            norm_type=norm_type[0],
+            norm_first=False,
+            kernel_size=1,
+            stride=1,
+            padding="same",
+            bias=bias[0],
+            **kwargs,
+        )
+        self.conv_depth = BaseConvBlock(
+            dimensions,
+            n_channels * 2,
+            n_channels * 2,
+            act_fn=act_fn[1],
+            act_last=True,
+            norm_type=norm_type[1],
+            norm_first=False,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=n_channels * 2,
+            bias=bias[1],
+            **kwargs,
+        )
+        self.conv_point = BaseConvBlock(
+            dimensions,
+            n_channels,
+            out_channels,
+            act_fn=act_fn[2],
+            act_last=True,
+            norm_type=norm_type[2],
+            norm_first=False,
+            kernel_size=1,
+            stride=1,
+            padding="same",
+            bias=bias[2],
+            **kwargs
+        )
+        self.dropout: nn.Module | None = None
+        if dropout_p is not None and dropout_p > 0:
+            self.dropout = nn.Dropout(dropout_p)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the block."""
+        h = self.conv_inverted(x)
+        h = self.conv_depth(h)
+        h = self.dropout(h) if self.dropout is not None else h
+        h = self.conv_point(h)
+        return h
+
+
+class MBResBlock(MBConvBlock):
+    """Mobile Inverted Bottleneck block with a residual skip connection.
+
+    Includes:
+        - inverted convolutional block
+            - convolution (default: 1x1, stride 1)
+            - normalization (default: `'batch'`)
+            - activation (default: `'relu6'`)
+        - depth-wise convolutional block
+            - convolution (default: 3x3, stride 1)
+            - normalization (default: `'batch'`)
+            - activation (default: `relu6`)
+        - dropout (optional; default: `0`)
+        - point-wise convolutional block
+            - convolution (default: 1x1, stride 1)
+            - normalization (default: `'batch'`)
+            - activation (optional)
+        - shortcut
+    """
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        expansion: float = 4,
+        act_fn: ActivationTypes | Sequence[ActivationTypes | None] | None = (
+            "relu6",
+            "relu6",
+            None,
+        ),
+        norm_type: NormTypes | Sequence[NormTypes | None] | None = "batch",
+        dropout_p: float | Sequence[float] | None = None,
+        kernel_size: int = 3,
+        stride: int = 1,
+        padding: int = 1,
+        bias: bool | Sequence[bool] = False,
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            expansion: Channel expansion factor in the bottleneck layer.
+            act_fn: Activation function(s).
+            norm_type: Normalization type(s) for the conv blocks.
+            dropout_p: Dropout probability of the block.
+            kernel_size: Kernel size for the conv block.
+            stride: Stride for the conv block.
+            padding: Padding size for the conv block.
+            bias: Whether to use bias(es) for the convolutional layers.
+            kwargs: Additional keyword arguments for the convolutional layers.
+        """
+        super().__init__(
+            dimensions,
+            in_channels,
+            out_channels,
+            expansion=expansion,
+            act_fn=act_fn,
+            norm_type=norm_type,
+            dropout_p=dropout_p,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=bias,
+            **kwargs,
+        )
+        if isinstance(bias, bool):
+            bias = (bias, bias, bias)
+        self.shortcut = DIM_TO_CONV_MAP[dimensions](
+            in_channels,
+            out_channels,
+            kernel_size=1,
+            stride=stride,
+            bias=bias[1],
+        ) if in_channels != out_channels or stride != 1 else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the block."""
+        return super().forward(x) + self.shortcut(x)
+
+
+class GLUMBConvBlock(nn.Module):
+    """Gated Linear Unit Mobile Inverted Bottleneck Convolutional block.
+
+    Includes:
+        - inverted convolutional block
+            - convolution (default: 1x1, stride 1)
+            - normalization (optional)
+            - activation (default: `'silu'`)
+        - depth-wise convolutional block
+            - convolution (default: 3x3, stride 1)
+            - normalization (optional)
+        - gated activation (default: `'silu'`)
+        - dropout (optional; default: `0`)
+        - point-wise convolutional block
+            - convolution (default: 1x1, stride 1)
+            - normalization (default: `'layer'`)
+            - activation (optional)
+    """
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        expansion: float = 4,
+        act_fn: ActivationTypes | Sequence[ActivationTypes | None] | None = (
+            "silu",
+            "silu",
+            None,
+        ),
+        norm_type: NormTypes | Sequence[NormTypes | None] | None = (
+            None,
+            None,
+            "layer",
+        ),
+        dropout_p: float | Sequence[float] | None = None,
+        kernel_size: int = 3,
+        stride: int = 1,
+        padding: int = 1,
+        bias: bool | Sequence[bool] = False,
+        **kwargs,
+    ):
+        """Initialize a convolutional block with various components.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            expansion: Channel expansion factor in the bottleneck layer.
+            act_fn: Activation function(s); second entry is the gate.
+            norm_type: Normalization type(s) for the conv blocks.
+            dropout_p: Dropout probability of the block.
+            kernel_size: Kernel size for the conv block.
+            stride: Stride for the conv block.
+            padding: Padding size for the conv block.
+            bias: Whether to use bias(es) for the convolutional layers.
+            kwargs: Additional keyword arguments for the convolutional layers.
+        """
+        super().__init__()
+        n_channels = round(expansion * in_channels)
+        if isinstance(norm_type, str) or norm_type is None:
+            norm_type = (norm_type, norm_type, norm_type)
+        if isinstance(act_fn, str) or act_fn is None:
+            act_fn = (act_fn, act_fn, act_fn)
+        if isinstance(bias, bool):
+            bias = (bias, bias, bias)
+        self.glu_act = ACTIVATION_FUNCTIONS[act_fn[1]]()
+        self.conv_inverted = BaseConvBlock(
+            dimensions,
+            in_channels,
+            n_channels * 2,
+            act_fn=act_fn[0],
+            act_last=True,
+            norm_type=norm_type[0],
+            norm_first=False,
+            kernel_size=1,
+            stride=1,
+            padding="same",
+            bias=bias[0],
+            **kwargs,
+        )
+        self.conv_depth = BaseConvBlock(
+            dimensions,
+            n_channels * 2,
+            n_channels * 2,
+            act=False,
+            norm_type=norm_type[1],
+            norm_first=False,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=n_channels * 2,
+            bias=bias[1],
+            **kwargs,
+        )
+        self.conv_point = BaseConvBlock(
+            dimensions,
+            n_channels,
+            out_channels,
+            act_fn=act_fn[2],
+            act_last=True,
+            norm_type=norm_type[2],
+            norm_first=False,
+            kernel_size=1,
+            stride=1,
+            padding="same",
+            bias=bias[2],
+            **kwargs
+        )
+        self.dropout: nn.Module | None = None
+        if dropout_p is not None and dropout_p > 0:
+            self.dropout = nn.Dropout(dropout_p)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the block."""
+        h = self.conv_inverted(x)
+        h = self.conv_depth(h)
+        h, gate = torch.chunk(h, 2, dim=1)
+        h = h * self.glu_act(gate)
+        h = self.dropout(h) if self.dropout is not None else h
+        h = self.conv_point(h)
+        return h
+
+
+class GLUMBResBlock(GLUMBConvBlock):
+    """Gated Linear Unit Mobile Inverted Bottleneck block with a residual skip connection.
+
+    Includes:
+        - inverted convolutional block
+            - convolution (default: 1x1, stride 1)
+            - normalization (optional)
+            - activation (default: `'silu'`)
+        - depth-wise convolutional block
+            - convolution (default: 3x3, stride 1)
+            - normalization (optional)
+            - gated activation (default: `'silu'`)
+        - dropout (optional; default: `0`)
+        - point-wise convolutional block
+            - convolution (default: 1x1, stride 1)
+            - normalization (default: `'layer'`)
+            - activation (optional)
+        - shortcut
+    """
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        expansion: float = 4,
+        act_fn: ActivationTypes | Sequence[ActivationTypes | None] | None = (
+            "silu",
+            "silu",
+            None,
+        ),
+        norm_type: NormTypes | Sequence[NormTypes | None] | None = (
+            None,
+            None,
+            "layer",
+        ),
+        dropout_p: float | Sequence[float] | None = None,
+        kernel_size: int = 3,
+        stride: int = 1,
+        padding: int = 1,
+        bias: bool | Sequence[bool] = False,
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            expansion: Channel expansion factor in the bottleneck layer.
+            act_fn: Activation function(s).
+            norm_type: Normalization type(s) for the conv blocks.
+            dropout_p: Dropout probability of the block.
+            kernel_size: Kernel size for the conv block.
+            stride: Stride for the conv block.
+            padding: Padding size for the conv block.
+            bias: Whether to use bias(es) for the convolutional layers.
+            kwargs: Additional keyword arguments for the convolutional layers.
+        """
+        super().__init__(
+            dimensions,
+            in_channels,
+            out_channels,
+            expansion=expansion,
+            act_fn=act_fn,
+            norm_type=norm_type,
+            dropout_p=dropout_p,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=bias,
+            **kwargs,
+        )
+        if isinstance(bias, bool):
+            bias = (bias, bias, bias)
+        self.shortcut = DIM_TO_CONV_MAP[dimensions](
+            in_channels,
+            out_channels,
+            kernel_size=1,
+            stride=stride,
+            bias=bias[1],
+        ) if in_channels != out_channels or stride != 1 else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the block."""
+        return super().forward(x) + self.shortcut(x)
+
+
+class LMAResBlock(LiteMultiscaleAttention):
+    """Lightweight multi-scale attention block with a residual skip connection."""
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        n_heads: int | None = None,
+        heads_mult: float = 1,
+        head_dim: int = 32,
+        scales: Sequence[int] = (5,),
+        attn_act_fn: ActivationTypes | None = "relu",
+        act_fn: ActivationTypes | Sequence[ActivationTypes | None] | None = None,
+        norm_type: NormTypes | Sequence[NormTypes | None] | None = (None, "batch"),
+        num_groups: int | Sequence[int] = 32,
+        kernel_size: int = 1,
+        bias: bool | Sequence[bool] = False,
+        dropout_p: float = 0.0,
+        eps: float = 1e-15,
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            n_heads: Number of attention heads.
+            heads_mult: Head multiplicity of input channels per head dimension (if `n_heads` is `None`).
+            head_dim: Dimensionality of an attention head.
+            scales: Convolutional scales for aggregation layers.
+            attn_act_fn: Activation function for normalizing query and key.
+            act_fn: Activation function(s).
+            norm_type: Normalization type(s) for the convolutional layers.
+            num_groups: Number of groups for normalization (if `'group'` in `norm_type`)
+            kernel_size: Kernel size for the convolutional layers.
+            bias: Whether to use bias(es) for the convolutional layers.
+            dropout_p: Dropout probability of the block.
+            eps: Numerical stability constant.
+            kwargs: Additional keyword arguments for the convolutional layers.
+        """
+        super().__init__(
+            dimensions,
+            in_channels,
+            out_channels,
+            n_heads=n_heads,
+            heads_mult=heads_mult,
+            head_dim=head_dim,
+            scales=scales,
+            attn_act_fn=attn_act_fn,
+            act_fn=act_fn,
+            norm_type=norm_type,
+            num_groups=num_groups,
+            kernel_size=kernel_size,
+            bias=bias,
+            dropout_p=dropout_p,
+            eps=eps,
+        )
+        if isinstance(bias, bool):
+            bias = (bias, bias)
+        self.shortcut = DIM_TO_CONV_MAP[dimensions](
+            in_channels,
+            out_channels,
+            kernel_size=1,
+            stride=1,
+            bias=bias[1],
+        ) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the block."""
+        return super().forward(x) + self.shortcut(x)
+
+
+class EfficientViTBlock(nn.Module):
+    """Efficient Vision Transformer block.
+
+    Includes:
+        - context residual block (lightweight multi-scale linear attention)
+        - local residual block (gated linear unit mobile inverted bottleneck) 
+    """
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        context_block_type: AttnBlockTypes = "LMAResBlock",
+        local_block_type: ConvBlockTypes = "GLUMBResBlock",
+        context_args: dict = {},
+        local_args: dict = {},
+        n_heads: int | None = None,
+        heads_mult: float = 1,
+        head_dim: int = 32,
+        scales: Sequence[int] = (5,),
+        norm_type: NormTypes | None = "batch",
+        num_groups: int = 32,
+        expansion: float = 4,
+        act_fn: ActivationTypes | None = "silu",
+        kernel_size: int = 3,
+        bias: bool | Sequence[bool] = (True, True, False),
+        dropout_p: float = 0.0,
+        eps: float = 1e-15,
+        attn_args: dict = {},
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            context_block_type: Type of attention block to be used as context extractor.
+            local_block_type: Type of convolutional block to be used as local feature extractor.
+            context_args: Keyword arguments for the context block (keyword arguments below are used as fallback).
+            local_args: Keyword arguments for the local block (keyword arguments below are used as fallback).
+            n_heads: Number of attention heads in the context block.
+            heads_mult: Head multiplicity of input channels per head dimension in the context block.
+            head_dim: Dimensionality of an attention head in the context block.
+            scales: Convolutional scales for aggregation layers in the context block.
+            norm_type: Normalization type for both blocks.
+            num_groups: Number of groups for normalization (if `'group'` in `norm_type`)
+            expansion: Channel expansion factor in the bottleneck layer in the local block.
+            act_fn: Activation function(s) for the local block.
+            kernel_size: Kernel size for the convolutional layers in the local block.
+            bias: Whether to use bias(es) for the convolutional layers in the local block.
+            dropout_p: Dropout probability of the block.
+            eps: Numerical stability constant.
+            attn_args: For compatibility alternative way to pass keyword arguments
+                for the context and/or local block.
+            kwargs: Additional keyword arguments (only for compatibility).
+        """
+        super().__init__()
+
+        context_args = {
+            "n_heads": n_heads,
+            "heads_mult": heads_mult,
+            "head_dim": head_dim,
+            "scales": scales,
+            "norm_type": (None, norm_type),
+            "num_groups": num_groups,
+            "dropout_p": dropout_p,
+            "eps": eps,
+            **context_args,
+            **(attn_args["context_args"] if "context_args" in attn_args else {})
+        }
+
+        local_args = {
+            "act_fn": (act_fn, act_fn, None),
+            "norm_type": (None, None, norm_type),
+            "kernel_size": kernel_size,
+            "bias": bias,
+            "dropout_p": dropout_p,
+            **local_args,
+            **(attn_args["local_args"] if "local_args" in attn_args else {})
+        }
+        
+        self.context_block = ATTN_BLOCK_MAP[context_block_type](
+            dimensions,
+            in_channels,
+            in_channels,
+            **context_args
+        )
+        self.local_block = CONV_BLOCK_MAP[local_block_type](
+            dimensions,
+            in_channels,
+            out_channels,
+            **local_args
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the block."""
+        h = self.context_block(x)
+        h = self.local_block(h)
+        return h
+        
+
 class ResidualBlock(nn.Module):
-    """Residual block (with 2 convolutional layers) including a skip connection.
+    """Residual block (with 2 convolutional layers) including a residual skip connection.
 
     Includes (in following order):
         - normalization (default: `'group'`)
@@ -335,7 +970,7 @@ class ResidualBlock(nn.Module):
         """Initialize the residual block.
 
         Args:
-            dimensions: Number of dimensions.
+            dimensions: Number of spatial dimensions.
             in_channels: Number of input channels.
             out_channels: Number of output channels.
             time_embedding: Whether to accept time embedding input.
@@ -468,7 +1103,7 @@ class ResidualBottleneck(nn.Module):
         """Initialize the residual block.
 
         Args:
-            dimensions: Number of dimensions.
+            dimensions: Number of spatial dimensions.
             in_channels: Number of input channels.
             out_channels: Number of output channels.
             time_embedding: Whether to accept time embedding input.
@@ -598,7 +1233,7 @@ class LiteResidualBlock(nn.Module):
         """Initialize the residual block.
 
         Args:
-            dimensions: Number of dimensions.
+            dimensions: Number of spatial dimensions.
             in_channels: Number of input channels.
             out_channels: Number of output channels.
             time_embedding: Whether to accept time embedding input.
@@ -1880,6 +2515,7 @@ NormActAttnConvDownsampleBlock = partialclass(
 )
 
 
+# blocks designed for specifically for models such as UNet, AE, etc.
 BLOCK_MAP: dict[str, Callable] = {
     # U-Net blocks
     "DownBlock": DownBlock,
@@ -1914,10 +2550,15 @@ BLOCK_MAP: dict[str, Callable] = {
     "DecoderInBlock": DecoderInBlock,
     "VAEDecoderInBlock": VAEDecoderInBlock,
     "DCDecoderInBlock": DCDecoderInBlock,
+    "EfficientViTBlock": EfficientViTBlock,
 }
 
 
+# general convolutional blocks
 CONV_BLOCK_MAP: dict[str, Callable] = {
+    "MBConvBlock": MBConvBlock,
+    "GLUMBConvBlock": GLUMBConvBlock,
+    "GLUMBResBlock": GLUMBResBlock,
     "ResidualBlock": ResidualBlock,
     "ResidualBottleneck": ResidualBottleneck,
     "LiteResidualBlock": LiteResidualBlock,
@@ -1948,8 +2589,23 @@ CONV_BLOCK_MAP: dict[str, Callable] = {
 }
 
 
+# blocks with residual skip connections
 RESIDUAL_BLOCK_MAP = {
     "ResidualBlock": ResidualBlock,
     "ResidualBottleneck": ResidualBottleneck,
     "LiteResidualBlock": LiteResidualBlock,
+    "MBResBlock": MBResBlock,
+    "GLUMBResBlock": GLUMBResBlock,
+    "LMAResBlock": LMAResBlock,
+}
+
+
+# attention blocks (swap-out components in transformer blocks)
+ATTN_BLOCK_MAP: dict[str, Callable] = {
+    "LMAResBlock": LMAResBlock,
+}
+
+# transformer blocks
+VIT_BLOCK_MAP: dict[str, Callable] = {
+    "EfficientViTBlock": EfficientViTBlock,
 }
