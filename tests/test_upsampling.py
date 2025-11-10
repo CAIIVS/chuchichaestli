@@ -33,10 +33,10 @@ def test_interpolate_forward(dimensions):
     output_shape = (1, 16) + (64,) * dimensions
     input_tensor = torch.randn(input_shape)
 
-    upsample = UpsampleInterpolate(dimensions=dimensions, num_channels=None)
+    upsample = UpsampleInterpolate(dimensions=dimensions, num_channels=16)
 
     # Call the forward method
-    output_tensor = upsample.forward(input_tensor, None)
+    output_tensor = upsample.forward(input_tensor)
 
     # Check the output tensor shape
     assert output_tensor.shape == output_shape

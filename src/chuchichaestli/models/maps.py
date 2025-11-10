@@ -24,6 +24,27 @@ DIM_TO_CONVT_MAP = {
     3: nn.ConvTranspose3d,
 }
 
+DIM_TO_POOL_MAP = {
+    1: {
+        "MaxPool": nn.MaxPool1d,
+        "AvgPool": nn.AvgPool1d,
+        "AdaptiveMaxPool": nn.AdaptiveMaxPool1d,
+        "AdaptiveAvgPool": nn.AdaptiveAvgPool1d,
+    },
+    2: {
+        "MaxPool": nn.MaxPool2d,
+        "AvgPool": nn.AvgPool2d,
+        "AdaptiveMaxPool": nn.AdaptiveMaxPool2d,
+        "AdaptiveAvgPool": nn.AdaptiveAvgPool2d,
+    },
+    3: {
+        "MaxPool": nn.MaxPool3d,
+        "AvgPool": nn.AvgPool3d,
+        "AdaptiveMaxPool": nn.AdaptiveMaxPool3d,
+        "AdaptiveAvgPool": nn.AdaptiveAvgPool3d,
+    },
+}
+
 UPSAMPLE_MODE = {
     1: "linear",
     2: "bilinear",

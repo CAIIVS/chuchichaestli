@@ -8,9 +8,6 @@ Original code is licensed under the Apache License, Version 2.0.
 Modifications made by CAIIVS are licensed under the GNU General Public License v3.0.
 """
 
-import math
-
-import numpy as np
 import torch
 from torch import nn
 from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS
@@ -53,7 +50,7 @@ class GaussianFourierProjection(nn.Module):
         if self.log:
             x = torch.log(x)
 
-        x_proj = x[:, None] * self.weight[None, :] * 2 * np.pi
+        x_proj = x[:, None] * self.weight[None, :] * 2 * torch.pi
 
         if self.flip_sin_to_cos:
             out = torch.cat([torch.cos(x_proj), torch.sin(x_proj)], dim=-1)
@@ -99,7 +96,7 @@ class SinusoidalTimeEmbedding(nn.Module):
             [N x dim] Tensor of positional embeddings.
         """
         half_dim = self.num_channels // 2
-        exponent = -math.log(max_period) * torch.arange(
+        exponent = -torch.log(torch.tensor(max_period)) * torch.arange(
             start=0, end=half_dim, dtype=torch.float32, device=timesteps.device
         )
         exponent = exponent / (half_dim - self.downscale_freq_shift)

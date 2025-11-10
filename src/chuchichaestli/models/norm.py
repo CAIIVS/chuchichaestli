@@ -11,14 +11,23 @@ from typing import Literal
 __all__ = ["Norm"]
 
 
+NormTypes = Literal["group", "instance", "batch", "adabatch", "rms", "layer"]
+
+
 class Norm(nn.Module):
     """Normalization layer implementation."""
 
     def __init__(
-        self, dimensions: int, norm_type: Literal["group", "instance", "batch", "adabatch"], channels: int, num_groups: int, **kwargs
+        self,
+        dimensions: int,
+        norm_type: NormTypes,
+        channels: int,
+        num_groups: int,
+        **kwargs,
     ):
         """Initialize the normalization layer."""
         super().__init__()
+        self.ntype = norm_type
         self.norm: nn.Module
         match norm_type:
             case "group":
@@ -35,11 +44,17 @@ class Norm(nn.Module):
                 self.norm = nn.BatchNorm2d(channels, **kwargs)
             case "batch" if dimensions == 3:
                 self.norm = nn.BatchNorm3d(channels, **kwargs)
+            case "rms":
+                self.norm = nn.RMSNorm(channels)
+            case "layer":
+                self.norm = nn.LayerNorm(channels)
             case "adabatch":
                 self.norm = AdaptiveBatchNorm(dimensions, channels, **kwargs)
 
     def forward(self, x: torch.Tensor):
         """Forward pass through the normalization layer."""
+        if self.ntype in ("rms", "layer"):
+            return self.norm(x.movedim(1, -1)).movedim(-1, 1)
         return self.norm(x)
 
 

@@ -8,7 +8,7 @@ from torch import nn
 from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.pooling import _AvgPoolNd, _MaxPoolNd
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
-from chuchichaestli.models.adversarial.blocks import BLOCK_MAP
+from chuchichaestli.models.blocks import CONV_BLOCK_MAP
 
 
 __all__ = [
@@ -66,9 +66,9 @@ class BlockDiscriminator(nn.Sequential):
                 f"Must be one of {list(DIM_TO_CONV_MAP.keys())}."
             )
 
-        if any(block_type not in BLOCK_MAP for block_type in block_types):
+        if any(block_type not in CONV_BLOCK_MAP for block_type in block_types):
             raise ValueError(
-                f"Invalid block types. Must be one of {list(BLOCK_MAP.keys())}."
+                f"Invalid block types. Must be one of {list(CONV_BLOCK_MAP.keys())}."
             )
 
         n_blocks = len(block_types)
@@ -94,17 +94,17 @@ class BlockDiscriminator(nn.Sequential):
         )
 
         # input block
-        block_cls = BLOCK_MAP[block_types[0]]
+        block_cls = CONV_BLOCK_MAP[block_types[0]]
         blocks = [block_cls(dimensions, in_channels, n_channels, **kwargs)]
         in_c = n_channels
         for block_type, mult in zip(block_types[1:-1], channel_mults):
             out_c = int(in_c * mult)
-            block_cls = BLOCK_MAP[block_type]
+            block_cls = CONV_BLOCK_MAP[block_type]
             block = block_cls(dimensions, in_c, out_c, **(kwargs | {"bias": True}))
             blocks.append(block)
             in_c = out_c
         # output block
-        block_cls = BLOCK_MAP[block_types[-1]]
+        block_cls = CONV_BLOCK_MAP[block_types[-1]]
         blocks += [
             block_cls(dimensions, in_c, out_channels, **(kwargs | {"bias": True}))
         ]

@@ -15,7 +15,7 @@ def test_self_attention_1d(dimensions):
     n_channels = 64
     n_heads = 4
     head_dim = 32
-    attention = SelfAttention(n_channels, n_heads, head_dim)
+    attention = SelfAttention(dimensions, n_channels, n_heads, head_dim)
 
     # Create a random input tensor
     batch_size = 8
@@ -44,7 +44,7 @@ def test_self_attention_1d(dimensions):
 def test_self_attention_different_sizes(dimensions, n_channels, img_wh):
     """Test the SelfAttention module."""
     # Create an instance of Attention
-    attention = SelfAttention(n_channels, n_heads=1)
+    attention = SelfAttention(dimensions, n_channels, n_heads=1)
 
     # Create a random input tensor
     batch_size = 2
