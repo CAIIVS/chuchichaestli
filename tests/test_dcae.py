@@ -14,7 +14,7 @@ from chuchichaestli.models.autoencoder import DCAE
     [
         (2, 1, 64, 4, 1),
         (2, 1, 32, 8, 1),
-        (2, 1, 8, 4, 3),
+        (2, 1, 32, 4, 3),
     ],
 )
 def test_dcae_init(dimensions, in_channels, n_channels, latent_dim, out_channels):
@@ -25,6 +25,10 @@ def test_dcae_init(dimensions, in_channels, n_channels, latent_dim, out_channels
         n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
+        attn_groups=8,
+        res_groups=8,
+        decoder_groups=8,
+        
     )
     assert isinstance(model.encoder, nn.Module)
     assert isinstance(model.decoder, nn.Module)
@@ -84,7 +88,7 @@ def test_dcae_blocks(
     down_block_types,
     up_block_types,
 ):
-    """Test the VAE module."""
+    """Test the DCAE module."""
     model = DCAE(
         dimensions=dimensions,
         in_channels=in_channels,
@@ -151,7 +155,7 @@ def test_dcae_latent_dim(
     down_block_types,
     up_block_types,
 ):
-    """Test the VAE module (latent dim)."""
+    """Test the DCAE module (latent dim)."""
     model = DCAE(
         dimensions=dimensions,
         in_channels=in_channels,
@@ -211,7 +215,7 @@ def test_dcae_latent_dim(
         ),
     ],
 )
-def test_vae_forward(
+def test_dcae_forward(
     dimensions,
     in_channels,
     n_channels,
@@ -220,7 +224,7 @@ def test_vae_forward(
     down_block_types,
     up_block_types,
 ):
-    """Test the VAE module (forward pass)."""
+    """Test the DCAE module (forward pass)."""
     model = DCAE(
         dimensions=dimensions,
         in_channels=in_channels,
@@ -284,7 +288,7 @@ def test_vae_forward(
         ),
     ],
 )
-def test_vae_backward(
+def test_dcae_backward(
     dimensions,
     in_channels,
     n_channels,
@@ -293,7 +297,7 @@ def test_vae_backward(
     down_block_types,
     up_block_types,
 ):
-    """Test the VAE module (backward pass)."""
+    """Test the DCAE module (backward pass)."""
     model = DCAE(
         dimensions=dimensions,
         in_channels=in_channels,
@@ -322,6 +326,10 @@ def test_dcae_inspect():
         n_channels=128,
         latent_dim=32,
         out_channels=1,
+        # down_block_types=("DCAutoencoderDownBlock",) * 3 + ("EfficientViTBlock",) * 4,
+        # up_block_types=("EfficientViTBlock",) * 4 + ("DCAutoencoderUpBlock",) * 3,
+        # block_out_channel_mults=(2, 2, 1, 2, 1, 2, 1),
+        # attn_scales=(3,5,7),
     )
     try:
         from torchinfo import summary
@@ -330,7 +338,7 @@ def test_dcae_inspect():
             model,
             (1, 1, 256, 256),
             col_names=["input_size", "output_size", "kernel_size", "num_params"],
-            depth=7,
+            depth=8,
         )
     except ImportError:
         print(model)

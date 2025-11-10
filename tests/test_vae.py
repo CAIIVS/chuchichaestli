@@ -48,6 +48,8 @@ def test_vae_init(dimensions, in_channels, n_channels, latent_dim, out_channels)
         (3, 1, 32, 8, 1, ("AutoencoderDownBlock",) * 5, ("AutoencoderUpBlock",) * 5),
         (1, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
         (2, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
+        (2, 1, 64, 4, 1, ("AttnAutoencoderDownBlock",) * 3, ("AttnAutoencoderUpBlock",) * 3),
+        (2, 1, 64, 4, 1, ("ConvAttnAutoencoderDownBlock",) * 3, ("ConvAttnAutoencoderUpBlock",) * 3),
         (3, 1, 64, 4, 1, ("AutoencoderDownBlock",) * 3, ("AutoencoderUpBlock",) * 3),
         (1, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),
         (2, 1, 16, 8, 1, ("AutoencoderDownBlock",) * 2, ("AutoencoderUpBlock",) * 2),

@@ -4,11 +4,16 @@
 """Autoencoder block tests."""
 
 import pytest
+import torch
 from torch import nn
 from chuchichaestli.models.blocks import (
     AutoencoderDownBlock,
     AutoencoderMidBlock,
     AutoencoderUpBlock,
+    GLUMBConvBlock,
+    GLUMBResBlock,
+    LMAResBlock,
+    EfficientViTBlock,
 )
 from chuchichaestli.models.autoencoder.decoder import Decoder
 from chuchichaestli.models.autoencoder.encoder import Encoder
@@ -135,6 +140,119 @@ def test_autoencoder_decoder_inspect():
         )
     except ImportError:
         print(decoder)
+    print()
+
+
+@pytest.mark.parametrize(
+    "dimensions,in_channels,out_channels,expansion",
+    [
+        (1, 64, 64, 4),
+        (2, 64, 64, 4),
+        (3, 64, 64, 4),
+    ],
+)
+def test_glumbconv_block(dimensions, in_channels, out_channels, expansion):
+    """Test GLUMBConvBlock."""
+    block = GLUMBConvBlock(
+        dimensions,
+        in_channels,
+        out_channels,
+        expansion,
+    )
+    wh = 16
+    sample = torch.randn(1, in_channels, *((wh,) * dimensions))
+    out = block(sample)
+    print(out.shape)
+
+
+@pytest.mark.parametrize(
+    "dimensions,in_channels,out_channels,expansion",
+    [
+        (1, 64, 64, 4),
+        (2, 64, 64, 4),
+        (3, 64, 64, 4),
+    ],
+)
+def test_glumbres_block(dimensions, in_channels, out_channels, expansion):
+    """Test GLUMBResBlock."""
+    block = GLUMBResBlock(
+        dimensions,
+        in_channels,
+        out_channels,
+        expansion,
+    )
+    wh = 16
+    sample = torch.randn(1, in_channels, *((wh,) * dimensions))
+    out = block(sample)
+    print(out.shape)
+
+
+@pytest.mark.parametrize(
+    "dimensions,in_channels,out_channels,heads",
+    [
+        (1, 64, 64, 8),
+        (2, 64, 64, 8),
+        (3, 64, 64, 8),
+    ],
+)
+def test_lmares_block(dimensions, in_channels, out_channels, heads):
+    """Test LMAResBlock."""
+    block = LMAResBlock(
+        dimensions,
+        in_channels,
+        out_channels,
+        heads,
+    )
+    wh = 16
+    sample = torch.randn(1, in_channels, *((wh,) * dimensions))
+    out = block(sample)
+    print(out.shape)
+
+
+def test_glumbconv_block_inspect():
+    """Test GLUMBConvBlock."""
+    dimensions, in_channels, out_channels, expansion = 2, 64, 64, 4
+    block = GLUMBConvBlock(
+        dimensions,
+        in_channels,
+        out_channels,
+        expansion,
+    )
+    try:
+        from torchinfo import summary
+        wh = 16
+        summary(
+            block,
+            (1, in_channels) + (wh,) * dimensions,
+            col_names=["input_size", "output_size", "kernel_size", "num_params"],
+            depth=4,
+        )
+    except ImportError:
+        print(block)
+    print()
+
+
+def test_efficientvit_block_inspect():
+    """Test EfficientViTBlock."""
+    dimensions, in_channels, out_channels, expansion = 2, 64, 64, 4
+    block = EfficientViTBlock(
+        dimensions,
+        in_channels,
+        out_channels,
+        
+        expansion=expansion
+    )
+    try:
+        from torchinfo import summary
+        wh = 16
+        summary(
+            block,
+            (1, in_channels) + (wh,) * dimensions,
+            col_names=["input_size", "output_size", "kernel_size", "num_params"],
+            depth=4,
+        )
+    except ImportError:
+        print(block)
     print()
 
 
