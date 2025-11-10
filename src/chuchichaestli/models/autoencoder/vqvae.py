@@ -5,7 +5,6 @@
 
 import torch
 from torch import nn
-from torch.distributions import MultivariateNormal, kl
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
 from chuchichaestli.models.blocks import (
@@ -178,6 +177,7 @@ class VQVAE(Autoencoder):
         attn_norm_type: NormTypes = "group",
         attn_groups: int = 32,
         attn_kernel_size: int = 1,
+        attn_scales: Sequence[int] = (5,),
         encoder_act_fn: ActivationTypes = "silu",
         encoder_norm_type: NormTypes = "group",
         encoder_groups: int = 8,
@@ -230,6 +230,7 @@ class VQVAE(Autoencoder):
             attn_groups: Number of groups for the convolutional attention block normalization
                 (if `attn_norm_type` is `"group"`).
             attn_kernel_size: Kernel size for the convolutional attention block.
+            attn_scales: Scales for the multi-scale attention block.
             encoder_act_fn: Activation function for the output layers in the encoder
                 (see `chuchichaestli.models.activations` for details).
             encoder_norm_type: Normalization type for the encoder's output block

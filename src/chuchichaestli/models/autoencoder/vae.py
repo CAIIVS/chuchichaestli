@@ -84,6 +84,7 @@ class VAE(Autoencoder):
         attn_norm_type: NormTypes = "group",
         attn_groups: int = 32,
         attn_kernel_size: int = 1,
+        attn_scales: Sequence[int] = (5,),
         encoder_act_fn: ActivationTypes = "silu",
         encoder_norm_type: NormTypes = "group",
         encoder_groups: int = 8,
@@ -133,6 +134,7 @@ class VAE(Autoencoder):
             attn_groups: Number of groups for the convolutional attention block normalization
                 (if `attn_norm_type` is `"group"`).
             attn_kernel_size: Kernel size for the convolutional attention block.
+            attn_scales: Scales for the multi-scale attention block.
             encoder_act_fn: Activation function for the output layers in the encoder
                 (see `chuchichaestli.models.activations` for details).
             encoder_norm_type: Normalization type for the encoder's output block
@@ -177,6 +179,7 @@ class VAE(Autoencoder):
             attn_norm_type=attn_norm_type,
             attn_groups=attn_groups,
             attn_kernel_size=attn_kernel_size,
+            attn_scales=attn_scales,
             encoder_act_fn=encoder_act_fn,
             encoder_norm_type=encoder_norm_type,
             encoder_groups=encoder_groups,

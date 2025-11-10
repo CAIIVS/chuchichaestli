@@ -85,6 +85,8 @@ class Decoder(nn.Module):
         self.channel_mults = prod(block_out_channel_mults)
         if isinstance(num_layers_per_block, int):
             num_layers_per_block = (num_layers_per_block,) * n_mults
+        elif len(num_layers_per_block) < len(up_block_types):
+            num_layers_per_block += (num_layers_per_block[-1],) * (len(up_block_types) - len(num_layers_per_block))
 
         self.in_block = BLOCK_MAP[in_block_type](
             dimensions=dimensions,

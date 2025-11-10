@@ -9,7 +9,6 @@ from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.pooling import _AvgPoolNd, _MaxPoolNd
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.blocks import CONV_BLOCK_MAP
-from chuchichaestli.models.blocks import ResidualBlock as ResBlock
 
 
 __all__ = [

@@ -20,6 +20,7 @@ from chuchichaestli.models.downsampling import (
     DOWNSAMPLE_FUNCTIONS,
     Downsample,
     DownsampleInterpolate,
+    DownsampleTypes,
 )
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
@@ -31,6 +32,7 @@ from chuchichaestli.models.upsampling import (
     UPSAMPLE_FUNCTIONS,
     Upsample,
     UpsampleInterpolate,
+    UpsampleTypes,
 )
 from typing import Literal
 from collections.abc import Sequence
@@ -75,8 +77,8 @@ class UNet(nn.Module):
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 4),
         num_blocks_per_level: int = 1,
-        upsample_type: Literal["Upsample", "UpsampleInterpolate"] = "Upsample",
-        downsample_type: Literal["Downsample", "DownsampleInterpolate"] = "Downsample",
+        upsample_type: UpsampleTypes = "Upsample",
+        downsample_type: DownsampleTypes = "Downsample",
         act_fn: ActivationTypes = "silu",
         norm_type: NormTypes = "group",
         groups: int = 8,
