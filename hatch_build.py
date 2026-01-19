@@ -42,7 +42,7 @@ class CustomBuildHook(BuildHookInterface):
         if not skip_ode:
             ext_modules.append(
                 CUDAExtension(
-                    name="chuchichaestli.ode._cuda_solvers",
+                    name="chuchichaestli.ode._cuda_ode_solvers",
                     sources=[
                         "csrc/ode/binding.cpp",
                         "csrc/ode/lode_kernel.cu",
