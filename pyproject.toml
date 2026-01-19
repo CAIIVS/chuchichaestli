@@ -4,16 +4,16 @@ dynamic = ["version"]
 license = "GPL-3.0-or-later"
 license-files = ["LICEN[CS]E*"]
 authors = [
-    { name = "Yann Billeter", email = "bily@zhaw.ch" },
-    { name = "Daniel Barco", email = "baoc@zhaw.ch" },
     { name = "Philipp Denzel", email = "denp@zhaw.ch" },
-    { name = "Martin Oswald", email = "oswd@zhaw.ch" },
     { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
+    { name = "Daniel Barco", email = "baoc@zhaw.ch" },
+    { name = "Yann Billeter", email = "bily@zhaw.ch" },
+    { name = "Martin Oswald", email = "oswd@zhaw.ch" },
 ]
 maintainers = [
-    { name = "Daniel Barco", email = "baoc@zhaw.ch" },
     { name = "Philipp Denzel", email = "denp@zhaw.ch" },
     { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
+    { name = "Daniel Barco", email = "baoc@zhaw.ch" },
 ]
 description = "Where you find all the state-of-the-art cooking utensils (salt, pepper, gradient descent... the usual)."
 readme = "README.md"
@@ -29,6 +29,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Mathematics",
 ]
 dependencies = [
     "numpy>=1.26",
@@ -39,6 +40,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "ruff==0.4.1",
+    "pre-commit==3.7.0",
     "pytest==8.1.1",
     "pytest-cov>=6.2.1",
 ]
@@ -47,6 +49,22 @@ docs = [
     "mkdocs-api-autonav>=0.3.0",
     "mkdocs-material>=9.6.16",
     "mkdocstrings[python]>=0.30.0",
+]
+
+ode = [
+    "torch>=2.2.2",
+]
+
+all = [
+    "ruff==0.4.1",
+    "pre-commit==3.7.0",
+    "pytest==8.1.1",
+    "pytest-cov>=6.2.1",
+    "mkdocs>=1.6.1",
+    "mkdocs-api-autonav>=0.3.0",
+    "mkdocs-material>=9.6.16",
+    "mkdocstrings[python]>=0.30.0",
+    "torch>=2.2.2",
 ]
 
 [dependency-groups]
@@ -71,7 +89,7 @@ Issues = "https://github.com/CAIIVS/chuchichaestli/issues"
 Source = "https://github.com/CAIIVS/chuchichaestli"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "setuptools", "torch>=2.2.2"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
@@ -85,6 +103,8 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chuchichaestli"]
+
+[tool.hatch.build.hooks.custom]
 
 [tool.hatch.envs.test]
 dependencies = ["pytest", "pytest-cov"]
