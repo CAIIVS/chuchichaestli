@@ -96,7 +96,9 @@ class SinusoidalTimeEmbedding(nn.Module):
             [N x dim] Tensor of positional embeddings.
         """
         half_dim = self.num_channels // 2
-        exponent = -torch.log(torch.tensor(max_period)) * torch.arange(
+        exponent = -torch.log(
+            torch.tensor(max_period, device=timesteps.device, dtype=torch.float32)
+        ) * torch.arange(
             start=0, end=half_dim, dtype=torch.float32, device=timesteps.device
         )
         exponent = exponent / (half_dim - self.downscale_freq_shift)

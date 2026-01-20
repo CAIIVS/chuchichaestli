@@ -193,7 +193,7 @@ class GaussianNoiseBlock(nn.Module):
         super().__init__()
         self.sigma = nn.Parameter(torch.tensor(sigma))
         self.detached = detached
-        self.noise = torch.tensor(mu)
+        self.register_buffer("noise", torch.tensor(mu))
 
     def forward(
         self, x: torch.Tensor, *args, noise_at_inference: bool = False
@@ -201,7 +201,8 @@ class GaussianNoiseBlock(nn.Module):
         """Forward pass using the reparametrization trick."""
         if (self.training or noise_at_inference) and self.sigma != 0:
             scale = self.sigma * x.detach() if self.detached else self.sigma * x
-            sampled_noise = self.noise.repeat(*x.size()).normal_() * scale
+            noise = self.noise.to(device=x.device, dtype=x.dtype)
+            sampled_noise = noise.repeat(*x.size()).normal_() * scale
             x = x + sampled_noise
         return x
 
