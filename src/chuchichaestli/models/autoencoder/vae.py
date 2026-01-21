@@ -223,6 +223,8 @@ class VAE(Autoencoder):
     @staticmethod
     def kl_divergence(posterior: torch.distributions.MultivariateNormal):
         """Compute the KL divergence between posterior and a multivariate Gaussian."""
+        device = posterior.mean.device
+        dtype = posterior.mean.dtype
         zeros = torch.zeros_like(posterior.mean)
-        eye = torch.eye(posterior.mean.shape[-1])
+        eye = torch.eye(posterior.mean.shape[-1], device=device, dtype=dtype)
         return kl.kl_divergence(posterior, MultivariateNormal(zeros, eye))
