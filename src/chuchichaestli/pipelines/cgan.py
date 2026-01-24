@@ -197,16 +197,55 @@ class CGANTrainer(CGANMixin):
     ) -> dict[str, float]:
         """Execute a single training step for both generator and discriminator.
         
+        This method must be implemented in subclasses with specific GAN loss functions.
+        A typical implementation should include:
+        
+        1. Discriminator training:
+           - Forward pass on real data
+           - Generate fake data and forward pass
+           - Compute discriminator loss (e.g., BCE, Wasserstein)
+           - Backward pass and optimizer step
+        
+        2. Generator training:
+           - Generate fake data
+           - Forward discriminator on fake data
+           - Compute generator loss
+           - Backward pass and optimizer step
+        
+        Example implementation structure:
+            ```python
+            real_data, conditions = batch
+            batch_size = real_data.size(0)
+            
+            # Train discriminator
+            self.d_optimizer.zero_grad()
+            d_real = self.discriminate(real_data, conditions)
+            noise = torch.randn(batch_size, latent_dim, device=self.device)
+            fake_data = self.generate(noise, conditions)
+            d_fake = self.discriminate(fake_data.detach(), conditions)
+            d_loss = compute_discriminator_loss(d_real, d_fake)
+            d_loss.backward()
+            self.d_optimizer.step()
+            
+            # Train generator
+            self.g_optimizer.zero_grad()
+            d_fake_for_g = self.discriminate(fake_data, conditions)
+            g_loss = compute_generator_loss(d_fake_for_g)
+            g_loss.backward()
+            self.g_optimizer.step()
+            
+            return {"d_loss": d_loss.item(), "g_loss": g_loss.item()}
+            ```
+        
         Args:
             batch: A batch of real data and optional conditions.
             latent_dim: Dimension of latent noise.
             **kwargs: Additional arguments.
             
         Returns:
-            Dictionary of training metrics.
+            Dictionary of training metrics (e.g., {"d_loss": float, "g_loss": float}).
         """
-        # This is a simplified template - actual implementation would
-        # include proper GAN training logic with loss functions
         raise NotImplementedError(
-            "train_step must be implemented with specific GAN loss functions."
+            "train_step must be implemented with specific GAN loss functions. "
+            "See the docstring for an example implementation structure."
         )

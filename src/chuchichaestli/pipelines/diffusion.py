@@ -12,6 +12,10 @@ from torch import nn
 __all__ = ["DiffusionMixin", "DiffusionInferencePipeline"]
 
 
+# Default number of timesteps for diffusion process
+DEFAULT_TIMESTEPS = 1000
+
+
 class DiffusionMixin:
     """Mixin for diffusion model functionality in pipelines.
     
@@ -108,7 +112,7 @@ class DiffusionMixin:
         
         # Determine number of steps
         if num_steps is None:
-            num_steps = getattr(self.noise_scheduler, "num_time_steps", 1000)
+            num_steps = getattr(self.noise_scheduler, "num_time_steps", DEFAULT_TIMESTEPS)
         
         # Denoise iteratively
         for t in reversed(range(num_steps)):
@@ -119,8 +123,11 @@ class DiffusionMixin:
             if hasattr(self.noise_scheduler, "step"):
                 x_t = self.noise_scheduler.step(x_t, noise_pred, timestep)
             else:
-                # Fallback: simple noise subtraction
-                x_t = x_t - noise_pred
+                raise NotImplementedError(
+                    "Noise scheduler must implement a 'step' method for proper denoising. "
+                    "Simple noise subtraction is not supported as it doesn't account for "
+                    "noise scheduling parameters."
+                )
         
         return x_t
 
