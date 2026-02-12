@@ -1,9 +1,12 @@
 // SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 // SPDX-FileNotice: Part of chuchichaestli
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include <torch/extension.h>
+
+#include <torch/types.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #define THREADS_PER_BLOCK 256
 
