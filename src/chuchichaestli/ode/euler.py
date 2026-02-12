@@ -8,16 +8,12 @@ from torch.autograd import Function
 from collections.abc import Callable
 
 try:
-    from chuchichaestli.ode import _cuda_ode_solvers
+    from chuchichaestli.ode import _ode_kernels
 
     CUDA_AVAILABLE = True
 except ImportError:
     CUDA_AVAILABLE = False
-    import warnings
-
-    warnings.warn(
-        "CUDA ODE solvers not available. Install with: pip install chuchichaestli[ode]"
-    )
+    _ode_kernels = None
 
 
 __all__ = ["EulerSolver"]
@@ -27,19 +23,21 @@ class EulerFunction(Function):
     """Autograd function for Euler method."""
 
     @staticmethod
-    def forward(ctx, y0: torch.Tensor, func: Callable, t0: float, t1: float, dt: float):
+    def forward(ctx, func: Callable, y0: torch.Tensor, t0: float, t1: float, dt: float, use_custom_kernel: bool):
         """Forward pass using Euler method.
 
         Args:
             ctx: module solver context
-            y0: Initial state (batch_size, dim)
             func: Function computing dy/dt = f(t, y)
+            y0: Initial state (batch_size, dim)
             t0: Initial time
             t1: Final time
             dt: Time step
+            use_custom_kernel: Whether to use custom CUDA kernels
         """
         ctx.func = func
         ctx.dt = dt
+        ctx.use_custom_kernel = use_custom_kernel
 
         y = y0
         t = t0
@@ -52,8 +50,8 @@ class EulerFunction(Function):
             with torch.no_grad():
                 dy = func(t, y)
 
-            if CUDA_AVAILABLE and y.is_cuda and ctx.use_custom_kernels:
-                y = _cuda_solvers.euler_forward(y, dy, dt)
+            if CUDA_AVAILABLE and use_custom_kernel:
+                y = _ode_kernels.euler_forward(y, dy, dt)
             else:
                 y = y + dt * dy
 
@@ -74,6 +72,7 @@ class EulerFunction(Function):
         dt = ctx.dt
         steps = ctx.steps
         t0 = ctx.t0
+        use_custom_kernel = ctx.use_custom_kernel
 
         grad_y = grad_output
         grad_y0 = None
@@ -89,8 +88,8 @@ class EulerFunction(Function):
                 dy = func(t, y_temp)
 
                 # Compute gradient w.r.t. y
-                if CUDA_AVAILABLE and grad_y.is_cuda and ctx.use_custom_kernel:
-                    grad_y_prev, grad_dy = _cuda_solvers.euler_backward(grad_y, dy, dt)
+                if CUDA_AVAILABLE and use_custom_kernel:
+                    grad_y_prev, grad_dy = _ode_kernels.euler_backward(grad_y, dy, dt)
                 else:
                     grad_y_prev = grad_y
                     grad_dy = dt * grad_y
@@ -104,7 +103,8 @@ class EulerFunction(Function):
 
         grad_y0 = grad_y
 
-        return grad_y0, None, None, None, None
+        # Return gradients for: func, y0, t0, t1, dt, use_custom_kernel
+        return None, grad_y0, None, None, None, None
 
 
 class EulerSolver:
@@ -122,20 +122,20 @@ class EulerSolver:
 
     def solve(
         self,
-        y0: torch.Tensor,
         func: Callable,
+        y0: torch.Tensor,
         t0: float,
         t1: float,
     ) -> torch.Tensor:
         """Solve ODE using Euler method.
 
         Args:
-            y0: Initial state
             func: Function computing dy/dt = f(t, y)
+            y0: Initial state
             t0: Initial time
             t1: Final time
 
         Returns:
             Final state at time t1
         """
-        return EulerFunction.apply(y0, func, t0, t1, self.dt)
+        return EulerFunction.apply(func, y0, t0, t1, self.dt, self.use_custom_kernel)
