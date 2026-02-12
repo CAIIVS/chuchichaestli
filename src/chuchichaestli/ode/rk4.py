@@ -8,16 +8,12 @@ from torch.autograd import Function
 from collections.abc import Callable
 
 try:
-    from chuchichaestli.ode import _cuda_ode_solvers
+    from chuchichaestli.ode import _ode_kernels
 
     CUDA_AVAILABLE = True
 except ImportError:
     CUDA_AVAILABLE = False
-    import warnings
-
-    warnings.warn(
-        "CUDA ODE solvers not available. Install with: pip install chuchichaestli[ode]"
-    )
+    _ode_kernels = None
 
 
 __all__ = ["RK4Solver"]
@@ -27,19 +23,21 @@ class RK4Function(Function):
     """Autograd function for RK4 method."""
 
     @staticmethod
-    def forward(ctx, y0: torch.Tensor, func: Callable, t0: float, t1: float, dt: float):
+    def forward(ctx, func: Callable, y0: torch.Tensor, t0: float, t1: float, dt: float, use_custom_kernel: bool):
         """Forward pass using RK4 method.
 
         Args:
             ctx: module solver context
-            y0: Initial state (batch_size, dim)
             func: Function computing dy/dt = f(t, y)
+            y0: Initial state (batch_size, dim)
             t0: Initial time
             t1: Final time
             dt: Time step
+            use_custom_kernel: Whether to use custom CUDA kernels
         """
         ctx.func = func
         ctx.dt = dt
+        ctx.use_custom_kernel = use_custom_kernel
 
         y = y0
         t = t0
@@ -52,27 +50,27 @@ class RK4Function(Function):
                 # Compute RK4 stages
                 k1 = func(t, y)
 
-                if CUDA_AVAILABLE and y.is_cuda and ctx.use_custom_kernel:
-                    y2 = _cuda_solvers.rk4_stage(y, k1, 0.5, dt)
+                if CUDA_AVAILABLE and use_custom_kernel:
+                    y2 = _ode_kernels.rk4_stage(y, k1, 0.5, dt)
                 else:
                     y2 = y + 0.5 * dt * k1
                 k2 = func(t + 0.5 * dt, y2)
 
-                if CUDA_AVAILABLE and y.is_cuda and ctx.use_custom_kernel:
-                    y3 = _cuda_solvers.rk4_stage(y, k2, 0.5, dt)
+                if CUDA_AVAILABLE and use_custom_kernel:
+                    y3 = _ode_kernels.rk4_stage(y, k2, 0.5, dt)
                 else:
                     y3 = y + 0.5 * dt * k2
                 k3 = func(t + 0.5 * dt, y3)
 
-                if CUDA_AVAILABLE and y.is_cuda and ctx.use_custom_kernel:
-                    y4 = _cuda_solvers.rk4_stage(y, k3, 1.0, dt)
+                if CUDA_AVAILABLE and use_custom_kernel:
+                    y4 = _ode_kernels.rk4_stage(y, k3, 1.0, dt)
                 else:
                     y4 = y + dt * k3
                 k4 = func(t + dt, y4)
 
                 # Combine stages
-                if CUDA_AVAILABLE and y.is_cuda and ctx.use_custom_kernel:
-                    y = _cuda_solvers.rk4_forward(y, k1, k2, k3, k4, dt)
+                if CUDA_AVAILABLE and use_custom_kernel:
+                    y = _ode_kernels.rk4_forward(y, k1, k2, k3, k4, dt)
                 else:
                     y = y + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
 
@@ -93,6 +91,7 @@ class RK4Function(Function):
         dt = ctx.dt
         steps = ctx.steps
         t0 = ctx.t0
+        use_custom_kernel = ctx.use_custom_kernel
 
         grad_y = grad_output
 
@@ -114,9 +113,9 @@ class RK4Function(Function):
                 k4 = func(t + dt, y4)
 
                 # Compute gradients
-                if CUDA_AVAILABLE and grad_y.is_cuda and ctx.use_custom_kernel:
+                if CUDA_AVAILABLE and use_custom_kernel:
                     grad_y0, grad_k1, grad_k2, grad_k3, grad_k4 = (
-                        _cuda_solvers.rk4_backward(grad_y, dt)
+                        _ode_kernels.rk4_backward(grad_y, dt)
                     )
                 else:
                     grad_y0 = grad_y
@@ -130,7 +129,8 @@ class RK4Function(Function):
                 y_next.backward(grad_y)
                 grad_y = y_temp.grad
 
-        return grad_y, None, None, None, None
+        # Return gradients for: func, y0, t0, t1, dt, use_custom_kernel
+        return None, grad_y, None, None, None, None
 
 
 class RK4Solver:
@@ -147,17 +147,17 @@ class RK4Solver:
         self.dt = dt
 
     def solve(
-        self, y0: torch.Tensor, func: Callable, t0: float, t1: float
+        self, func: Callable, y0: torch.Tensor, t0: float, t1: float
     ) -> torch.Tensor:
         """Solve ODE using RK4 method.
 
         Args:
-            y0: Initial state
             func: Function computing dy/dt = f(t, y)
+            y0: Initial state
             t0: Initial time
             t1: Final time
 
         Returns:
             Final state at time t1
         """
-        return RK4Function.apply(y0, func, t0, t1, self.dt)
+        return RK4Function.apply(func, y0, t0, t1, self.dt, self.use_custom_kernel)
