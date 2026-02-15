@@ -56,6 +56,21 @@ def test_serial_byte_size():
     assert dct_size == 87
 
 
+@pytest.mark.parametrize("x", ["2.0G", "2.0GB", "2.0 GB", 2147483648.0, 2147483648])
+def test_double_nbytes(x):
+    """Test the nbytes class double use."""
+    b = nbytes(x)
+    db = nbytes(b)
+    assert 0 < db < 10**10
+    assert isinstance(db, nbytes)
+    assert isinstance(db, float)
+    assert db == float(db)
+    assert isinstance(db.as_str(), str)
+    assert isinstance(db.as_bstr(), str)
+    assert isinstance(db.to("G"), nbytes)
+    assert isinstance(db.to("G"), float)
+
+
 def test_serial_byte_size_empty():
     """Test the serial_byte_size function."""
     dct_size = serial_byte_size({})
@@ -79,6 +94,14 @@ def test_SharedArray_init(shape, dtype, cache_size):
     assert isinstance(cache.states, torch.Tensor)
     assert len(cache) == shape[0]
     assert cache.get_state(0)[0].value == 0
+
+
+def test_SharedArray_zero_size():
+    """Test the boolean values of instance."""
+    cache = SharedArray(
+        shape=(), size=0, dtype=torch.float32, allow_overwrite=True, verbose=True,
+    )
+    assert not cache
 
 
 @pytest.mark.parametrize(
@@ -407,4 +430,12 @@ def test_SharedDictList_setitem_and_getitem(n, descr, slot_size, cache_size):
     assert meta_cache.get_state(0)[0].value == 1
     assert meta_cache.get_state(1)[0].value == 0
     assert meta_cache.get_state(3)[0].value == 0
+    meta_cache.clear_allocation()
+
+
+def test_SharedDictList_zero_size():
+    """Test the boolean values of instance."""
+    meta_cache = SharedDictList(0, size=0, verbose=True)
+    print(meta_cache)
+    assert not meta_cache
     meta_cache.clear_allocation()
