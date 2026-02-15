@@ -14,6 +14,7 @@ from multiprocessing import Lock
 from multiprocessing.shared_memory import SharedMemory, ShareableList
 import numpy as np
 import torch
+from chuchichaestli.utils import prod
 from typing import Protocol, Any
 from collections.abc import Generator, Iterator, KeysView, ValuesView, ItemsView
 
@@ -239,7 +240,7 @@ class SharedArray:
     def __init__(
         self,
         shape: tuple[int, ...],
-        size: int | float | str = "4.0G",
+        size: int | float | str | nbytes = "4.0G",
         dtype: torch.dtype = torch.float32,
         use_lock: bool = True,
         allow_overwrite: bool = True,
@@ -249,16 +250,19 @@ class SharedArray:
 
         Args:
             shape: Dataset N-d shape, e.g. (n_samples, channels, width, height, depth).
-            size: Maximum cache size in GiB (if int or float); default "4.0 GiB".
-            dtype: PyTorch dtype (default torch.float32). Must be type with corresponding ctype,
+            size: Maximum cache size in GiB (if int or float); default `"4.0G"`.
+            dtype: PyTorch dtype (default `torch.float32`). Must be type with corresponding ctype,
               i.e. bool, uint8, int8/16/32/64, or float32/64.
-            use_lock: If True, applies a threading lock for multiprocessing.
-            allow_overwrite: If True, cache slots can be overwritten.
+            use_lock: If `True`, applies a threading lock for multiprocessing.
+            allow_overwrite: If `True`, cache slots can be overwritten.
             verbose: Print information to the stdout.
         """
-        self.cache_size = (
-            nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
-        )
+        if isinstance(size, nbytes):
+            self.cache_size = size
+        elif isinstance(size, int | float):
+            self.cache_size = nbytes(f"{size}G")
+        else:
+            self.cache_size = nbytes(size)
         self.allow_overwrite = allow_overwrite
         self.verbose = verbose
 
@@ -270,8 +274,10 @@ class SharedArray:
         self._lock: mp.synchronize.Lock | DummyLock = (
             Lock() if use_lock else DummyLock()
         )
+        if not shape:
+            shape = (0,)
 
-        slot_size = int(np.prod(shape[1:]))
+        slot_size = int(prod(shape[1:]))
         elem_size = torch.empty((), dtype=dtype).element_size()
         slot_bytes = nbytes(slot_size * elem_size)
         dataset_bytes = nbytes(shape[0] * slot_bytes)
@@ -296,7 +302,6 @@ class SharedArray:
                     f"requested cache size ({self.cache_size}).\n"
                     f"Allocating cache for {n_slots} data samples."
                 )
-
         mp_arr = mp.Array(C_DTYPES[dtype], n_slots * slot_size, lock=use_lock)  # type: ignore
         shm_arr = np.ctypeslib.as_array(
             mp_arr.get_obj() if hasattr(mp_arr, "get_obj") else mp_arr
@@ -311,7 +316,6 @@ class SharedArray:
         self._shm_states *= 0
         self._shm_states[n_slots:] = SlotState.OOC.value
         self._slot_bytes = slot_bytes
-        self._n_slots = n_slots
 
     @property
     def array(self) -> torch.Tensor:
@@ -335,7 +339,7 @@ class SharedArray:
         return int((self.states == SlotState.SET.value).sum().item())
 
     @property
-    def cached_bytes(self) -> "nbytes":
+    def cached_bytes(self) -> nbytes:
         """Bytes written to cache."""
         return nbytes(self._slot_bytes * self.cached_states)
 
@@ -409,13 +413,23 @@ class SharedArray:
 
     def __str__(self) -> str:
         """String of the instance."""
-        n_slots = len(self.array)
-        n = len(self.states)
-        return f"{self.__class__.__name__}({self.cached_states}({n_slots})/{n}@{self.cache_size.as_str()})"
+        name = self.__class__.__name__
+        n_slots = len(self)
+        n_states = len(self.states)
+        size_str = self.cache_size.as_str()
+        return f"{name}({self.cached_states}({n_slots})/{n_states}@{size_str})"
 
     def __repr__(self) -> str:
         """Representation of the instance."""
         return self.__str__()
+
+    def __bool__(self) -> bool:
+        """Return False if cache is zero-size."""
+        return len(self.states) != 0
+
+    def __neg__(self) -> bool:
+        """Return True if cache is zero-size."""
+        return len(self.states) == 0
 
 
 class SharedDict:
@@ -428,7 +442,7 @@ class SharedDict:
     def __init__(
         self,
         descr: str = "shm_dict",
-        size: int | float | str = "16M",
+        size: int | float | str | nbytes = "16M",
         serializer: DictSerializer = PickleSerializer(),
         use_lock: bool = True,
         allow_overwrite: bool = True,
@@ -451,9 +465,12 @@ class SharedDict:
         super().__init__()
         self.descr = descr
         self.allow_overwrite = True
-        self.cache_size = (
-            nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
-        )
+        if isinstance(size, nbytes):
+            self.cache_size = size
+        elif isinstance(size, int | float):
+            self.cache_size = nbytes(f"{size}G")
+        else:
+            self.cache_size = nbytes(size)
         if self.cache_size <= 5:
             raise ValueError("Chosen cache size is too small!")
         self.serializer = serializer
@@ -655,8 +672,8 @@ class SharedDictList:
         n: int,
         *sequence: int | float | bool | str | bytes | dict | None,
         descr: str = "shm_list",
-        slot_size: int | float | str = "650b",
-        size: int | float | str = "64M",
+        slot_size: int | float | str | nbytes = "650b",
+        size: int | float | str | nbytes = "64M",
         serializer: DictSerializer = PickleSerializer(),
         use_lock: bool = True,
         allow_overwrite: bool = True,
@@ -689,9 +706,12 @@ class SharedDictList:
         )
         self.allow_overwrite = True
         self.verbose = verbose
-        self.cache_size = (
-            nbytes(f"{size}G") if isinstance(size, int | float) else nbytes(size)
-        )
+        if isinstance(size, nbytes):
+            self.cache_size = size
+        elif isinstance(size, int | float):
+            self.cache_size = nbytes(f"{size}G")
+        else:
+            self.cache_size = nbytes(size)
         if sequence:
             slot_bytes = max(
                 [nbytes(slot_size)] + [serial_byte_size(v) for v in sequence]
@@ -705,7 +725,9 @@ class SharedDictList:
         total_bytes = n_slots_bytes + states_bytes
 
         if total_bytes > cache_bytes:
-            n_slots = int((cache_bytes - states_bytes) / slot_bytes)
+            n_slots = 0
+            if slot_bytes > 0:
+                n_slots = int((cache_bytes - states_bytes) / slot_bytes)
             if self.verbose:
                 print(
                     f"Requested memory ({total_bytes}) "
@@ -880,10 +902,20 @@ class SharedDictList:
 
     def __str__(self) -> str:
         """String of the instance."""
-        n_slots = len(self.slots)
-        n = len(self.states)
-        return f"{self.__class__.__name__}({self.cached_states}({n_slots})/{n}@{self.cache_size.as_str()})"
+        name = self.__class__.__name__
+        n_slots = len(self)
+        n_states = len(self.states)
+        size_str = self.cache_size.as_str()
+        return f"{name}({self.cached_states}({n_slots})/{n_states}@{size_str})"
 
     def __repr__(self) -> str:
         """Representation of the instance."""
         return self.__str__()
+
+    def __bool__(self) -> bool:
+        """Return False if cache is zero-size."""
+        return len(self.states) != 0
+
+    def __neg__(self) -> bool:
+        """Return True if cache is zero-size."""
+        return len(self.states) == 0
