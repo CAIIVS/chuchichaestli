@@ -1,0 +1,638 @@
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Base classes for datasets and loaders."""
+
+from abc import ABC, abstractmethod
+from pathlib import Path
+import torch
+from torch.utils.data import Dataset
+from chuchichaestli.utils import prod
+from chuchichaestli.data.cache import (
+    nbytes,
+    serial_byte_size,
+    SharedArray,
+    SharedDictList,
+)
+import warnings
+from typing import Any, Literal
+from collections.abc import Sequence
+from types import TracebackType
+
+
+__all__ = ["FileDataset", "CachingDataset"]
+
+
+DataReturnTypes = Literal["tuple", "dict"] | dict
+
+
+class FileDataset(Dataset, ABC):
+    """Abstract base class for file-based datasets of various types.
+
+    Provides common file handling utilities with wildcards finders.
+    Files should be memory-mapped into an `mmap` which can represent a single
+    contiguous dataset or multiple subsets that will be sequentially indexed.
+    Optionally, a `mmap_attrs` memory map (congruent to `mmap`) can be loaded
+    that contains metadata.
+
+    Required definitions:
+        - `load`: load the memory map(s).
+        - `close`: close the memory map(s).
+    """
+
+    FILE_EXTENSIONS: list[str] = []  # override in subclasses.
+
+    def __init__(
+        self,
+        path: str | Path | Sequence[str] | Sequence[Path] | None = None,
+        dtype: torch.dtype = torch.float32,
+        return_as: DataReturnTypes | None = "tuple",
+        has_attrs: bool = False,
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            path: Path to file(s) or data directory. May contain wildcards.
+            dtype: Data tensor type; default: torch.float32.
+            return_as: Return type; one of ['tuple', 'dict', dict, None].
+            has_attrs: Whether to fetch attribute/metadata.
+            kwargs: Additional keyword arguments for subclasses.
+        """
+        self.dtype = dtype
+        self.return_as = return_as
+        self.has_attrs = has_attrs
+        self.files = self.glob_path(path, self.FILE_EXTENSIONS)
+        self._file_offsets: list[int] = []
+        self._mmap: list[Sequence] = []
+        self._mmap_attrs: list[Sequence] = []
+        if self.has_files:
+            self.load(**kwargs)
+
+    @staticmethod
+    def _split_glob(
+        path: str | list[str], relative: bool = False
+    ) -> tuple[list[str], list[str | None]]:
+        """Split path containing wildcard into root and wildcard expression.
+
+        Args:
+            path: File path or list of paths, may contain wildcards.
+            relative: If True, strip leading '/' from paths.
+
+        Returns:
+            Tuple of (root_paths, wildcard_patterns).
+        """
+        roots: list[str] = []
+        patterns: list[str | None] = []
+
+        if isinstance(path, str) and "*" in path:
+            if relative:
+                path = path[1:] if path.startswith("/") else path
+            components = Path(path).parts
+            wildcard_idx = [i for i, c in enumerate(components) if "*" in c][0]
+            roots = [str(Path().joinpath(*components[:wildcard_idx]))]
+            patterns = [str(Path().joinpath(*components[wildcard_idx:]))]
+            return roots, patterns
+        elif isinstance(path, list | tuple):
+            for p in path:
+                r, pat = FileDataset._split_glob(p, relative)
+                roots.extend(r)
+                patterns.extend(pat)
+            return roots, patterns
+        return [str(path)], [None]
+
+    @staticmethod
+    def glob_path(
+        path: str | Path | Sequence[str] | Sequence[Path] | None,
+        extensions: Sequence[str] | None = None,
+    ) -> list[Path]:
+        """Glob path recursively for files with specified extensions.
+
+        Args:
+            path: Filename, path or list, can contain wildcards `*` or `**`.
+                If `None`, returns an empty list.
+            extensions: List of valid file extensions (e.g., ['.h5', '.hdf5']).
+                If `None`, all files matching the pattern are returned.
+
+        Returns:
+            List of Path objects for matching files.
+        """
+        if path is None:
+            return []
+
+        files: list[Path] = []
+        roots, patterns = FileDataset._split_glob(path)
+
+        for root, pattern in zip(roots, patterns):
+            if pattern is None:
+                files.append(Path(root))
+            else:
+                matched = [f for f in Path(root).rglob(pattern) if f.is_file()]
+                if extensions:
+                    matched = [f for f in matched if f.suffix in extensions]
+                files.extend(sorted(matched))
+
+        files, missing = FileDataset.check_files_exist(files)
+        if missing:
+            warnings.warn(f"{len(missing)} files not found.")
+        return files
+
+    @staticmethod
+    def check_files_exist(files: list[Path]) -> tuple[list[Path], list[Path]]:
+        """Check which files exist and which are missing.
+
+        Args:
+            files: List of file paths to check.
+
+        Returns:
+            Tuple of (existing_files, missing_files).
+        """
+        existing = [f for f in files if f.exists()]
+        missing = [f for f in files if not f.exists()]
+        return existing, missing
+
+    @staticmethod
+    def validate_files(
+        files: list[Path],
+        extensions: list[str],
+        check_exists: bool = True,
+        raise_on_error: bool = True,
+    ) -> list[Path]:
+        """Validate that all files exist and have correct extensions.
+
+        Args:
+            files: List of file paths to validate.
+            extensions: List of valid file extensions.
+            check_exists: If `True`, verify that each file exists.
+            raise_on_error: If `True`, raise `FileNotFoundError` for missing files
+                or `ValueError` for invalid extensions.
+                If `False`, filter out invalid/missing files with warnings.
+
+        Returns:
+            List of valid file paths.
+
+        Raises:
+            FileNotFoundError: If any file does not exist and `raise_on_missing`.
+            ValueError: If any file has an invalid extension and `raise_on_invalid_ext`.
+        """
+        valid: list[Path] = []
+
+        for f in files:
+            # Check existence
+            if check_exists and not f.exists():
+                if raise_on_error:
+                    raise FileNotFoundError(f"File not found: {f}")
+                else:
+                    warnings.warn(f"File not found, skipping: {f}")
+                    continue
+
+            # Check extensions
+            if extensions is not None and f.suffix not in extensions:
+                if raise_on_error:
+                    raise ValueError(
+                        f"Invalid file extension '{f.suffix}' for file: {f}. "
+                        f"Expected one of: {extensions}"
+                    )
+                else:
+                    warnings.warn(
+                        f"Invalid extension '{f.suffix}' for file {f}, skipping. "
+                        f"Expected one of: {extensions}"
+                    )
+                    continue
+            valid.append(f)
+        return valid
+
+    @property
+    def n_files(self) -> int:
+        """Number of files in the dataset."""
+        return len(self.files)
+
+    @property
+    def has_files(self) -> bool:
+        """Whether the dataset has associated files."""
+        return self.n_files > 0
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Shape of the contiguous dataset."""
+        if not self._mmap:
+            return ()
+        total_samples = sum(m.shape[0] for m in self._mmap)
+        sample_shape = self._mmap[0].shape[1:]
+        return (total_samples, *sample_shape)
+
+    @property
+    def n_samples(self) -> int:
+        """Number of samples in the dataset (across all files)."""
+        return self.shape[0] if self.shape else 0
+
+    @property
+    def sample_shape(self) -> tuple[int, ...]:
+        """Shape of a single sample (excluding batch dimension)."""
+        return self.shape[1:] if len(self.shape) >= 1 else 0
+
+    def __len__(self) -> int:
+        """Dataset length."""
+        return self.n_samples
+
+    def __str__(self) -> str:
+        """Instance string."""
+        name = self.__class__.__name__
+        return f"{name}(#f{self.n_files}#s{self.n_samples})"
+
+    def __repr__(self) -> str:
+        """Instance representation."""
+        return self.__str__()
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
+        """Context manager exit."""
+        self.close()
+        return False
+
+    def _build_index(self):
+        """Build (cumulative) index for mapping global index to (file_index, local_index)."""
+        self._file_offsets = [0]
+        for m in self._mmap:
+            self._file_offsets.append(self._file_offsets[-1] + m.shape[0])
+
+    def _map_index(self, index: int) -> tuple[int, int]:
+        """Map global index to (file_index, local_index).
+
+        Args:
+            index: Sample index.
+        """
+        if not self._file_offsets or self.n_files != (len(self._file_offsets) - 1):
+            self._build_index()
+        for file_idx, (ini_idx, fin_idx) in enumerate(
+            zip(self._file_offsets[:-1], self._file_offsets[1:])
+        ):
+            if index < fin_idx:
+                local_idx = index - ini_idx
+                return file_idx, local_idx
+        raise IndexError(f"Index {index} out of range")
+
+    def _format_output(
+        self,
+        item: torch.Tensor,
+        attrs: dict | Any | None,
+    ) -> torch.Tensor | tuple | dict:
+        """Format the output based on return_as setting.
+
+        Args:
+            item: Tensor data.
+            attrs: Attributes/metadata.
+
+        Returns:
+            Formatted output.
+        """
+        match (self.return_as, attrs):
+            case (_, None):
+                return item
+            case ("tuple", _):
+                return (item, attrs)
+            case ("dict", _):
+                return {"data": item, "attrs": attrs}
+            case (dict() as template, _):
+                keys = list(template.keys())
+                match keys:
+                    case [data_key, attrs_key, *_]:
+                        return {data_key: item, attrs_key: attrs}
+                    case [data_key]:
+                        return {data_key: item, "attrs": attrs}
+                    case _:
+                        return {"data": item, "attrs": attrs}
+            case _:
+                return (item, attrs)
+
+    def _read_item(self, index: int, flush: bool = True) -> torch.Tensor:
+        """Fetch tensor sample from mmap.
+
+        Args:
+            index: Sample index.
+            flush: Clear memory after reading from mmap.
+
+        Note: if subclasses have non-standard logic for accessing mmaps,
+            this method should be overridden.
+        """
+        file_idx, local_idx = self._map_index(index)
+        sample = self._mmap[file_idx][local_idx].copy()
+        if flush:
+            self._mmap[file_idx].flush()
+        return torch.from_numpy(sample).type(self.dtype)
+
+    def _read_attrs(self, index: int) -> dict | Any | None:
+        """Fetch attributes from mmap.
+
+        Args:
+            index: Attributes index.
+            flush: Clear memory after reading from mmap.
+
+        Note: if subclasses have non-standard logic for accessing mmaps,
+            this method should be overridden.
+        """
+        if not self._mmap_attrs:
+            return None
+        file_idx, local_idx = self._map_index(index)
+        attr = self._mmap_attrs[file_idx][local_idx].copy()
+        return attr
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        """Get a sample at specified index.
+
+        Args:
+            index: Sample index.
+        """
+        if index < 0:
+            index = len(self) + index
+        if index < 0 or index >= len(self):
+            raise IndexError(
+                f"Index {index} out of range for dataset of length {len(self)}"
+            )
+        item = self._read_item(index)
+        attrs = None
+        if self.has_attrs and self._mmap_attrs:
+            attrs = self._read_attrs(index)
+        return self._format_output(item, attrs)
+
+    @abstractmethod
+    def load(self, **kwargs):
+        """Load file contents into a memory map(s) and set up resources."""
+        ...
+
+    @abstractmethod
+    def close(self, **kwargs):
+        """Close any open file handles and clean up resources."""
+        ...
+
+
+class CachingDataset(FileDataset, ABC):
+    """Base class for file-based datasets with shared memory caching support.
+
+    Extends FileDataset with stochastic caching using SharedArray.
+    All files are treated as a single contiguous dataset for caching purposes.
+    The cache stores samples in shared memory, allowing efficient access
+    across multiple DataLoader workers. When cache size is smaller than
+    the dataset, only a subset of samples are cached (stochastic caching).
+
+    Required definitions:
+        - `load`: load the memory map(s).
+        - `close`: close the memory map(s).
+    """
+
+    def __init__(
+        self,
+        path: str | Path | list[str] | list[Path] | None = None,
+        dtype: torch.dtype = torch.float32,
+        return_as: DataReturnTypes | None = "tuple",
+        cache: int | float | str | bool | None = "4G",
+        attrs_cache: int | float | str | bool | None = None,
+        preload: bool = False,
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            path: Path to file(s) or data directory. May contain wildcards.
+                If None, the dataset is assumed to be created programmatically.
+            dtype: Data tensor type; default: `torch.float32`.
+            return_as: Return type; one of `['tuple', 'dict', None]` or as dictionary template.
+            preload: Preload and cache the dataset.
+            cache: Cache size for data items.
+            attrs_cache: Cache size for attributes/metadata.
+            kwargs: Additional keyword arguments for subclasses.
+        """
+        super().__init__(path=path, dtype=dtype, return_as=return_as, **kwargs)
+
+        self._req_cache_size = nbytes(cache)
+        self._req_attrs_cache_size = nbytes(attrs_cache)
+        self.cache = SharedArray((), size=0)
+        self.attrs_cache = SharedDictList(0, size=0)
+        self.init_cache(self._req_cache_size, self._req_attrs_cache_size)
+
+        if preload and self.cache:
+            self.preload_cache()
+
+    def __str__(self) -> str:
+        """Instance string."""
+        name = self.__class__.__name__
+        cached_str = self.cache.cached_bytes.as_str()
+        size_str = self.cache.cache_size.as_str()
+        return f"{name}[{cached_str}/{size_str}](#f{self.n_files}#s{self.n_samples})"
+
+    def __del__(self):
+        """Cleanup caches when object is destroyed."""
+        try:
+            self.purge_cache(reset=False)
+        except Exception:
+            pass  # Ignore errors during cleanup
+
+    @property
+    def n_cached(self) -> int:
+        """Number of cached data samples."""
+        return self.cache.cached_states if self.cache else 0
+
+    @property
+    def n_cacheable(self) -> int:
+        """Maximum number of samples that can fit in cache."""
+        return len(self.cache) if self.cache else 0
+
+    @property
+    def cached_bytes(self) -> nbytes:
+        """Byte size of currently used cache (excluding metadata cache)."""
+        return self.cache.cached_bytes if self.cache else nbytes(0)
+
+    @property
+    def cached_bytes_total(self) -> nbytes:
+        """Total byte size of currently used cache (including metadata cache)."""
+        cbytes = self.cache.cached_bytes if self.cache else nbytes(0)
+        cbytes += self.attrs_cache.cached_bytes if self.attrs_cache else nbytes(0)
+        return cbytes
+
+    @property
+    def cache_size(self) -> nbytes:
+        """Cache size in bytes (excluding metadata cache)."""
+        return self.cache.cache_size if self.cache else nbytes(0)
+
+    @property
+    def cache_size_total(self) -> nbytes:
+        """Total cache size in bytes (including metadata cache)."""
+        size = self.cache.cache_size if self.cache else nbytes(0)
+        size += self.attrs_cache.cache_size if self.attrs_cache else nbytes(0)
+        return size
+
+    @property
+    def sample_size(self) -> nbytes:
+        """Size of a single sample in bytes."""
+        if not self.sample_shape:
+            return nbytes(0)
+        elem_size = torch.empty((), dtype=self.dtype).element_size()
+        n_elements = prod(self.sample_shape)
+        return nbytes(n_elements * elem_size)
+
+    @property
+    def attrs_size(self) -> nbytes:
+        """Size of a single metadata element in bytes."""
+        if not self._mmap_attrs:
+            return nbytes(0)
+        return serial_byte_size(self._mmap_attrs[0])
+
+    @property
+    def serial_size(self) -> nbytes:
+        """Total serialized size of the dataset."""
+        return nbytes(self.n_samples * self.sample_size)
+
+    def init_cache(
+        self,
+        cache: int | float | str | nbytes | None = None,
+        attrs_cache: int | float | str | nbytes | None = None,
+    ):
+        """Initialize the shared-memory cache.
+
+        Args:
+            cache: Cache size for data items.
+            attrs_cache: Cache size for attributes/metadata.
+        """
+        if not self.has_files or self.n_samples == 0:
+            return
+        self.purge_cache(reset=False)
+
+        cache_size = nbytes(cache) if cache is not None else self._req_cache_size
+        attrs_cache_size = (
+            nbytes(attrs_cache)
+            if attrs_cache is not None
+            else self._req_attrs_cache_size
+        )
+
+        if cache_size is not None:
+            self.cache = SharedArray(
+                shape=self.shape,
+                size=cache_size,
+                dtype=self.dtype,
+                allow_overwrite=True,
+                verbose=False,
+            )
+        if attrs_cache_size is not None:
+            self.attrs_cache = SharedDictList(
+                n=self.n_samples,
+                size=attrs_cache_size,
+                slot_size=self.attrs_size,
+                allow_overwrite=True,
+                verbose=False,
+            )
+
+    def preload_cache(self):
+        """Pre-load data and cache it."""
+        if (not self.cache) and (not self.attrs_cache):
+            return
+        cache_slots = self.n_cacheable
+        for i in range(min(len(self), cache_slots)):
+            if self.cache and i not in self.cache:
+                item = self._read_item(i)
+                self.cache_item(i, item)
+
+    def clear_item(self, index: int | None = None):
+        """Clear single cached sample and metadata."""
+        if self.cache is not None:
+            self.cache.clear(index)
+        if self.attrs_cache is not None:
+            self.attrs_cache.clear(index)
+
+    def purge_cache(self, reset: bool = True):
+        """Purge the cache.
+
+        Args:
+            reset: If True, the cache is reinitialized after purging.
+        """
+        cache_size = nbytes(0)
+        attrs_cache_size = nbytes(0)
+        if self.cache is not None:
+            cache_size += self.cache.cache_size
+            self.cache.clear_allocation()
+        if self.attrs_cache is not None:
+            attrs_cache_size += self.attrs_cache.cache_size
+            self.attrs_cache.clear_allocation()
+        self.cache = None
+        self.attrs_cache = None
+        if reset:
+            self.init_cache(cache_size, attrs_cache_size)
+
+    def get_cached(self, index: int) -> torch.Tensor | None:
+        """Get sample from cache if present.
+
+        Args:
+            index: Sample index.
+        """
+        if self.cache and index in self.cache:
+            return self.cache[index]
+        return None
+
+    def cache_item(self, index: int, item: torch.Tensor, overwrite: bool = False):
+        """Store sample tensor in cache.
+
+        Args:
+            index: Sample index.
+            item: Tensor to cache.
+            overwrite: If True, overwrite existing cached item.
+        """
+        if not self.cache:
+            return
+        if overwrite or index not in self.cache:
+            self.cache[index] = item
+
+    def get_cached_attrs(self, index: int) -> dict | None:
+        """Get element from metadata cache if present.
+
+        Args:
+            index: Sample index.
+        """
+        if self.has_attrs and self.attrs_cache and index in self.attrs_cache:
+            return self.attrs_cache[index]
+        return None
+
+    def cache_attrs(self, index: int, attrs: dict | Any, overwrite: bool = False):
+        """Store attributes in cache.
+
+        Args:
+            index: Sample index.
+            attrs: Attributes to metaadata cache (typically a dict).
+            overwrite: If True, overwrite existing cached attribute.
+        """
+        if not self.attrs_cache or not attrs:
+            return
+        if overwrite or index not in self.attrs_cache:
+            self.attrs_cache[index] = attrs
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        """Get a sample at specified index.
+
+        Args:
+            index: Sample index.
+        """
+        if index < 0:
+            index = len(self) + index
+        if index < 0 or index >= len(self):
+            raise IndexError(
+                f"Index {index} out of range for dataset of length {len(self)}"
+            )
+        item = self.get_cached(index)
+        if item is None:
+            item = self._read_item(index)
+            self.cache_item(index, item)
+        attrs = self.get_cached_attrs(index)
+        if self.has_attrs and attrs is None:
+            attrs = self._read_attrs(index)
+            self.cache_attrs(index, attrs)
+        return self._format_output(item, attrs)
+
+    def close(self):
+        """Close any open file handles and purge the cache."""
+        self.purge_cache(reset=False)
