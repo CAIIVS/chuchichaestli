@@ -743,7 +743,7 @@ class SharedDictList:
                     f"Allocating cache for {n_slots} data samples."
                 )
 
-        self._slots, self._shm_states = self.get_allocation(
+        self._slots, self._shm_states_mem, self._shm_states = self.get_allocation(
             name=self.descr, n_slots=n_slots, slot_size=int(slot_bytes), size=n
         )
         self._slot_bytes = nbytes(slot_bytes)
@@ -760,7 +760,7 @@ class SharedDictList:
         slot_size: int | None = None,
         size: int | None = None,
         **kwargs,
-    ) -> tuple[ShareableList, torch.Tensor | None]:
+    ) -> tuple[ShareableList, SharedMemory, torch.Tensor]:
         """Get a shared memory allocation.
 
         Args:
@@ -772,35 +772,73 @@ class SharedDictList:
 
         Returns:
             shm_list: List in shared memory.
-            _shm_states: List slot states if newly allocated, None otherwise.
+            _shm_states_mem: Shared memory for states array.
+            _shm_states: Local list slot states array.
         """
         if name is None:
             name = self.descr
+        states_name = f"{self.descr}_states"
         try:
             shm_list = ShareableList(name=name)
         except FileNotFoundError:
             shm_list = ShareableList([bytes(slot_size)] * n_slots, name=name)
-        if not hasattr(self, "_shm_states"):
-            mp_states_arr = mp.Array(C_DTYPES[torch.uint8], size, lock=True)  # type: ignore
-            shm_states_arr = np.ctypeslib.as_array(mp_states_arr.get_obj())
-            self._shm_states = torch.from_numpy(shm_states_arr)
-            self._shm_states *= 0
-            self._shm_states[n_slots:] = SlotState.OOC.value
-            _shm_states = self._shm_states
-        else:
-            _shm_states = None
-        return shm_list, _shm_states
+        states_size = size * torch.uint8.itemsize
+        try:
+            shm_states_mem = SharedMemory(name=states_name)
+            states_arr = np.ndarray((size,), dtype=np.uint8, buffer=shm_states_mem.buf)
+        except FileNotFoundError:
+            shm_states_mem = SharedMemory(name=states_name, create=True, size=states_size) if states_size else None
+            states_arr = np.ndarray((size,), dtype=np.uint8, buffer=shm_states_mem.buf if shm_states_mem else None)
+            states_arr[:] = 0
+            states_arr[n_slots:] = SlotState.OOC.value
+        _shm_states = torch.from_numpy(states_arr)
+        return shm_list, shm_states_mem, _shm_states
 
-    def clear_allocation(
-        self,
-    ):
+    def clear(self, index: int | None = None):
+        """Clear the cache (optionally only at a specified index)."""
+        if index is None:
+            for i in range(len(self._slots)):
+                self._slots[i] = bytes(int(self._slot_bytes))
+            self._shm_states[:] *= 0
+            self._shm_states[len(self) :] = SlotState.OOC.value
+        else:
+            _, idx = self.get_state(index)
+            if idx is None:
+                return
+            if idx < len(self._slots):
+                self._slots[idx] = bytes(int(self._slot_bytes))
+            self._shm_states[idx] = 0
+            if len(self) <= idx:
+                self._shm_states[idx] = SlotState.OOC.value
+
+    def clear_allocation(self):
         """Delete shared memory allocation."""
+        if hasattr(self, "_shm_states"):
+            del self._shm_states
         if hasattr(self, "_slots"):
             try:
-                self._slots.shm.close()
                 self._slots.shm.unlink()
             except FileNotFoundError:
-                self._slots.shm.close()
+                pass  # already unlinked
+            finally:
+                try:
+                    self._slots.shm.close()
+                except Exception:
+                    pass  # already closed
+            del self._slots
+        if hasattr(self, "_shm_states_mem"):
+            try:
+                if self._shm_states_mem is not None:
+                    self._shm_states_mem.unlink()
+            except FileNotFoundError:
+                pass
+            finally:
+                try:
+                    if self._shm_states_mem is not None:
+                        self._shm_states_mem.close()
+                except Exception:
+                    pass
+            del self._shm_states_mem
 
     @property
     def slots(self) -> Any:
