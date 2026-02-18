@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Zip iterator for PyTorch datasets for paired read-outs."""
+"""Zip iterator for PyTorch datasets for paired readouts."""
 
 from pathlib import Path
 import torch
@@ -28,14 +28,14 @@ class ZipDataset(Dataset):
     def __init__(
         self,
         *datasets: Dataset,
-        return_as: DataReturnTypes | None = "tuple",
+        zip_as: DataReturnTypes | None = "tuple",
         strict: bool = False,
     ):
         """Constructor.
 
         Args:
             *datasets: Various datasets to zip together.
-            return_as: Return type; one of `['tuple', 'dict', 'list']` or custom dict mapping.
+            zip_as: Return type; one of `['tuple', 'dict', 'list']` or custom dict mapping.
                 - 'tuple': Returns tuple of samples (default)
                 - 'dict': Returns dict with keys '0', '1', etc.
                 - dict: Custom mapping, e.g., {'input': 0, 'target': 1, 'mask': 3}
@@ -44,12 +44,11 @@ class ZipDataset(Dataset):
                 If `False`, length is determined by the shortest dataset.
         """
         super().__init__()
-
         if len(datasets) == 0:
             raise ValueError("At least one dataset must be provided.")
 
         self.datasets = list(datasets)
-        self.return_as = return_as
+        self.zip_as = zip_as
         self.strict = strict
 
         lengths = [len(d) for d in self.datasets]
@@ -67,16 +66,16 @@ class ZipDataset(Dataset):
     @classmethod
     def from_paths(
         cls,
-        *paths: str | Path | Sequence[str] | Sequence[Path],
+        *paths: Sequence[str] | Sequence[Path],
         dataset_cls: type[CachingDataset],
-        return_as: DataReturnTypes | None = "tuple",
+        zip_as: DataReturnTypes | None = "tuple",
         strict: bool = False,
-        cache: int | float | str | bool | None = "4G",
+        cache: int | float | str | bool | None = "2G",
         attrs_cache: int | float | str | bool | None = None,
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
-        dataset_return_as: DataReturnTypes | None = "tuple",
-        **dataset_kwargs,
+        return_as: DataReturnTypes | None = "tuple",
+        **kwargs,
     ) -> "ZipDataset":
         """Create ZipDatasets from multiple file paths with caching.
 
@@ -84,7 +83,7 @@ class ZipDataset(Dataset):
             *paths: File paths for each dataset. Each path can be a single file,
                 directory, or pattern with wildcards `*` or `**`.
             dataset_cls: CachingDataset subclass to instantiate (e.g., HDF5Dataset).
-            return_as: Return format for ZipDataset; one of
+            zip_as: Return format for ZipDataset; one of
                 `['tuple', 'dict', 'list']` or custom dict mapping.
             strict: If `True`, all datasets must have the same length.
                 If `False`, length is determined by the shortest dataset.
@@ -92,8 +91,8 @@ class ZipDataset(Dataset):
             attrs_cache: Cache size for each dataset's attributes/metadata.
             preload: Whether to preload and cache all datasets.
             dtype: Data tensor type for all datasets.
-            dataset_return_as: Return format for individual datasets.
-            **dataset_kwargs: Additional keyword arguments passed to `dataset_cls`.
+            return_as: Return format for individual datasets.
+            **kwargs: Additional keyword arguments passed to `dataset_cls`.
         """
         if not paths:
             raise ValueError("At least one path must be provided")
@@ -102,14 +101,14 @@ class ZipDataset(Dataset):
             dataset = dataset_cls(
                 path=path,
                 dtype=dtype,
-                return_as=dataset_return_as,
+                return_as=return_as,
                 cache=cache,
                 attrs_cache=attrs_cache,
                 preload=preload,
-                **dataset_kwargs,
+                **kwargs,
             )
             datasets.append(dataset)
-        return cls(*datasets, return_as=return_as, strict=strict)
+        return cls(*datasets, zip_as=zip_as, strict=strict)
 
     @classmethod
     def from_named_paths(
@@ -117,12 +116,12 @@ class ZipDataset(Dataset):
         paths: dict[str, str | Path | Sequence[str] | Sequence[Path]],
         dataset_cls: type[CachingDataset],
         strict: bool = False,
-        cache: int | float | str | bool | None = "4G",
+        cache: int | float | str | bool | None = "2G",
         attrs_cache: int | float | str | bool | None = None,
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
-        dataset_return_as: DataReturnTypes | None = "tuple",
-        **dataset_kwargs,
+        return_as: DataReturnTypes | None = "tuple",
+        **kwargs,
     ) -> "ZipDataset":
         """Create ZipDataset from named paths with automatic dict return format.
 
@@ -136,28 +135,28 @@ class ZipDataset(Dataset):
             attrs_cache: Cache size for each dataset's attributes/metadata.
             preload: Whether to preload and cache all datasets.
             dtype: Data tensor type for all datasets.
-            dataset_return_as: Return format for individual datasets.
-            **dataset_kwargs: Additional keyword arguments passed to `dataset_cls`.
+            return_as: Return format for individual datasets.
+            **kwargs: Additional keyword arguments passed to `dataset_cls`.
         """
         if not paths:
             raise ValueError("At least one named path must be provided")
         # Create return_as mapping from names to indices
         names = list(paths.keys())
-        return_as = {name: idx for idx, name in enumerate(names)}
+        zip_as = {name: idx for idx, name in enumerate(names)}
         # Create datasets in order
         datasets = []
         for name in names:
             dataset = dataset_cls(
                 path=paths[name],
                 dtype=dtype,
-                return_as=dataset_return_as,
+                return_as=return_as,
                 cache=cache,
                 attrs_cache=attrs_cache,
                 preload=preload,
-                **dataset_kwargs,
+                **kwargs,
             )
             datasets.append(dataset)
-        return cls(*datasets, return_as=return_as, strict=strict)
+        return cls(*datasets, zip_as=zip_as, strict=strict)
 
     @property
     def n_datasets(self) -> int:
@@ -202,7 +201,7 @@ class ZipDataset(Dataset):
         Args:
             items: List of samples from each dataset.
         """
-        match self.return_as:
+        match self.zip_as:
             case "tuple":
                 return tuple(items)
             case "dict":
@@ -258,6 +257,15 @@ class ZipDataset(Dataset):
         for dataset in self.datasets:
             if hasattr(dataset, "purge_cache") and callable(dataset.purge_cache):
                 dataset.purge_cache(reset=reset)
+
+    @property
+    def n_cached(self) -> int:
+        """Total number of cached samples across all datasets."""
+        total = 0
+        for dataset in self.datasets:
+            if hasattr(dataset, "n_cached"):
+                total += dataset.n_cached
+        return total
 
     @property
     def cached_bytes_total(self) -> nbytes:

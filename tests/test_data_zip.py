@@ -154,7 +154,7 @@ class TestZipDataset:
         """Test __getitem__ with tuple return format."""
         dataset1 = DummyDataset([1, 2, 3])
         dataset2 = DummyDataset([4, 5, 6])
-        zipped = ZipDataset(dataset1, dataset2, return_as="tuple")
+        zipped = ZipDataset(dataset1, dataset2, zip_as="tuple")
         item = zipped[0]
         assert isinstance(item, tuple)
         assert len(item) == 2
@@ -165,7 +165,7 @@ class TestZipDataset:
         """Test __getitem__ with dict return format."""
         dataset1 = DummyDataset([1, 2, 3])
         dataset2 = DummyDataset([4, 5, 6])
-        zipped = ZipDataset(dataset1, dataset2, return_as="dict")
+        zipped = ZipDataset(dataset1, dataset2, zip_as="dict")
         item = zipped[0]
         assert isinstance(item, dict)
         assert len(item) == 2
@@ -178,7 +178,7 @@ class TestZipDataset:
         dataset2 = DummyDataset([4, 5, 6])
         dataset3 = DummyDataset([7, 8, 9])
         zipped = ZipDataset(
-            dataset1, dataset2, dataset3, return_as={"input": 0, "target": 1, "mask": 2}
+            dataset1, dataset2, dataset3, zip_as={"input": 0, "target": 1, "mask": 2}
         )
         item = zipped[0]
         assert isinstance(item, dict)
@@ -192,7 +192,7 @@ class TestZipDataset:
         dataset2 = DummyDataset([4, 5, 6])
         with pytest.warns(UserWarning, match="out of range"):
             zipped = ZipDataset(
-                dataset1, dataset2, return_as={"input": 0, "invalid": 5}
+                dataset1, dataset2, zip_as={"input": 0, "invalid": 5}
             )
             item = zipped[0]
             assert "input" in item
@@ -457,7 +457,7 @@ class TestZipDataset:
             paths['inputs'],
             paths['targets'],
             dataset_cls=DummyCachingDataset,
-            return_as={'input': 0, 'target': 1},
+            zip_as={'input': 0, 'target': 1},
             cache="1M"
         )
         sample = zipped[0]
@@ -547,7 +547,7 @@ class TestZipDataset:
             paths['inputs'],
             paths['targets'],
             dataset_cls=DummyCachingDataset,
-            return_as={'input': 0, 'target': 1},
+            zip_as={'input': 0, 'target': 1},
             cache="10M",
             preload=True,
             strict=True
