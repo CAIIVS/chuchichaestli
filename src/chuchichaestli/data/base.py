@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Base classes for datasets and loaders."""
+"""Base classes for datasets for single-sample returns."""
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 from chuchichaestli.utils import prod
@@ -30,9 +31,9 @@ class FileDataset(Dataset, ABC):
     """Abstract base class for file-based datasets of various types.
 
     Provides common file handling utilities with wildcards finders.
-    Files should be memory-mapped into an `mmap` which can represent a single
+    Files should be memory-mapped into a `_mmap` which can represent a single
     contiguous dataset or multiple subsets that will be sequentially indexed.
-    Optionally, a `mmap_attrs` memory map (congruent to `mmap`) can be loaded
+    Optionally, a `_mmap_attrs` memory map (congruent to `mmap`) can be loaded
     that contains metadata.
 
     Required definitions:
@@ -48,6 +49,7 @@ class FileDataset(Dataset, ABC):
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
         has_attrs: bool = False,
+        copy_on_write: bool = False,
         **kwargs,
     ):
         """Constructor.
@@ -56,7 +58,12 @@ class FileDataset(Dataset, ABC):
             path: Path to file(s) or data directory. May contain wildcards.
             dtype: Data tensor type; default: torch.float32.
             return_as: Return type; one of ['tuple', 'dict', dict, None].
+                If `'dict'` or `dict`, the output will always be of type `dict`,
+                if `'tuple'` and the samples have no corresponding metadata,
+                the sample tensor will be returned directly.
             has_attrs: Whether to fetch attribute/metadata.
+            copy_on_write: Whether to use Copy-on-Write behaviour, i.e.
+                whether to copy data from memory maps/files.
             kwargs: Additional keyword arguments for subclasses.
         """
         self.dtype = dtype
@@ -66,6 +73,7 @@ class FileDataset(Dataset, ABC):
         self._file_offsets: list[int] = []
         self._mmap: list[Sequence] = []
         self._mmap_attrs: list[Sequence] = []
+        self.cow = copy_on_write
         if self.has_files:
             self.load(**kwargs)
 
@@ -295,7 +303,7 @@ class FileDataset(Dataset, ABC):
             Formatted output.
         """
         match (self.return_as, attrs):
-            case (_, None):
+            case ("tuple", None):
                 return item
             case ("tuple", _):
                 return (item, attrs)
@@ -310,30 +318,60 @@ class FileDataset(Dataset, ABC):
                         return {data_key: item, "attrs": attrs}
                     case _:
                         return {"data": item, "attrs": attrs}
+            case (_, None):
+                return item
             case _:
                 return (item, attrs)
 
-    def _read_item(self, index: int, flush: bool = True) -> torch.Tensor:
-        """Fetch tensor sample from mmap.
+    def _read_item(self, index: int, copy: bool | None = None, flush: bool = True) -> torch.Tensor:
+        """Fetch tensor sample from mmap (no cache lookup).
 
         Args:
             index: Sample index.
+            copy: Whether to copy manually from mmap; defaults to `self.cow`.
             flush: Clear memory after reading from mmap.
 
         Note: if subclasses have non-standard logic for accessing mmaps,
             this method should be overridden.
         """
         file_idx, local_idx = self._map_index(index)
-        sample = self._mmap[file_idx][local_idx].copy()
-        if flush:
-            self._mmap[file_idx].flush()
+        # Fetch sample from memory map
+        copy = copy if copy is not None else not self.cow
+        sample = self._get_from_mmap(file_idx, local_idx, copy=copy)
+        # Flush memory-map cache
+        if flush and hasattr(self._mmap[file_idx], "flush"):
+            try:
+                self._mmap[file_idx].flush()
+            except (AttributeError, OSError):
+                pass
         return torch.from_numpy(sample).type(self.dtype)
 
-    def _read_attrs(self, index: int) -> dict | Any | None:
-        """Fetch attributes from mmap.
+    def _get_from_mmap(self, file_idx: int, local_idx: int, copy: bool = False) -> np.ndarray:
+        """Hook for reading sample from memory map.
+
+        Override if `_mmap` requires special logic.
+
+        Args:
+            file_idx: Index of the file in self._mmap.
+            local_idx: Local sample index within that file.
+            copy: Whether to manually copy from mmap.
+        """
+        # Fetch item
+        sample = self._mmap[file_idx][local_idx]
+        # Copy sample from memory map
+        if copy:
+            sample = sample.copy()
+        # Given a memmap `fp`, `isinstance(fp, np.ndarray)` returns `True`
+        if not isinstance(sample, np.ndarray):
+            sample = np.asarray(sample)
+        return sample
+
+    def _read_attrs(self, index: int, copy: bool | None = None, flush: bool = True) -> dict | Any | None:
+        """Fetch attributes from mmap (no cache lookup).
 
         Args:
             index: Attributes index.
+            copy: Whether to manually copy from mmap.
             flush: Clear memory after reading from mmap.
 
         Note: if subclasses have non-standard logic for accessing mmaps,
@@ -342,8 +380,44 @@ class FileDataset(Dataset, ABC):
         if not self._mmap_attrs:
             return None
         file_idx, local_idx = self._map_index(index)
-        attr = self._mmap_attrs[file_idx][local_idx].copy()
+        copy = copy if copy is not None else not self.cow
+        attr = self._get_from_mmap_attrs(file_idx, local_idx, copy=copy)
+        # Flush memory-map cache
+        if flush and hasattr(self._mmap_attrs[file_idx], "flush"):
+            try:
+                self._mmap_attrs[file_idx].flush()
+            except (AttributeError, OSError):
+                pass
         return attr
+
+    def _get_from_mmap_attrs(self, file_idx: int, local_idx: int, copy: bool = True):
+        """Hook for reading attribute/metadata from memory map.
+
+        Override if `_mmap_attrs` requires special logic.
+
+        Args:
+            file_idx: Index of the file in self._mmap.
+            local_idx: Local sample index within that file.
+            copy: Whether to manually copy from mmap.
+        """
+        attrs_obj = self._mmap_attrs[file_idx]
+        # Per-sample attributes
+        if hasattr(attrs_obj, "__getitem__"):
+            try:
+                attr = attrs_obj[local_idx]
+                if isinstance(attr, np.ndarray) and not attr.flags["OWNDATA"]:
+                    if copy:
+                        attr = attr.copy()
+                return attr
+            except (IndexError, TypeError, KeyError):
+                pass
+        # Per-group dict-like attributes
+        if hasattr(attrs_obj, "items"):
+            return dict(attrs_obj)
+        if hasattr(attrs_obj, "keys"):
+            return {k: attrs_obj[k] for k in attrs_obj.keys()}
+        # Fallback: return as-is
+        return attrs_obj
 
     def __getitem__(self, index: int) -> torch.Tensor:
         """Get a sample at specified index.
@@ -379,9 +453,9 @@ class CachingDataset(FileDataset, ABC):
 
     Extends FileDataset with stochastic caching using SharedArray.
     All files are treated as a single contiguous dataset for caching purposes.
-    The cache stores samples in shared memory, allowing efficient access
-    across multiple DataLoader workers. When cache size is smaller than
-    the dataset, only a subset of samples are cached (stochastic caching).
+    The cache stores samples in shared memory, allowing efficient access across
+    multiple DataLoader workers. When cache size is smaller than the dataset,
+    only a subset of samples are cached (stochastic caching).
 
     Required definitions:
         - `load`: load the memory map(s).
@@ -393,8 +467,8 @@ class CachingDataset(FileDataset, ABC):
         path: str | Path | list[str] | list[Path] | None = None,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
-        cache: int | float | str | bool | None = "4G",
-        attrs_cache: int | float | str | bool | None = None,
+        cache: int | float | str | bool | nbytes | None = "4G",
+        attrs_cache: int | float | str | bool | nbytes | None = None,
         preload: bool = False,
         **kwargs,
     ):
@@ -405,9 +479,9 @@ class CachingDataset(FileDataset, ABC):
                 If None, the dataset is assumed to be created programmatically.
             dtype: Data tensor type; default: `torch.float32`.
             return_as: Return type; one of `['tuple', 'dict', None]` or as dictionary template.
-            preload: Preload and cache the dataset.
-            cache: Cache size for data items.
+            cache: Cache size for data items (e.g., "4G", 4.0, or bytes).
             attrs_cache: Cache size for attributes/metadata.
+            preload: Preload and cache the dataset.
             kwargs: Additional keyword arguments for subclasses.
         """
         super().__init__(path=path, dtype=dtype, return_as=return_as, **kwargs)
@@ -424,8 +498,8 @@ class CachingDataset(FileDataset, ABC):
     def __str__(self) -> str:
         """Instance string."""
         name = self.__class__.__name__
-        cached_str = self.cache.cached_bytes.as_str()
-        size_str = self.cache.cache_size.as_str()
+        cached_str = self.cache.cached_bytes.as_str() if self.cache else None
+        size_str = self.cache.cache_size.as_str() if self.cache else None
         return f"{name}[{cached_str}/{size_str}](#f{self.n_files}#s{self.n_samples})"
 
     def __del__(self):
