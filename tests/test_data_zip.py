@@ -191,9 +191,7 @@ class TestZipDataset:
         dataset1 = DummyDataset([1, 2, 3])
         dataset2 = DummyDataset([4, 5, 6])
         with pytest.warns(UserWarning, match="out of range"):
-            zipped = ZipDataset(
-                dataset1, dataset2, zip_as={"input": 0, "invalid": 5}
-            )
+            zipped = ZipDataset(dataset1, dataset2, zip_as={"input": 0, "invalid": 5})
             item = zipped[0]
             assert "input" in item
             assert "invalid" not in item
@@ -240,9 +238,11 @@ class TestZipDataset:
         dataset2 = DummyDataset([4, 5, 6])
         zipped = ZipDataset(dataset1, dataset2)
         s = str(zipped)
+        r = repr(zipped)
         assert "ZipDataset" in s
         assert "n=2" in s
         assert "len=3" in s
+        assert s == r
 
     def test_context_manager(self):
         """Test context manager functionality."""
@@ -345,10 +345,10 @@ class TestZipDataset:
         """Test basic usage of from_paths."""
         paths = create_multiple_datasets
         zipped = ZipDataset.from_paths(
-            paths['inputs'],
-            paths['targets'],
+            paths["inputs"],
+            paths["targets"],
             dataset_cls=DummyCachingDataset,
-            cache="1M"
+            cache="1M",
         )
         assert zipped.n_datasets == 2
         assert len(zipped) == 10
@@ -358,11 +358,11 @@ class TestZipDataset:
         """Test from_paths with preload option."""
         paths = create_multiple_datasets
         zipped = ZipDataset.from_paths(
-            paths['inputs'],
-            paths['targets'],
+            paths["inputs"],
+            paths["targets"],
             dataset_cls=DummyCachingDataset,
             cache="10M",
-            preload=True
+            preload=True,
         )
         # Check that data is cached
         assert zipped.datasets[0].n_cached > 0
@@ -373,11 +373,11 @@ class TestZipDataset:
         """Test from_paths with custom dtype."""
         paths = create_multiple_datasets
         zipped = ZipDataset.from_paths(
-            paths['inputs'],
-            paths['targets'],
+            paths["inputs"],
+            paths["targets"],
             dataset_cls=DummyCachingDataset,
             dtype=torch.float64,
-            cache="1M"
+            cache="1M",
         )
         item1, item2 = zipped[0]
         assert item1.dtype == torch.float64
@@ -388,11 +388,11 @@ class TestZipDataset:
         """Test from_paths with attributes cache."""
         paths = create_multiple_datasets
         zipped = ZipDataset.from_paths(
-            paths['inputs'],
-            paths['targets'],
+            paths["inputs"],
+            paths["targets"],
             dataset_cls=DummyCachingDataset,
             cache="1M",
-            attrs_cache="500K"
+            attrs_cache="500K",
         )
         assert zipped.datasets[0].attrs_cache is not None
         assert zipped.datasets[1].attrs_cache is not None
@@ -408,7 +408,7 @@ class TestZipDataset:
                 paths[2],
                 dataset_cls=DummyCachingDataset,
                 strict=True,
-                cache="1M"
+                cache="1M",
             )
 
     def test_from_paths_no_strict_different_sizes(self, create_different_size_datasets):
@@ -420,7 +420,7 @@ class TestZipDataset:
             paths[2],  # 20 samples
             dataset_cls=DummyCachingDataset,
             strict=False,
-            cache="1M"
+            cache="1M",
         )
         # Length should be minimum (10)
         assert len(zipped) == 10
@@ -445,7 +445,7 @@ class TestZipDataset:
             str(temp_dir / "input_*" / "*.npy"),
             str(temp_dir / "target_*" / "*.npy"),
             dataset_cls=DummyCachingDataset,
-            cache="1M"
+            cache="1M",
         )
         assert zipped.n_datasets == 2
         zipped.close()
@@ -454,16 +454,30 @@ class TestZipDataset:
         """Test from_paths with dict return format."""
         paths = create_multiple_datasets
         zipped = ZipDataset.from_paths(
-            paths['inputs'],
-            paths['targets'],
+            paths["inputs"],
+            paths["targets"],
             dataset_cls=DummyCachingDataset,
-            zip_as={'input': 0, 'target': 1},
-            cache="1M"
+            zip_as={"input": 0, "target": 1},
+            cache="1M",
         )
         sample = zipped[0]
         assert isinstance(sample, dict)
-        assert 'input' in sample
-        assert 'target' in sample
+        assert "input" in sample
+        assert "target" in sample
+        zipped.close()
+
+    def test_from_paths_return_as_invalid_dict(self, create_multiple_datasets):
+        """Test from_paths with dict return format."""
+        paths = create_multiple_datasets
+        zipped = ZipDataset.from_paths(
+            paths["inputs"],
+            paths["targets"],
+            dataset_cls=DummyCachingDataset,
+            zip_as={"input": "invalid", "target": 1},
+            cache="1M",
+        )
+        with pytest.warns(UserWarning, match="Invalid dataset index type for key"):
+            _ = zipped[0]
         zipped.close()
 
     def test_from_named_paths_basic(self, create_multiple_datasets):
@@ -471,49 +485,47 @@ class TestZipDataset:
         paths = create_multiple_datasets
         zipped = ZipDataset.from_named_paths(
             {
-                'input': paths['inputs'],
-                'target': paths['targets'],
-                'mask': paths['masks'],
+                "input": paths["inputs"],
+                "target": paths["targets"],
+                "mask": paths["masks"],
             },
             dataset_cls=DummyCachingDataset,
-            cache="1M"
+            cache="1M",
         )
         assert zipped.n_datasets == 3
         assert len(zipped) == 10
         # Check that return format is dict with correct keys
         sample = zipped[0]
         assert isinstance(sample, dict)
-        assert 'input' in sample
-        assert 'target' in sample
-        assert 'mask' in sample
+        assert "input" in sample
+        assert "target" in sample
+        assert "mask" in sample
         zipped.close()
 
     def test_from_named_paths_preserves_order(self, create_multiple_datasets):
         """Test that from_named_paths preserves key order."""
         paths = create_multiple_datasets
         ordered_paths = {
-            'first': paths['inputs'],
-            'second': paths['targets'],
-            'third': paths['masks'],
+            "first": paths["inputs"],
+            "second": paths["targets"],
+            "third": paths["masks"],
         }
         zipped = ZipDataset.from_named_paths(
-            ordered_paths,
-            dataset_cls=DummyCachingDataset,
-            cache="1M"
+            ordered_paths, dataset_cls=DummyCachingDataset, cache="1M"
         )
         sample = zipped[0]
         keys = list(sample.keys())
-        assert keys == ['first', 'second', 'third']
+        assert keys == ["first", "second", "third"]
         zipped.close()
 
     def test_from_named_paths_with_preload(self, create_multiple_datasets):
         """Test from_named_paths with preload."""
         paths = create_multiple_datasets
         zipped = ZipDataset.from_named_paths(
-            {'input': paths['inputs'], 'target': paths['targets']},
+            {"input": paths["inputs"], "target": paths["targets"]},
             dataset_cls=DummyCachingDataset,
             cache="10M",
-            preload=True
+            preload=True,
         )
         assert all(ds.n_cached > 0 for ds in zipped.datasets)
         zipped.close()
@@ -521,44 +533,39 @@ class TestZipDataset:
     def test_from_named_paths_empty_raises(self):
         """Test from_named_paths with empty dict raises."""
         with pytest.raises(ValueError, match="At least one named path"):
-            ZipDataset.from_named_paths(
-                {},
-                dataset_cls=DummyCachingDataset
-            )
+            ZipDataset.from_named_paths({}, dataset_cls=DummyCachingDataset)
 
     def test_from_named_paths_single_entry(self, create_multiple_datasets):
         """Test from_named_paths with single entry."""
         paths = create_multiple_datasets
         zipped = ZipDataset.from_named_paths(
-            {'data': paths['inputs']},
-            dataset_cls=DummyCachingDataset,
-            cache="1M"
+            {"data": paths["inputs"]}, dataset_cls=DummyCachingDataset, cache="1M"
         )
         assert zipped.n_datasets == 1
         sample = zipped[0]
         assert isinstance(sample, dict)
-        assert 'data' in sample
+        assert "data" in sample
         zipped.close()
 
     def test_full_workflow_from_paths(self, create_multiple_datasets):
         """Test complete workflow using from_paths."""
         paths = create_multiple_datasets
         with ZipDataset.from_paths(
-            paths['inputs'],
-            paths['targets'],
+            paths["inputs"],
+            paths["targets"],
             dataset_cls=DummyCachingDataset,
-            zip_as={'input': 0, 'target': 1},
+            zip_as={"input": 0, "target": 1},
             cache="10M",
             preload=True,
-            strict=True
+            strict=True,
         ) as zipped:
             # Access data
             for i in range(min(5, len(zipped))):
                 sample = zipped[i]
-                assert 'input' in sample
-                assert 'target' in sample
-                assert sample['input'].shape == (5, 5)
-                assert sample['target'].shape == (3, 3)
+                assert "input" in sample
+                assert "target" in sample
+                assert sample["input"].shape == (5, 5)
+                assert sample["target"].shape == (3, 3)
             # Check caching
             assert zipped.cached_bytes_total > nbytes(0)
 
@@ -567,19 +574,19 @@ class TestZipDataset:
         paths = create_multiple_datasets
         with ZipDataset.from_named_paths(
             {
-                'image': paths['inputs'],
-                'label': paths['targets'],
-                'attention': paths['masks'],
+                "image": paths["inputs"],
+                "label": paths["targets"],
+                "attention": paths["masks"],
             },
             dataset_cls=DummyCachingDataset,
             cache="5M",
-            preload=True
+            preload=True,
         ) as zipped:
             # Verify structure
             sample = zipped[0]
-            assert set(sample.keys()) == {'image', 'label', 'attention'}
+            assert set(sample.keys()) == {"image", "label", "attention"}
             # Verify iteration
             for sample in zipped:
-                assert 'image' in sample
-                assert 'label' in sample
-                assert 'attention' in sample
+                assert "image" in sample
+                assert "label" in sample
+                assert "attention" in sample
