@@ -4,12 +4,11 @@
 """PyTorch dataset classes for HDF5 file reading."""
 
 from pathlib import Path
+import fnmatch
 import tempfile
 import h5py
 import torch
 import numpy as np
-import fnmatch
-from typing import Any
 from collections.abc import Sequence
 from chuchichaestli.data.cache import nbytes
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
@@ -47,18 +46,18 @@ class HDF5Dataset(CachingDataset):
         """Constructor.
 
         Args:
-            path: Path to file(s) or data directory. May contain wildcards (* and **).
+            path: Path to file(s) or data directory. May contain wildcards (`*` and `**`).
             groups: HDF5 group path(s) or patterns for datasets.
-                Use "*" for all groups, "path/*" for subgroups, etc.
+                Use `"*"` for all groups, `"path/*"` for subgroups, etc.
             attrs_groups: HDF5 group path(s) or patterns for attributes/metadata.
-                If None, no attributes are loaded.
-            dtype: Data tensor type; default: torch.float32.
+                If `None`, no attributes are loaded.
+            dtype: Data tensor type; default: `torch.float32`.
             return_as: Return type; one of `['tuple', 'dict', 'list']` or custom dict mapping.
-                - 'tuple': Returns tuple of samples (default)
-                - 'dict': Returns dict with keys '0', '1', etc.
-                - dict: Custom mapping, e.g., {'input': 0, 'target': 1, 'mask': 3}
+                - `'tuple'`: Returns tuple of samples (default)
+                - `'dict'`: Returns dict with keys `'0'`, `'1'`, etc.
+                - `dict`: Custom mapping, e.g., `{'input': 0, 'target': 1, 'mask': 3}`
                     which maps keys to dataset indices.
-            cache: Cache size for data items (e.g., "4G", 4.0, or bytes).
+            cache: Cache size for data items (e.g., `"4G"`, `4.0`, or bytes).
             attrs_cache: Cache size for attributes/metadata.
             preload: Preload and cache the dataset.
             kwargs: Additional arguments for h5py.File (e.g., `libver='latest'`).
