@@ -323,7 +323,9 @@ class FileDataset(Dataset, ABC):
             case _:
                 return (item, attrs)
 
-    def _read_item(self, index: int, copy: bool | None = None, flush: bool = True) -> torch.Tensor:
+    def _read_item(
+        self, index: int, copy: bool | None = None, flush: bool = True
+    ) -> torch.Tensor:
         """Fetch tensor sample from mmap (no cache lookup).
 
         Args:
@@ -344,9 +346,13 @@ class FileDataset(Dataset, ABC):
                 self._mmap[file_idx].flush()
             except (AttributeError, OSError):
                 pass
+        if isinstance(sample, torch.Tensor):
+            return sample.to(self.dtype)
         return torch.from_numpy(sample).type(self.dtype)
 
-    def _get_from_mmap(self, file_idx: int, local_idx: int, copy: bool = False) -> np.ndarray:
+    def _get_from_mmap(
+        self, file_idx: int, local_idx: int, copy: bool = False
+    ) -> np.ndarray:
         """Hook for reading sample from memory map.
 
         Override if `_mmap` requires special logic.
@@ -358,6 +364,8 @@ class FileDataset(Dataset, ABC):
         """
         # Fetch item
         sample = self._mmap[file_idx][local_idx]
+        if isinstance(sample, torch.Tensor):
+            return sample.clone() if copy else sample
         # Copy sample from memory map
         if copy:
             sample = sample.copy()
@@ -366,7 +374,9 @@ class FileDataset(Dataset, ABC):
             sample = np.asarray(sample)
         return sample
 
-    def _read_attrs(self, index: int, copy: bool | None = None, flush: bool = True) -> dict | Any | None:
+    def _read_attrs(
+        self, index: int, copy: bool | None = None, flush: bool = True
+    ) -> dict | Any | None:
         """Fetch attributes from mmap (no cache lookup).
 
         Args:
@@ -405,6 +415,8 @@ class FileDataset(Dataset, ABC):
         if hasattr(attrs_obj, "__getitem__"):
             try:
                 attr = attrs_obj[local_idx]
+                if isinstance(attr, torch.Tensor):
+                    return attr.clone() if copy else attr
                 if isinstance(attr, np.ndarray) and not attr.flags["OWNDATA"]:
                     if copy:
                         attr = attr.copy()
@@ -557,7 +569,8 @@ class CachingDataset(FileDataset, ABC):
         """Size of a single metadata element in bytes."""
         if not self._mmap_attrs:
             return nbytes(0)
-        return serial_byte_size(self._mmap_attrs[0])
+        attr = self._get_from_mmap_attrs(0, 0)
+        return serial_byte_size(attr)
 
     @property
     def serial_size(self) -> nbytes:
