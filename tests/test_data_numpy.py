@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Unit tests for the HDF5Dataset and ZipHDF5Dataset classes."""
+"""Unit tests for the NumpyDataset and ZipNumpyDataset classes."""
 
 from pathlib import Path
 import tempfile
@@ -341,7 +341,11 @@ class TestNumpyDataset:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             NumpyDataset([sample_npy_file, npz_path], keys="images").close()
-        user_warnings = [w for w in caught if issubclass(w.category, UserWarning) and "ignored" in str(w.message)]
+        user_warnings = [
+            w
+            for w in caught
+            if issubclass(w.category, UserWarning) and "ignored" in str(w.message)
+        ]
         assert len(user_warnings) == 0
 
     def test_default_key_pattern_no_warning(self, sample_npy_file):
@@ -349,7 +353,11 @@ class TestNumpyDataset:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             NumpyDataset(sample_npy_file).close()
-        user_warnings = [w for w in caught if issubclass(w.category, UserWarning) and "ignored" in str(w.message)]
+        user_warnings = [
+            w
+            for w in caught
+            if issubclass(w.category, UserWarning) and "ignored" in str(w.message)
+        ]
         assert len(user_warnings) == 0
 
     def test_tensor_is_writable_from_npy_mmap(self, sample_npy_file):
@@ -365,10 +373,13 @@ class TestNumpyDataset:
             warnings.simplefilter("always")
             sample = ds[0]
         numpy_warnings = [
-            w for w in caught
+            w
+            for w in caught
             if issubclass(w.category, UserWarning) and "not writable" in str(w.message)
         ]
-        assert len(numpy_warnings) == 0, "Got non-writable tensor warning from memmap slice"
+        assert len(numpy_warnings) == 0, (
+            "Got non-writable tensor warning from memmap slice"
+        )
         # Verify the tensor is actually writable
         sample[0] = 0.0
         ds.close()
