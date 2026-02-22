@@ -108,6 +108,7 @@ class TestHDF5Dataset:
             groups="data/images",
             attrs_groups="metadata",
             return_as="tuple",
+            attrs_cache="10M",
         )
         assert ds.has_attrs
         ret = ds[0]
