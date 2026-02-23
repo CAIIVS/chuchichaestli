@@ -217,8 +217,8 @@ class FileDataset(Dataset, ABC):
 
     @property
     def has_files(self) -> bool:
-        """Whether the dataset has associated files."""
-        return self.n_files > 0
+        """Whether the dataset has associated files or data buffers."""
+        return bool(self.files) or bool(self._mmap)
 
     @property
     def shape(self) -> tuple[int, ...]:
