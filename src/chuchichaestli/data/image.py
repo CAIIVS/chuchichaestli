@@ -111,15 +111,11 @@ class ImageTensorView:
             return t.to(torch.float32) / 255.0
         return t.to(torch.float32)
 
-    
+
 class JsonMetaView:
     """Lazy, length-1 dict view over a JSON metadata file."""
 
-    def __init__(
-        self,
-        path: Path, keys: str | Sequence[str] = "*",
-        mode: str = "r"
-    ):
+    def __init__(self, path: Path, keys: str | Sequence[str] = "*", mode: str = "r"):
         self._path = path
         self._mode = mode
         self._keys = (keys,) if isinstance(keys, str) else tuple(keys)
@@ -226,7 +222,9 @@ class ImageDataset(CachingDataset):
     def load(self, **kwargs) -> None:
         """Build one `ImageTensorView` per image file and index them."""
         for file_path in self.files:
-            self._mmap.append(ImageTensorView(file_path, self.read_mode, self.normalize))
+            self._mmap.append(
+                ImageTensorView(file_path, self.read_mode, self.normalize)
+            )
             if self.has_attrs:
                 mdtafile = file_path.with_suffix(self.attrs_suffix)
                 self._mmap_attrs.append(

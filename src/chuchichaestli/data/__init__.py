@@ -10,7 +10,7 @@ from chuchichaestli.data.numpy import NumpyDataset, ZipNumpyDataset
 from chuchichaestli.data.safetensors import SafetensorsDataset, ZipSafetensorsDataset
 from chuchichaestli.data.image import ImageDataset, ZipImageDataset
 from chuchichaestli.data.procedural import (
-    ProceduralDataset, # abstract
+    ProceduralDataset,  # abstract
     HalfMoonsDataset,
     SpiralsDataset,
     CheckerboardDataset,

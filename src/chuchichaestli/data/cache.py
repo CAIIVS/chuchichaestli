@@ -787,8 +787,16 @@ class SharedDictList:
             shm_states_mem = SharedMemory(name=states_name)
             states_arr = np.ndarray((size,), dtype=np.uint8, buffer=shm_states_mem.buf)
         except FileNotFoundError:
-            shm_states_mem = SharedMemory(name=states_name, create=True, size=states_size) if states_size else None
-            states_arr = np.ndarray((size,), dtype=np.uint8, buffer=shm_states_mem.buf if shm_states_mem else None)
+            shm_states_mem = (
+                SharedMemory(name=states_name, create=True, size=states_size)
+                if states_size
+                else None
+            )
+            states_arr = np.ndarray(
+                (size,),
+                dtype=np.uint8,
+                buffer=shm_states_mem.buf if shm_states_mem else None,
+            )
             states_arr[:] = 0
             states_arr[n_slots:] = SlotState.OOC.value
         _shm_states = torch.from_numpy(states_arr)

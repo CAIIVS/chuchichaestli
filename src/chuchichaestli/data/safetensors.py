@@ -65,7 +65,9 @@ class SafetensorsView:
         if idx < 0:
             idx += self._total
         if not (0 <= idx < self._total):
-            raise IndexError(f"Index {idx} out of range for dataset of length {self._total}.")
+            raise IndexError(
+                f"Index {idx} out of range for dataset of length {self._total}."
+            )
         # Find which key owns this index
         key_idx = 0
         for i, offset in enumerate(self._offsets):
@@ -197,7 +199,9 @@ class SafetensorsDataset(CachingDataset):
         # Validate that all selected tensors share the same sample shape and type
         ref_shape: tuple[int, ...] = shapes[0][1:]
         ref_dtype: torch.dtype = slices[0].dtype
-        for i, (key, shape, tensor) in enumerate(zip(keys[1:], shapes[1:], slices[1:]), start=1):
+        for i, (key, shape, tensor) in enumerate(
+            zip(keys[1:], shapes[1:], slices[1:]), start=1
+        ):
             if shape[1:] != ref_shape:
                 raise ValueError(
                     f"Tensor shapes are incompatible for concatenation in '{source}': "
@@ -260,6 +264,7 @@ class SafetensorsDataset(CachingDataset):
         if print_:
             print(summary)
         return summary
+
 
 class ZipSafetensorsDataset(ZipDataset):
     """Dataset for simultaneous readouts from multiple safetensors tensor sources.

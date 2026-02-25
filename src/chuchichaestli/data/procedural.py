@@ -609,7 +609,7 @@ class SwissRollDataset(ProceduralDataset):
         t_max: float = 4.5 * torch.pi,
         noise: float = 0.05,
         path: str | Path | None = None,
-        **kwargs
+        **kwargs,
     ):
         """Constructor.
 
@@ -634,11 +634,7 @@ class SwissRollDataset(ProceduralDataset):
         self.t_min = t_min
         self.t_max = t_max
         self.noise = noise
-        super().__init__(
-            n_samples=n_samples,
-            path=path,
-            **kwargs
-        )
+        super().__init__(n_samples=n_samples, path=path, **kwargs)
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate Swiss-roll samples."""
