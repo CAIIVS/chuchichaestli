@@ -431,7 +431,7 @@ class FileDataset(Dataset, ABC):
         # Fallback: return as-is
         return attrs_obj
 
-    def __getitem__(self, index: int) -> torch.Tensor:
+    def __getitem__(self, index: int) -> torch.Tensor | tuple | dict:
         """Get a sample at specified index.
 
         Args:
@@ -698,7 +698,7 @@ class CachingDataset(FileDataset, ABC):
         if overwrite or index not in self.attrs_cache:
             self.attrs_cache[index] = attrs
 
-    def __getitem__(self, index: int) -> torch.Tensor:
+    def __getitem__(self, index: int) -> torch.Tensor | tuple | dict:
         """Get a sample at specified index.
 
         Args:

@@ -35,7 +35,7 @@ class SafetensorsView:
         key_lengths: list[int],
         sample_shape: tuple[int, ...],
         dtype: torch.dtype,
-    ) -> None:
+    ):
         self._handle = handle
         self._keys = keys
         self._key_lengths = key_lengths
@@ -102,6 +102,7 @@ class SafetensorsDataset(CachingDataset):
         cache: int | float | str | bool | nbytes | None = "4G",
         attrs_cache: int | float | str | bool | nbytes | None = None,
         preload: bool = False,
+        **kwargs,
     ):
         """Constructor.
 
@@ -112,11 +113,15 @@ class SafetensorsDataset(CachingDataset):
             attrs_keys: Key name(s) or patterns for attribute/metadata tensors.
                 If `None`, no attributes are loaded.
             dtype: Data tensor type; default: `torch.float32`.
-            return_as: Return type; one of `['tuple', 'dict']` or a custom dict
-                mapping.  See `CachingDataset` for details.
+            return_as: Return type; one of `['tuple', 'dict']` or a custom dict mapping.
+                - `'tuple'`: Returns tuple of samples (default).
+                - `'dict'`: Returns dict with key `'data'` (and
+                  `'attrs'` when attributes are present).
+                - `dict`: Custom mapping, e.g. `{'input': 0, 'target': 1}`.
             cache: Cache size for data items (e.g. `"4G"`, `4.0`, or bytes).
             attrs_cache: Cache size for attributes/metadata.
             preload: Preload and cache the dataset.
+            kwargs: Reserved for forward-compatibility.
         """
         # Key patterns
         self.key_patterns: tuple[str, ...] = (
