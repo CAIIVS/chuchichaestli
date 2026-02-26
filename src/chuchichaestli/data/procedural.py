@@ -103,6 +103,8 @@ class ProceduralDataset(CachingDataset, ABC):
                     stacklevel=3,
                 )
             self._init_from_tensors(*self.generate())
+        if kwargs.get("preload", False) and self.cache:
+            self.preload_cache()
 
     @staticmethod
     def _partition(n_samples: int, n_classes: int) -> list[int]:
