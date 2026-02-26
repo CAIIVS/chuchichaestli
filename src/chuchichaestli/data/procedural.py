@@ -87,7 +87,8 @@ class ProceduralDataset(CachingDataset, ABC):
 
         if cache is None:
             elem_bytes = torch.tensor(0, dtype=dtype).element_size()
-            cache = n_samples * (dim + 1) * elem_bytes
+            states_bytes = n_samples * torch.empty((), dtype=torch.uint8).element_size()
+            cache = n_samples * (dim + 1) * elem_bytes + states_bytes
 
         super().__init__(
             path=path, dtype=dtype, return_as=return_as, cache=cache, **kwargs
