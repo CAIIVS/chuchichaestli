@@ -221,9 +221,13 @@ class ProceduralDataset(CachingDataset, ABC):
         )
         return path
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, index: int | slice) -> tuple[torch.Tensor, torch.Tensor]:
         """Return item as `(features, label)` for index."""
-        row = super().__getitem__(idx)
+        if isinstance(index, slice):
+            X_slice = self._mmap[0][index, :self.dim]
+            y_slice = self._mmap[0][index, self.dim]
+            return X_slice, y_slice
+        row = super().__getitem__(index)
         return row[: self.dim], row[self.dim]
 
     def __repr__(self) -> str:
