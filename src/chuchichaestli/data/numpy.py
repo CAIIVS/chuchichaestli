@@ -6,8 +6,11 @@
 from pathlib import Path
 import fnmatch
 import numpy as np
+import numpy.lib.format as nf
 import torch
+import threading
 import warnings
+from io import RawIOBase
 from collections.abc import Sequence
 from chuchichaestli.data.cache import nbytes
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
@@ -17,11 +20,76 @@ from chuchichaestli.data.zip import ZipDataset
 __all__ = ["NumpyDataset", "ZipNumpyDataset"]
 
 
+class NpyArrayView:
+    """Proxy for a single .npy file.
+
+    Supports integer indexing (`view[i]`) and exposes `.shape` and `.dtype`
+    so that it behaves like a memory-mapped `numpy.ndarray`.
+    """
+
+    def __init__(self, file_path: Path):
+        self._path = file_path
+        self._local = threading.local()
+        # Open briefly to peek at header metadata.
+        with open(file_path, "rb") as f:
+            version = nf.read_magic(f)
+            if version == (1, 0):
+                shape, fortran_order, dtype = nf.read_array_header_1_0(f)
+            elif version == (2, 0):
+                shape, fortran_order, dtype = nf.read_array_header_2_0(f)
+            else:
+                raise ValueError(
+                    f"{file_path}: unsupported .npy format version {version}"
+                )
+            self._data_offset: int = f.tell()
+        if fortran_order:
+            raise ValueError(f"{file_path}: Fortran-order arrays are not supported")
+        self.shape: tuple[int, ...] = shape
+        self.dtype: np.dtype = dtype
+        self._sample_shape: tuple[int, ...] = shape[1:]
+        self._item_bytes: int = int(np.prod(shape[1:])) * dtype.itemsize
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def _get_fd(self) -> RawIOBase:
+        """Return the cached file descriptor for the current thread.
+
+        Opens a new fd on first access, or after `flush()` has closed it.
+        """
+        fd = getattr(self._local, "fd", None)
+        if fd is None or fd.closed:
+            self._local.fd = open(self._path, "rb")
+        return self._local.fd
+
+    def flush(self) -> None:
+        """Close the thread-local file descriptor.
+
+        Called by `FileDataset._read_item` after every sample access.
+        The fd will be transparently re-opened on the next `__getitem__` call.
+        """
+        fd = getattr(self._local, "fd", None)
+        if fd is not None and not fd.closed:
+            fd.close()
+
+    def close(self) -> None:
+        """Alias for `flush`; called explicitly during dataset teardown."""
+        self.flush()
+
+    def __getitem__(self, idx) -> np.ndarray:
+        """Open the file, copy the requested slice, close immediately."""
+        f = self._get_fd()
+        f.seek(self._data_offset + idx * self._item_bytes)
+        buf = f.read(self._item_bytes)
+        return np.frombuffer(buf, dtype=self.dtype).reshape(self._sample_shape).copy()
+
+
+
 class NumpyDataset(CachingDataset):
     """Dataset for loading numpy files (.npy / .npz) with (sto)caching features.
 
     Features:
-    - memory-mapped .npy file access (via `np.load(..., mmap_mode='r')`)
+    - lazy .npy file access via `NpyArrayView`
     - .npz archive support with key-pattern selection and array concatenation
     - shared memory caching via CachingDataset
     - optional attribute/metadata loading
@@ -104,6 +172,7 @@ class NumpyDataset(CachingDataset):
         # Issue warning if keys have been passed, but files only include .npy
         npy_files = [f for f in self.files if f.suffix == ".npy"]
         npz_files = [f for f in self.files if f.suffix == ".npz"]
+        
         if npy_files and not npz_files and self.key_patterns != ("*",):
             warnings.warn(
                 f"key_patterns {self.key_patterns!r} are ignored for .npy files, "
@@ -125,7 +194,7 @@ class NumpyDataset(CachingDataset):
         The array is memory-mapped. Attribute sidecar files (`<stem>.attrs.npy`)
         are loaded if `attrs_patterns` is set.
         """
-        data = np.load(file_path, mmap_mode="r")
+        data = NpyArrayView(file_path)
         self._mmap.append(data)
 
         # Look for sidecar data matching attrs_patterns
@@ -218,6 +287,14 @@ class NumpyDataset(CachingDataset):
 
     def close(self):
         """Close memory maps and clean up resources."""
+        for entry in self._mmap:
+            if isinstance(entry, NpyArrayView):
+                entry.close()
+            elif isinstance(entry, np.memmap):
+                try:
+                    entry._mmap.close()
+                except Exception:
+                    pass
         self._mmap.clear()
         self._mmap_attrs.clear()
         self._file_offsets.clear()
