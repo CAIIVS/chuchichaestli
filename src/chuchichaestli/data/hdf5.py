@@ -89,6 +89,7 @@ class HDF5Dataset(CachingDataset):
             preload=preload,
             copy_on_write=True,
             has_attrs=attrs_groups is not None,
+            new_axis=False,
         )
 
     def load(self, **kwargs):
@@ -283,6 +284,7 @@ class HDF5Dataset(CachingDataset):
         self.h5_attrs.clear()
         self._mmap.clear()
         self._mmap_attrs.clear()
+        self._virt_files.clear()
         self._file_offsets.clear()
 
         # Purge caches
@@ -306,7 +308,7 @@ class HDF5Dataset(CachingDataset):
             paths = []
             for attr_obj in attrs_list:
                 if isinstance(attr_obj, h5py.AttributeManager):
-                    paths.append(attr_obj.name)
+                    paths.append(h5py.h5i.get_name(attr_obj._id).decode())
                 elif isinstance(attr_obj, h5py.Dataset):
                     paths.append(attr_obj.name)
             result.append(paths)

@@ -50,6 +50,7 @@ class FileDataset(Dataset, ABC):
         return_as: DataReturnTypes | None = "tuple",
         has_attrs: bool = False,
         copy_on_write: bool = False,
+        new_axis: bool = False,
         **kwargs,
     ):
         """Constructor.
@@ -64,11 +65,18 @@ class FileDataset(Dataset, ABC):
             has_attrs: Whether to fetch attribute/metadata.
             copy_on_write: Whether to use Copy-on-Write behaviour, i.e.
                 whether to copy data from memory maps/files.
+            new_axis: If `True`, each file is treated as a single sample (e.g.
+                for image files) rather than a collection of samples along axis 0.
+                - `new_axis=False` (default): files with shape (N, H, W) contribute
+                  N samples of shape (H, W); ds.shape == (sum(N_i), H, W).
+                - `new_axis=True`: each file contributes 1 sample whose shape is
+                  the full file shape; ds.shape == (n_files, N, H, W).
             kwargs: Additional keyword arguments for subclasses.
         """
         self.dtype = dtype
         self.return_as = return_as
         self.has_attrs = has_attrs
+        self.new_axis = new_axis
         self.files = self.glob_path(path, self.FILE_EXTENSIONS)
         self._file_offsets: list[int] = []
         self._mmap: list[Sequence] = []
@@ -225,6 +233,8 @@ class FileDataset(Dataset, ABC):
         """Shape of the contiguous dataset."""
         if not self._mmap:
             return ()
+        if self.new_axis:
+            return (self.n_files, *self._mmap[0].shape)
         total_samples = sum(m.shape[0] for m in self._mmap)
         sample_shape = self._mmap[0].shape[1:]
         return (total_samples, *sample_shape)
@@ -270,7 +280,7 @@ class FileDataset(Dataset, ABC):
         """Build (cumulative) index for mapping global index to (file_index, local_index)."""
         self._file_offsets = [0]
         for m in self._mmap:
-            self._file_offsets.append(self._file_offsets[-1] + m.shape[0])
+            self._file_offsets.append(self._file_offsets[-1] + (1 if self.new_axis else m.shape[0]))
 
     def _map_index(self, index: int) -> tuple[int, int]:
         """Map global index to (file_index, local_index).
@@ -280,6 +290,10 @@ class FileDataset(Dataset, ABC):
         """
         if not self._file_offsets or self.n_files != (len(self._file_offsets) - 1):
             self._build_index()
+        if self.new_axis:
+            if not (0 <= index < self.n_files):
+                raise IndexError(f"Index {index} out of range")
+            return index, None
         for file_idx, (ini_idx, fin_idx) in enumerate(
             zip(self._file_offsets[:-1], self._file_offsets[1:])
         ):
@@ -351,7 +365,7 @@ class FileDataset(Dataset, ABC):
         return torch.from_numpy(sample).type(self.dtype)
 
     def _get_from_mmap(
-        self, file_idx: int, local_idx: int, copy: bool = False
+        self, file_idx: int, local_idx: int | None, copy: bool = False
     ) -> np.ndarray:
         """Hook for reading sample from memory map.
 
@@ -359,11 +373,13 @@ class FileDataset(Dataset, ABC):
 
         Args:
             file_idx: Index of the file in self._mmap.
-            local_idx: Local sample index within that file.
+            local_idx: Local sample index within that file, or `None` to read
+                the entire file as one sample (`new_axis=True` mode).
             copy: Whether to manually copy from mmap.
         """
         # Fetch item
-        sample = self._mmap[file_idx][local_idx]
+        mmap = self._mmap[file_idx]
+        sample = mmap[:] if local_idx is None else mmap[local_idx]
         if isinstance(sample, torch.Tensor):
             return sample.clone() if copy else sample
         # Copy sample from memory map
@@ -400,17 +416,25 @@ class FileDataset(Dataset, ABC):
                 pass
         return attr
 
-    def _get_from_mmap_attrs(self, file_idx: int, local_idx: int, copy: bool = True):
+    def _get_from_mmap_attrs(self, file_idx: int, local_idx: int | None, copy: bool = True):
         """Hook for reading attribute/metadata from memory map.
 
         Override if `_mmap_attrs` requires special logic.
 
         Args:
             file_idx: Index of the file in self._mmap.
-            local_idx: Local sample index within that file.
+            local_idx: Local sample index within that file, or `None` when
+                the whole file is one sample (`new_axis=True` mode).
             copy: Whether to manually copy from mmap.
         """
         attrs_obj = self._mmap_attrs[file_idx]
+        # new_axis mode: attrs belong to the whole file, not a row within it.
+        if local_idx is None:
+            if hasattr(attrs_obj, "items"):
+                return dict(attrs_obj)
+            if hasattr(attrs_obj, "keys"):
+                return {k: attrs_obj[k] for k in attrs_obj.keys()}
+            return attrs_obj
         # Per-sample attributes
         if hasattr(attrs_obj, "__getitem__"):
             try:
@@ -482,6 +506,7 @@ class CachingDataset(FileDataset, ABC):
         cache: int | float | str | bool | nbytes | None = "4G",
         attrs_cache: int | float | str | bool | nbytes | None = None,
         preload: bool = False,
+        new_axis: bool = False,
         **kwargs,
     ):
         """Constructor.
@@ -494,9 +519,11 @@ class CachingDataset(FileDataset, ABC):
             cache: Cache size for data items (e.g., "4G", 4.0, or bytes).
             attrs_cache: Cache size for attributes/metadata.
             preload: Preload and cache the dataset.
+            new_axis: If `True`, each file is one sample; see `FileDataset`
+                for full documentation.
             kwargs: Additional keyword arguments for subclasses.
         """
-        super().__init__(path=path, dtype=dtype, return_as=return_as, **kwargs)
+        super().__init__(path=path, dtype=dtype, return_as=return_as, new_axis=new_axis, **kwargs)
 
         self._req_cache_size = nbytes(cache)
         self._req_attrs_cache_size = nbytes(attrs_cache)
@@ -693,7 +720,7 @@ class CachingDataset(FileDataset, ABC):
             attrs: Attributes to metaadata cache (typically a dict).
             overwrite: If True, overwrite existing cached attribute.
         """
-        if not self.attrs_cache or not attrs:
+        if not self.attrs_cache or attrs is not None:
             return
         if overwrite or index not in self.attrs_cache:
             self.attrs_cache[index] = attrs

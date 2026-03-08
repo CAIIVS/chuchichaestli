@@ -75,6 +75,7 @@ class ZipDataset(Dataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
+        new_axis: bool = False,
         **kwargs,
     ) -> "ZipDataset":
         """Create ZipDatasets from multiple file paths with caching.
@@ -92,6 +93,8 @@ class ZipDataset(Dataset):
             preload: Whether to preload and cache all datasets.
             dtype: Data tensor type for all datasets.
             return_as: Return format for individual datasets.
+            new_axis: If `True`, each file is one sample; see `FileDataset`
+                for full documentation.
             **kwargs: Additional keyword arguments passed to `dataset_cls`.
         """
         if not paths:
@@ -105,6 +108,7 @@ class ZipDataset(Dataset):
                 cache=cache,
                 attrs_cache=attrs_cache,
                 preload=preload,
+                new_axis=new_axis,
                 **kwargs,
             )
             datasets.append(dataset)
@@ -121,6 +125,7 @@ class ZipDataset(Dataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
+        new_axis: bool = False,
         **kwargs,
     ) -> "ZipDataset":
         """Create ZipDataset from named paths with automatic dict return format.
@@ -136,6 +141,8 @@ class ZipDataset(Dataset):
             preload: Whether to preload and cache all datasets.
             dtype: Data tensor type for all datasets.
             return_as: Return format for individual datasets.
+            new_axis: If `True`, each file is one sample; see `FileDataset`
+                for full documentation.
             **kwargs: Additional keyword arguments passed to `dataset_cls`.
         """
         if not paths:
@@ -153,6 +160,7 @@ class ZipDataset(Dataset):
                 cache=cache,
                 attrs_cache=attrs_cache,
                 preload=preload,
+                new_axis=new_axis,
                 **kwargs,
             )
             datasets.append(dataset)

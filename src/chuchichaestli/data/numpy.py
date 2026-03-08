@@ -78,6 +78,16 @@ class NpyArrayView:
 
     def __getitem__(self, idx) -> np.ndarray:
         """Open the file, copy the requested slice, close immediately."""
+        if isinstance(idx, slice):
+            start, stop, step = idx.indices(self.shape[0])
+            n = len(range(start, stop, step))
+            f = self._get_fd()
+            if step == 1:
+                f.seek(self._data_offset + start * self._item_bytes)
+                buf = f.read(n * self._item_bytes)
+                return np.frombuffer(buf, dtype=self.dtype).reshape((n, *self._sample_shape)).copy()
+            # Non-contiguous slice: read sample by sample
+            return np.stack([self[i] for i in range(start, stop, step)])
         f = self._get_fd()
         f.seek(self._data_offset + idx * self._item_bytes)
         buf = f.read(self._item_bytes)
@@ -111,6 +121,7 @@ class NumpyDataset(CachingDataset):
         cache: int | float | str | bool | nbytes | None = "4G",
         attrs_cache: int | float | str | bool | nbytes | None = None,
         preload: bool = False,
+        new_axis: bool = False,
         **kwargs,
     ):
         """Constructor.
@@ -138,6 +149,8 @@ class NumpyDataset(CachingDataset):
             cache: Cache size for data items (e.g. `"4G"`, `4.0`, or bytes).
             attrs_cache: Cache size for attributes/metadata.
             preload: Preload and cache the dataset.
+            new_axis: If `True`, each file is one sample; see `FileDataset`
+                for full documentation.
             kwargs: Reserved for forward-compatibility.
         """
         # Key patterns
@@ -160,6 +173,7 @@ class NumpyDataset(CachingDataset):
             preload=preload,
             copy_on_write=False,
             has_attrs=attrs_keys is not None,
+            new_axis=new_axis,
         )
 
     def load(self, **kwargs):
@@ -393,6 +407,7 @@ class ZipNumpyDataset(ZipDataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
+        new_axis: bool = False,
         **kwargs,
     ) -> "ZipNumpyDataset":
         """Create a `ZipNumpyDataset` from multiple file paths.
@@ -410,6 +425,8 @@ class ZipNumpyDataset(ZipDataset):
             preload: Whether to preload all datasets.
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
+            new_axis: If `True`, each file is one sample; see `FileDataset`
+                for full documentation.
             **kwargs: Additional arguments forwarded to `NumpyDataset`.
         """
         if not paths:
@@ -423,6 +440,7 @@ class ZipNumpyDataset(ZipDataset):
                 preload=preload,
                 dtype=dtype,
                 return_as=return_as,
+                new_axis=new_axis,
                 **kwargs,
             )
             for path in paths
@@ -486,6 +504,7 @@ class ZipNumpyDataset(ZipDataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
+        new_axis: bool = False,
         **kwargs,
     ) -> "ZipNumpyDataset":
         """Create a `ZipNumpyDataset` with named paths returning a dict.
@@ -499,6 +518,8 @@ class ZipNumpyDataset(ZipDataset):
             preload: Whether to preload all datasets.
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
+            new_axis: If `True`, each file is one sample; see `FileDataset`
+                for full documentation.
             **kwargs: Additional arguments forwarded to `NumpyDataset`.
         """
         if not paths:
@@ -512,6 +533,7 @@ class ZipNumpyDataset(ZipDataset):
                 preload=preload,
                 dtype=dtype,
                 return_as=return_as,
+                new_axis=new_axis,
                 **kwargs,
             )
             for path in paths.values()

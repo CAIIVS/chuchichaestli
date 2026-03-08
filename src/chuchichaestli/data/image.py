@@ -198,6 +198,9 @@ class ImageDataset(CachingDataset):
             attrs_cache: Cache size for attributes/metadata.
             preload: Preload and cache the dataset.
             kwargs: Reserved for forward-compatibility.
+
+        Note: `new_axis=True` is redundant; ImageDataset already treats each
+            image file as exactly one sample by definition.
         """
         self.read_mode: ImageReadMode = ImageTensorView._parse_mode(mode)
         self.normalize = normalize
@@ -215,6 +218,7 @@ class ImageDataset(CachingDataset):
             cache=cache,
             attrs_cache=attrs_cache,
             preload=preload,
+            new_axis=False,
             copy_on_write=True,  # images are always fresh arrays, no mmap aliasing
             has_attrs=attrs_keys is not None,
         )
