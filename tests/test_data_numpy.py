@@ -165,6 +165,70 @@ class TestNumpyDataset:
         with pytest.raises(ValueError, match="incompatible"):
             NumpyDataset(file_path, keys="*")
 
+    def test_single_npy_new_axis_len_is_one(self, sample_npy_file):
+        """A single .npy file with new_axis=True has len==1."""
+        ds = NumpyDataset(sample_npy_file, new_axis=True)
+        assert len(ds) == 1
+        ds.close()
+
+    def test_single_npy_new_axis_shape(self, sample_npy_file):
+        """Dataset shape is (n_files, *file_shape) when new_axis=True."""
+        ds = NumpyDataset(sample_npy_file, new_axis=True)
+        # sample_npy_file contains (100, 3, 64, 64)
+        assert ds.shape == (1, 100, 3, 64, 64)
+        ds.close()
+
+    def test_multi_npy_new_axis_len_equals_n_files(self, multiple_npy_files):
+        """Multiple .npy files → len equals the number of files, not total rows."""
+        ds = NumpyDataset(multiple_npy_files, new_axis=True)
+        assert len(ds) == 3
+        ds.close()
+
+    def test_multi_npy_new_axis_dataset_shape(self, multiple_npy_files):
+        """Dataset shape is (n_files, *file_shape) for multiple files."""
+        ds = NumpyDataset(multiple_npy_files, new_axis=True)
+        # each file is (50, 3, 32, 32)
+        assert ds.shape == (3, 50, 3, 32, 32)
+        ds.close()
+
+    def test_sample_shape_is_full_file(self, multiple_npy_files):
+        """Each sample has the full file shape, not a single-row shape."""
+        ds = NumpyDataset(multiple_npy_files, new_axis=True)
+        sample = ds[0]
+        assert sample.shape == (50, 3, 32, 32)
+        ds.close()
+
+    def test_new_axis_values_match_source_array(self, temp_dir):
+        """Values returned by ds[i] match the original full array."""
+        data = np.arange(24, dtype=np.float32).reshape(4, 2, 3)
+        path = temp_dir / "known.npy"
+        np.save(path, data)
+        ds = NumpyDataset(path, new_axis=True, dtype=torch.float32)
+        result = ds[0]
+        expected = torch.from_numpy(data)
+        assert torch.allclose(result, expected)
+        ds.close()
+
+    def test_new_axis_negative_index(self, multiple_npy_files):
+        """Negative indices wrap around correctly with new_axis=True."""
+        ds = NumpyDataset(multiple_npy_files, new_axis=True)
+        assert torch.allclose(ds[-1], ds[2])
+        assert torch.allclose(ds[-3], ds[0])
+        ds.close()
+
+    def test_caching_works_with_new_axis(self, temp_dir):
+        """Cache stores and retrieves the full-file sample correctly."""
+        data = np.random.randn(10, 4, 4).astype(np.float32)
+        path = temp_dir / "cache_test.npy"
+        np.save(path, data)
+        ds = NumpyDataset(path, new_axis=True, cache="100M")
+        assert ds.n_cached == 0
+        first = ds[0]
+        assert ds.n_cached == 1
+        second = ds[0]
+        assert torch.allclose(first, second)
+        ds.close()
+
     def test_no_matching_keys_npz(self, sample_npz_file):
         """A pattern that matches no keys produces an empty dataset."""
         ds = NumpyDataset(sample_npz_file, keys="nonexistent_*")
@@ -476,6 +540,22 @@ class TestZipNumpyDataset:
         assert len(ds) == 50
         sample = ds[0]
         assert isinstance(sample, tuple)
+        ds.close()
+
+    def test_zip_from_paths_new_axis(self, multiple_npy_files):
+        """ZipNumpyDataset.from_paths forwards new_axis=True to each sub-dataset."""
+        ds = ZipNumpyDataset.from_paths(
+            multiple_npy_files[0],
+            multiple_npy_files[1],
+            new_axis=True
+        )
+        # two datasets, treated as one sample each due to new_axis -> ziped as one
+        assert len(ds) == 1
+        sample = ds[0]
+        assert isinstance(sample, tuple)
+        # Each element should be the whole file, shape (50, 3, 32, 32)
+        assert sample[0].shape == (50, 3, 32, 32)
+        assert sample[1].shape == (50, 3, 32, 32)
         ds.close()
 
     def test_from_named_keys(self, sample_npz_file):

@@ -407,6 +407,12 @@ class TestFileDataset:
         with pytest.raises(IndexError, match="out of range"):
             dataset._map_index(100)
 
+    def test_map_index_out_of_range_new_axis(self, temp_dir, create_test_files):
+        """Test _map_index raises IndexError for out of range index."""
+        dataset = DummyFileDataset(path=create_test_files, new_axis=True)
+        with pytest.raises(IndexError, match="out of range"):
+            dataset._map_index(100)
+
     def test_getitem_positive_index(self, create_test_files):
         """Test __getitem__ with positive index."""
         dataset = DummyFileDataset(path=str(create_test_files[0]), has_attrs=False)

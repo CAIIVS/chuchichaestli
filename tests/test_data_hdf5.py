@@ -71,6 +71,53 @@ def multiple_hdf5_files(temp_dir):
     return files
 
 
+@pytest.fixture
+def multi_dataset_file(temp_dir):
+    """HDF5 file with two same-shaped datasets under the same group.
+
+    This triggers the VDS (virtual dataset) code path in ``HDF5Dataset.load``
+    where ``len(datasets) > 1``.
+    """
+    file_path = temp_dir / "multi_ds.h5"
+    with h5py.File(file_path, "w") as f:
+        grp = f.create_group("images")
+        grp.create_dataset(
+            "part_a",
+            data=np.arange(40 * 4 * 4, dtype=np.float32).reshape(40, 4, 4),
+        )
+        grp.create_dataset(
+            "part_b",
+            data=np.arange(40 * 4 * 4, dtype=np.float32).reshape(40, 4, 4),
+        )
+    return file_path
+
+
+@pytest.fixture
+def group_attrs_file(temp_dir):
+    """HDF5 file where a *group* carries HDF5 attributes (not a Dataset).
+
+    This exercises the ``h5py.AttributeManager`` branch inside
+    ``_find_attrs`` and ``_get_from_mmap_attrs``.
+    """
+    file_path = temp_dir / "group_attrs.h5"
+    with h5py.File(file_path, "w") as f:
+        data_grp = f.create_group("data")
+        data_grp.create_dataset(
+            "images", data=np.random.randn(20, 8, 8).astype(np.float32)
+        )
+        # A *group* with HDF5 dataset, meant as corresponding metadata
+        data_grp.create_dataset(
+            "attrs", data=np.random.randn(20, 8, 8).astype(np.float32)
+        )
+        # A *group* with HDF5 attributes, resolved to an AttributeManager
+        meta_grp = f.create_group("meta")
+        meta_grp.attrs["scalar_attr"] = 42
+        meta_grp.attrs["string_attr"] = "hello"
+        meta_grp.attrs["array_attr"] = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        meta_grp.attrs["single_elem_array"] = np.array([7.0], dtype=np.float32)
+    return file_path
+
+
 class TestHDF5Dataset:
     """Tests for the refactored HDF5Dataset class."""
 
@@ -176,6 +223,18 @@ class TestHDF5Dataset:
         assert "Samples:" in info_str
         ds.close()
 
+    def test_info_includes_group_patterns(self, temp_dir):
+        """info() output mentions the configured group patterns."""
+        fp = temp_dir / "info.h5"
+        with h5py.File(fp, "w") as f:
+            f.create_dataset("data", data=np.zeros((5, 4), dtype=np.float32))
+            meta_grp = f.create_group("meta")
+            meta_grp.attrs["scalar_attr"] = 42
+        ds = HDF5Dataset(fp, groups="data", attrs_groups="meta")
+        info = ds.info(print_=True)
+        assert "Group patterns:" in info
+        ds.close()
+
     def test_return_as_dict(self, sample_hdf5_file):
         """Test dict return format."""
         ds = HDF5Dataset(sample_hdf5_file, groups="data/images", return_as="dict")
@@ -211,6 +270,117 @@ class TestHDF5Dataset:
         with pytest.raises(IndexError):
             _ = ds[1000]  # Beyond dataset length
         ds.close()
+
+    def test_vds_concatenates_datasets(self, multi_dataset_file):
+        """Two matched datasets in one file are transparently concatenated via VDS."""
+        ds = HDF5Dataset(multi_dataset_file, groups="images/*")
+        # Both part_a and part_b have 40 samples, total should be 80
+        assert ds.n_datasets == 2
+        assert len(ds) == 80
+        sample = ds[0]
+        assert isinstance(sample, torch.Tensor)
+        assert sample.shape == (4, 4)
+        ds.close()
+
+    def test_vds_second_half_accessible(self, multi_dataset_file):
+        """Samples from the second concatenated dataset are reachable."""
+        ds = HDF5Dataset(multi_dataset_file, groups="images/*")
+        sample = ds[60]  # well into part_b
+        assert sample.shape == (4, 4)
+        ds.close()
+
+    def test_vds_temp_file_cleaned_on_close(self, multi_dataset_file):
+        """VDS temp files are tracked; after close() the tracking list is cleared."""
+        ds = HDF5Dataset(multi_dataset_file, groups="images/*")
+        virt_paths = list(ds._virt_files)  # copy before close
+        assert len(virt_paths) > 0, "Expected at least one virtual temp file"
+        ds.close()
+        assert len(ds._virt_files) == 0
+
+    def test_create_vds_empty_raises(self, multi_dataset_file):
+        """_create_vds raises ValueError when given an empty dataset list."""
+        with pytest.raises(ValueError, match="At least one dataset required"):
+            HDF5Dataset._create_vds([], multi_dataset_file)
+
+    def test_create_vds_shape_mismatch_raises(self, temp_dir):
+        """_create_vds raises ValueError when dataset shapes are incompatible."""
+        fp = temp_dir / "mismatch.h5"
+        with h5py.File(fp, "w") as f:
+            f.create_dataset("a", data=np.zeros((10, 4, 4), dtype=np.float32))
+            f.create_dataset("b", data=np.zeros((10, 8, 8), dtype=np.float32))
+        with h5py.File(fp, "r") as hf:
+            ds_a = hf["a"]
+            ds_b = hf["b"]
+            with pytest.raises(ValueError, match="shapes are incompatible"):
+                HDF5Dataset._create_vds([ds_a, ds_b], fp)
+
+    def test_create_vds_dtype_mismatch_raises(self, temp_dir):
+        """_create_vds raises ValueError when dataset dtypes are incompatible."""
+        fp = temp_dir / "dtype_mismatch.h5"
+        with h5py.File(fp, "w") as f:
+            f.create_dataset("a", data=np.zeros((10, 4), dtype=np.float32))
+            f.create_dataset("b", data=np.zeros((10, 4), dtype=np.float64))
+        with h5py.File(fp, "r") as hf:
+            ds_a = hf["a"]
+            ds_b = hf["b"]
+            with pytest.raises(ValueError, match="dtypes are incompatible"):
+                HDF5Dataset._create_vds([ds_a, ds_b], fp)
+
+    def test_group_attrs_returned_as_dict(self, group_attrs_file):
+        """When attrs_groups matches a *group*, attrs come back as a plain dict."""
+        ds = HDF5Dataset(
+            group_attrs_file,
+            groups="data/images",
+            attrs_groups="meta",
+            return_as="tuple",
+        )
+        assert ds.has_attrs
+        data, attrs = ds[0]
+        assert isinstance(attrs, dict)
+        assert "scalar_attr" in attrs
+        assert "string_attr" in attrs
+        ds.close()
+
+    def test_group_attrs_returned_as_dataset(self, group_attrs_file):
+        """When attrs_groups matches a *group*, attrs come back as tensor."""
+        ds = HDF5Dataset(
+            group_attrs_file,
+            groups="data/images",
+            attrs_groups="data/attrs",
+            return_as="tuple",
+        )
+        assert ds.has_attrs
+        data, attrs = ds[0]
+        assert isinstance(attrs, np.ndarray)
+        ds.close()
+
+    def test_attrs_groups(self, group_attrs_file):
+        """Test attrs_groups property."""
+        ds = HDF5Dataset(
+            group_attrs_file,
+            groups="data/images",
+            attrs_groups="data/attrs",
+            return_as="tuple",
+        )
+        assert ds.has_attrs
+        assert ds.attr_groups
+        assert isinstance(ds.attr_groups, list)
+        assert isinstance(ds.attr_groups[0], list)
+        assert ds.attr_groups[0][0] == "/data/attrs"
+
+    def test_attrs_groups_with_attribute_manager(self, group_attrs_file):
+        """Test attrs_groups property."""
+        ds = HDF5Dataset(
+            group_attrs_file,
+            groups="data/images",
+            attrs_groups="meta",
+            return_as="tuple",
+        )
+        assert ds.has_attrs
+        assert ds.attr_groups
+        assert isinstance(ds.attr_groups, list)
+        assert isinstance(ds.attr_groups[0], list)
+        assert ds.attr_groups[0][0] == "/meta"
 
 
 class TestZipHDF5Dataset:
@@ -320,6 +490,17 @@ class TestZipHDF5Dataset:
         assert "image" in sample1
         assert "label" in sample1
         ds.close()
+
+    @pytest.mark.parametrize("clsmethod", [ZipHDF5Dataset.from_paths, ZipHDF5Dataset.from_named_paths])
+    def test_from_paths_no_paths_raises(self, clsmethod):
+        """from_paths raises an error when called without any path arguments."""
+        with pytest.raises((ValueError, TypeError)):
+            clsmethod(paths=(), groups="*")
+
+    def test_from_named_groups_no_groups_raises(self, sample_hdf5_file):
+        """from_named_groups raises an error when called without any path arguments."""
+        with pytest.raises((ValueError, TypeError)):
+            ZipHDF5Dataset.from_named_groups(sample_hdf5_file, groups=())
 
     def test_dataloader_integration(self, sample_hdf5_file):
         """Test integration with PyTorch DataLoader."""
