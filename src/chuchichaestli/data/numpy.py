@@ -42,8 +42,9 @@ class NpyArrayView:
                     f"{file_path}: unsupported .npy format version {version}"
                 )
             self._data_offset: int = f.tell()
-        if fortran_order:
-            raise ValueError(f"{file_path}: Fortran-order arrays are not supported")
+        self._fortran_order: bool = fortran_order
+        # if fortran_order:
+        #     raise ValueError(f"{file_path}: Fortran-order arrays are not supported")
         self.shape: tuple[int, ...] = shape
         self.dtype: np.dtype = dtype
         self._sample_shape: tuple[int, ...] = shape[1:]
@@ -76,23 +77,42 @@ class NpyArrayView:
         """Alias for `flush`; called explicitly during dataset teardown."""
         self.flush()
 
+    def _read_fortran_sample(self, f, idx: int) -> np.ndarray:
+        """Read a single Fortran-order sample without extra file handles."""
+        N = self.shape[0]
+        M = self._sample_elems
+        f.seek(self._data_offset)
+        buf = f.read(N * M * self.dtype.itemsize)
+        flat = np.frombuffer(buf, dtype=self.dtype)
+        # Extract elements at flat positions idx, idx+N, idx+2N, ...
+        indices = idx + np.arange(M, dtype=np.intp) * N
+        return flat[indices].reshape(self._sample_shape).copy()
+
     def __getitem__(self, idx) -> np.ndarray:
         """Open the file, copy the requested slice, close immediately."""
         if isinstance(idx, slice):
             start, stop, step = idx.indices(self.shape[0])
-            n = len(range(start, stop, step))
+            indices = range(start, stop, step)
+            n = len(indices)
+            # Fortran-order contiguous slice
+            if self._fortran_order:
+                if n == 0:
+                    return np.empty((0, *self._sample_shape), dtype=self.dtype)
+                return np.stack([self[i] for i in indices])
+            # C-order contiguous slice
             f = self._get_fd()
             if step == 1:
                 f.seek(self._data_offset + start * self._item_bytes)
                 buf = f.read(n * self._item_bytes)
                 return np.frombuffer(buf, dtype=self.dtype).reshape((n, *self._sample_shape)).copy()
             # Non-contiguous slice: read sample by sample
-            return np.stack([self[i] for i in range(start, stop, step)])
+            return np.stack([self[i] for i in indices])
         f = self._get_fd()
+        if self._fortran_order:
+            return self._read_fortran_sample(f, idx)
         f.seek(self._data_offset + idx * self._item_bytes)
         buf = f.read(self._item_bytes)
         return np.frombuffer(buf, dtype=self.dtype).reshape(self._sample_shape).copy()
-
 
 
 class NumpyDataset(CachingDataset):
