@@ -49,6 +49,7 @@ class NpyArrayView:
         self.dtype: np.dtype = dtype
         self._sample_shape: tuple[int, ...] = shape[1:]
         self._item_bytes: int = int(np.prod(shape[1:])) * dtype.itemsize
+        self._sample_elems: int = int(np.prod(shape[1:]))
 
     def __len__(self) -> int:
         return self.shape[0]
