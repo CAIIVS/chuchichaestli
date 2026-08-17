@@ -16,12 +16,12 @@ from chuchichaestli.data.cache import (
     SharedDictList,
 )
 import warnings
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 from collections.abc import Sequence
 from types import TracebackType
 
 
-__all__ = ["FileDataset", "CachingDataset"]
+__all__ = ["FileDataset", "CachingDataset", "IndexedSample", "WithIndices", "with_indices"]
 
 
 DataReturnTypes = Literal["tuple", "dict"] | dict
@@ -750,3 +750,39 @@ class CachingDataset(FileDataset, ABC):
     def close(self):
         """Close any open file handles and purge the cache."""
         self.purge_cache(reset=False)
+
+
+class IndexedSample(NamedTuple):
+    """A `(index, sample)` pair produced by `WithIndices`."""
+
+    index: int
+    sample: Any
+
+
+class WithIndices(Dataset):
+    """Wrap a dataset so `__getitem__(i)` yields `IndexedSample(i, dataset[i])`.
+
+    Lets a downstream `collate_fn` recover each sample's global index (e.g. to
+    attach source-file provenance to a batch).
+    """
+
+    def __init__(self, dataset: Dataset):
+        """Constructor.
+
+        Args:
+            dataset: Any indexable dataset.
+        """
+        self.dataset = dataset
+
+    def __len__(self) -> int:
+        """Length of the wrapped dataset."""
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> IndexedSample:
+        """Return `(index, dataset[index])`."""
+        return IndexedSample(index, self.dataset[index])
+
+
+def with_indices(dataset: Dataset) -> WithIndices:
+    """Return a `WithIndices` view of `dataset` (see `WithIndices`)."""
+    return WithIndices(dataset)

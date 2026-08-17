@@ -3,7 +3,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Data module of chuchichaestli."""
 
-from chuchichaestli.data.base import FileDataset, CachingDataset  # abstract
+from chuchichaestli.data.base import (
+    FileDataset,  # abstract
+    CachingDataset,  # abstract
+    IndexedSample,
+    WithIndices,
+    with_indices,
+)
 from chuchichaestli.data.zip import ZipDataset
 from chuchichaestli.data.hdf5 import HDF5Dataset, ZipHDF5Dataset
 from chuchichaestli.data.numpy import NumpyDataset, ZipNumpyDataset
@@ -23,6 +29,10 @@ from chuchichaestli.data.procedural import (
 from chuchichaestli.data.batching import (
     HierarchicalBatchSampler,
     HierarchicalFileBatchSampler,
+)
+from chuchichaestli.data.collate import (
+    SequenceCollate,
+    sequence_collate,
 )
 
 __all__ = [
@@ -48,4 +58,9 @@ __all__ = [
     "generate_procedural_dataset",
     "HierarchicalBatchSampler",
     "HierarchicalFileBatchSampler",
+    "IndexedSample",
+    "WithIndices",
+    "with_indices",
+    "SequenceCollate",
+    "sequence_collate",
 ]
