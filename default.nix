@@ -1,26 +1,16 @@
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Traditional Nix package install.
+#
+# Usage:
+#   nix-build                          # CPU (default torch)
+#   nix-build --arg torchPackage \
+#     '(import <nixpkgs> {}).python313Packages.torchWithRocm'   # ROCm
+#   nix-build --arg torchPackage \
+#     '(let p = import <nixpkgs> { config.cudaSupport = true; }; in p.python313Packages.torchWithCuda)'
 {
-  pkgs ? import <nixpkgs> {},
-  src ? ./.,
+  pkgs ? import <nixpkgs> { config.allowUnfree = true; },
 }:
-let 
-  pythonPackage = pkgs.python313Packages.buildPythonApplication {
-    pname = "chuchichaestli";
-    version = "0.2.14";
-    format = "pyproject";
-    build-system = with pkgs.python313Packages; [hatchling];
-    propagatedBuildInputs = with pkgs.python313Packages; [
-      numpy
-      h5py
-      torch
-      torchvision
-    ];
-    src = src;
-    doCheck = false;
-    meta = {
-      description = "Where you find all the state-of-the-art cooking utensils (salt, pepper, gradient descent... the usual).";
-      license = pkgs.lib.licenses.gpl3Plus;
-    };
-  };
-in
-
-pythonPackage
+pkgs.callPackage ./nix/chuchichaestli.nix { src = ./.; }
