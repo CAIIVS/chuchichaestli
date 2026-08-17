@@ -44,12 +44,9 @@ __all__ = [
 class ProceduralDataset(CachingDataset, ABC):
     """Base class for procedurally generated labelled datasets.
 
-    Subclasses implement `generate`, which returns `(X, y)` tensors.
-    All data is stored in shared memory cache and can be safely shared
-    across PyTorch DataLoader worker processes.
-    When path points to a `.safetensors` file the data is loaded from disk;
-    otherwise `generate` is called at construction time.  Call `save` afterwards
-    to persist a freshly generated dataset.
+    Subclasses implement `generate() -> (X, y)`. Data lives in a shared-memory
+    cache safe to share across DataLoader workers. A `.safetensors` path loads
+    from disk; otherwise `generate` runs at construction (call `save` to persist).
     """
 
     FILE_EXTENSIONS: list[str] = [".safetensors"]
