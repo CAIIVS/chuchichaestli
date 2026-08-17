@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import warnings
 import pytest
-from chuchichaestli.data.numpy import NumpyDataset, ZipNumpyDataset
+from chuchichaestli.data.numpy import NumpyDataset, ZipNumpyDataset, NpyArrayView
 
 
 @pytest.fixture
@@ -451,10 +451,13 @@ class TestNumpyDataset:
     def test_mmap_closed_on_close(self, sample_npy_file):
         """close() explicitly releases the underlying mmap file handle."""
         ds = NumpyDataset(sample_npy_file)
+        _ = ds[0]  # open the thread-local fd
+        mmaps = list(ds._mmap)  # capture references before close() clears the list
         ds.close()
-        # After close, the internal mmap object's file should be closed
-        for mmap in ds._mmap:
-            assert mmap._mmap.closed
+        for mmap in mmaps:
+            if isinstance(mmap, NpyArrayView):
+                fd = getattr(mmap._local, "fd", None)
+                assert fd is None or fd.closed
 
     def test_data_values_match_source_npy(self, temp_dir):
         """Values returned by __getitem__ match the original array."""
