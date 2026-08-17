@@ -118,6 +118,24 @@ def group_attrs_file(temp_dir):
     return file_path
 
 
+@pytest.fixture
+def paired_hdf5_files(temp_dir):
+    """Two HDF5 files each containing a different group, same sample count."""
+    file_a = temp_dir / "file_a.h5"
+    file_b = temp_dir / "file_b.h5"
+    with h5py.File(file_a, "w") as f:
+        f.create_dataset(
+            "images",
+            data=np.random.randn(60, 3, 16, 16).astype(np.float32),
+        )
+    with h5py.File(file_b, "w") as f:
+        f.create_dataset(
+            "labels",
+            data=np.random.randint(0, 10, 60).astype(np.int64),
+        )
+    return file_a, file_b
+
+
 class TestHDF5Dataset:
     """Tests for the refactored HDF5Dataset class."""
 
@@ -501,6 +519,126 @@ class TestZipHDF5Dataset:
         """from_named_groups raises an error when called without any path arguments."""
         with pytest.raises((ValueError, TypeError)):
             ZipHDF5Dataset.from_named_groups(sample_hdf5_file, groups=())
+
+    def test_from_tuples_cross_file(self, paired_hdf5_files):
+        """Different group from each of two different files."""
+        file_a, file_b = paired_hdf5_files
+        ds = ZipHDF5Dataset.from_tuples(
+            (file_a, "images"),
+            (file_b, "labels"),
+            zip_as="tuple",
+            strict=True,
+        )
+        assert len(ds) == 60
+        sample = ds[0]
+        assert isinstance(sample, tuple)
+        assert len(sample) == 2
+        assert sample[0].shape == (3, 16, 16)   # image from file_a
+        assert sample[1].shape == ()             # scalar label from file_b
+        ds.close()
+
+    def test_from_tuples_same_file_different_groups(self, sample_hdf5_file):
+        """Same file, different groups — equivalent to from_groups."""
+        ds = ZipHDF5Dataset.from_tuples(
+            (sample_hdf5_file, "data/images"),
+            (sample_hdf5_file, "labels/class"),
+            zip_as="tuple",
+            strict=True,
+        )
+        assert len(ds) == 100
+        sample = ds[0]
+        assert isinstance(sample, tuple)
+        assert len(sample) == 2
+        assert sample[0].shape == (3, 64, 64)
+        ds.close()
+
+    def test_from_tuples_three_slots(self, sample_hdf5_file):
+        """Three (path, group) pairs from the same file."""
+        ds = ZipHDF5Dataset.from_tuples(
+            (sample_hdf5_file, "data/images"),
+            (sample_hdf5_file, "data/features"),
+            (sample_hdf5_file, "labels/bbox"),
+            zip_as="tuple",
+            strict=True,
+        )
+        assert len(ds) == 100
+        sample = ds[0]
+        assert len(sample) == 3
+        assert sample[0].shape == (3, 64, 64)   # images
+        assert sample[1].shape == (128,)          # features
+        assert sample[2].shape == (4,)            # bbox
+        ds.close()
+ 
+    def test_from_tuples_custom_zip_as(self, paired_hdf5_files):
+        """Custom zip_as dict returned correctly."""
+        file_a, file_b = paired_hdf5_files
+        ds = ZipHDF5Dataset.from_tuples(
+            (file_a, "images"),
+            (file_b, "labels"),
+            zip_as={"img": 0, "lbl": 1},
+            strict=True,
+        )
+        sample = ds[0]
+        assert isinstance(sample, dict)
+        assert set(sample.keys()) == {"img", "lbl"}
+        assert sample["img"].shape == (3, 16, 16)
+        ds.close()
+ 
+    def test_from_tuples_no_pairs_raises(self):
+        """Calling from_tuples with no arguments raises ValueError."""
+        with pytest.raises(ValueError, match="pair"):
+            ZipHDF5Dataset.from_tuples()
+
+    def test_from_named_tuples_cross_file(self, paired_hdf5_files):
+        """Named pairs from two different files → dict return."""
+        file_a, file_b = paired_hdf5_files
+        ds = ZipHDF5Dataset.from_named_tuples(
+            {
+                "image": (file_a, "images"),
+                "label": (file_b, "labels"),
+            },
+            strict=True,
+        )
+        assert len(ds) == 60
+        sample = ds[0]
+        assert isinstance(sample, dict)
+        assert set(sample.keys()) == {"image", "label"}
+        assert sample["image"].shape == (3, 16, 16)
+        assert sample["label"].shape == ()
+        ds.close()
+ 
+    def test_from_named_tuples_same_file(self, sample_hdf5_file):
+        """Named pairs from the same file — equivalent to from_named_groups."""
+        ds = ZipHDF5Dataset.from_named_tuples(
+            {
+                "image":    (sample_hdf5_file, "data/images"),
+                "features": (sample_hdf5_file, "data/features"),
+                "bbox":     (sample_hdf5_file, "labels/bbox"),
+            },
+            strict=True,
+        )
+        sample = ds[0]
+        assert isinstance(sample, dict)
+        assert set(sample.keys()) == {"image", "features", "bbox"}
+        assert sample["image"].shape == (3, 64, 64)
+        assert sample["features"].shape == (128,)
+        assert sample["bbox"].shape == (4,)
+        ds.close()
+ 
+    def test_from_named_tuples_key_order_preserved(self, sample_hdf5_file):
+        """Dict insertion order is reflected in the output keys."""
+        keys = ["third", "first", "second"]
+        groups = ["labels/bbox", "data/images", "data/features"]
+        pairs = {k: (sample_hdf5_file, g) for k, g in zip(keys, groups)}
+        ds = ZipHDF5Dataset.from_named_tuples(pairs, strict=True)
+        sample = ds[0]
+        assert list(sample.keys()) == keys
+        ds.close()
+ 
+    def test_from_named_tuples_no_pairs_raises(self):
+        """Calling from_named_tuples with an empty dict raises ValueError."""
+        with pytest.raises(ValueError, match="pair"):
+            ZipHDF5Dataset.from_named_tuples({})
 
     def test_dataloader_integration(self, sample_hdf5_file):
         """Test integration with PyTorch DataLoader."""

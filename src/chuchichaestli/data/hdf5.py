@@ -381,8 +381,7 @@ class ZipHDF5Dataset(ZipDataset):
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
                 If None, returns raw tensors (no tuple wrapping).
-            **kwargs: Additional arguments for `HDF5Dataset`
-                (e.g., attr_groups, h5py options).
+            **kwargs: Additional arguments for `HDF5Dataset`.
         """
         datasets = []
         for group in groups:
@@ -422,14 +421,17 @@ class ZipHDF5Dataset(ZipDataset):
             *paths: HDF5 file paths. Each path creates one dataset.
             groups: Group pattern(s) applied to all files.
                 Can be a single pattern or sequence.
-            zip_as: Return format for combined output.
+            zip_as: Return format for combined output:
+                - 'tuple': (dataset0, dataset1, ...)
+                - 'dict': {0: dataset0, 1: dataset1, ...}
+                - dict: Custom mapping like {'data': 0, 'labels': 1}
             strict: If True, all datasets must have the same length.
             cache: Cache size for each dataset.
             attrs_cache: Attribute cache size for each dataset.
             preload: Whether to preload all datasets.
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
-            **kwargs: Additional arguments for HDF5Dataset.
+            **kwargs: Additional arguments for `HDF5Dataset`.
         """
         if not paths:
             raise ValueError("At least one path must be provided")
@@ -477,7 +479,7 @@ class ZipHDF5Dataset(ZipDataset):
             preload: Whether to preload all datasets.
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
-            **kwargs: Additional arguments for HDF5Dataset.
+            **kwargs: Additional arguments for `HDF5Dataset`.
         """
         if not groups:
             raise ValueError("At least one group must be provided")
@@ -527,7 +529,7 @@ class ZipHDF5Dataset(ZipDataset):
             preload: Whether to preload all datasets.
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
-            **kwargs: Additional arguments for HDF5Dataset.
+            **kwargs: Additional arguments for `HDF5Dataset`.
         """
         if not paths:
             raise ValueError("At least one path must be provided")
@@ -552,4 +554,130 @@ class ZipHDF5Dataset(ZipDataset):
 
         # Create return mapping: name -> dataset index
         zip_as = {name: idx for idx, name in enumerate(path_names)}
+        return cls(*datasets, zip_as=zip_as, strict=strict)
+
+    @classmethod
+    def from_tuples(
+        cls,
+        *pairs: tuple[
+            str | Path | Sequence[str] | Sequence[Path],
+            str | Sequence[str],
+        ],
+        zip_as: DataReturnTypes | None = "tuple",
+        strict: bool = True,
+        cache: int | float | str | bool | None = "2G",
+        attrs_cache: int | float | str | bool | None = None,
+        preload: bool = False,
+        dtype: torch.dtype = torch.float32,
+        return_as: DataReturnTypes | None = "tuple",
+        **kwargs,
+    ) -> "ZipHDF5Dataset":
+        """Create ZipHDF5Dataset from (path, group) pairs.
+
+        This method applies to the most general usecase: reading separate
+        files and groups in parallel, for paired/tupled datasets.
+
+        Args:
+            *pairs: `(path, group)` tuples. Each tuple independently
+                specifies the HDF5 file(s) and the group pattern for one
+                dataset slot.
+            zip_as: Return format for combined output:
+                - 'tuple': (dataset0, dataset1, ...)
+                - 'dict': {0: dataset0, 1: dataset1, ...}
+                - dict: Custom mapping like {'data': 0, 'labels': 1}
+            strict: If `True`, all datasets must have the same length.
+            cache: Cache size for each dataset.
+            attrs_cache: Attribute cache size for each dataset.
+            preload: Whether to preload all datasets into memory.
+            dtype: PyTorch data type for all datasets.
+            return_as: Return format for individual datasets.
+            **kwargs: Additional arguments for `HDF5Dataset`.
+        """
+        if not pairs:
+            raise ValueError("At least one (path, group) pair must be provided")
+        datasets = []
+        for path, group in pairs:
+            dataset = HDF5Dataset(
+                path=path,
+                groups=group,
+                dtype=dtype,
+                return_as=return_as,
+                cache=cache,
+                attrs_cache=attrs_cache,
+                preload=preload,
+                **kwargs,
+            )
+            datasets.append(dataset)
+        return cls(*datasets, zip_as=zip_as, strict=strict)
+
+    @classmethod
+    def from_named_tuples(
+        cls,
+        pairs: dict[
+            str,
+            tuple[
+                str | Path | Sequence[str] | Sequence[Path],
+                str | Sequence[str],
+            ],
+        ],
+        strict: bool = True,
+        cache: int | float | str | bool | None = "2G",
+        attrs_cache: int | float | str | bool | None = None,
+        preload: bool = False,
+        dtype: torch.dtype = torch.float32,
+        return_as: DataReturnTypes | None = "tuple",
+        **kwargs,
+    ) -> "ZipHDF5Dataset":
+        """Create ZipHDF5Dataset from named (path, group) pairs.
+
+        Named variant of :meth:`from_tuples`. Each key in ``pairs`` becomes
+        the corresponding key in the returned sample dict, so no explicit
+        ``zip_as`` mapping is required.
+
+        Args:
+            pairs: Dict mapping output names to ``(path, group)`` tuples.
+                Keys become the keys of the returned sample dict; values are
+                ``(path, group)`` tuples as accepted by :meth:`from_tuples`.
+            strict: If ``True``, all datasets must have the same length.
+            cache: Cache size for each dataset.
+            attrs_cache: Attribute cache size for each dataset.
+            preload: Whether to preload all datasets into memory.
+            dtype: PyTorch data type for all datasets.
+            return_as: Return format for individual datasets.
+            **kwargs: Additional keyword arguments forwarded to
+                ``HDF5Dataset``.
+
+        Raises:
+            ValueError: If ``pairs`` is empty.
+
+        Example::
+
+            ds = ZipHDF5Dataset.from_named_tuples(
+                {
+                    "image":  ("train_images.h5",  "data/images"),
+                    "mask":   ("train_labels.h5",  "annotations/masks"),
+                    "meta":   ("train_meta.h5",    "metadata/info"),
+                },
+                strict=True,
+            )
+            sample = ds[0]          # {"image": ..., "mask": ..., "meta": ...}
+        """
+        if not pairs:
+            raise ValueError("At least one (path, group) pair must be provided")
+        names = list(pairs.keys())
+        datasets = []
+        for name in names:
+            path, group = pairs[name]
+            dataset = HDF5Dataset(
+                path=path,
+                groups=group,
+                dtype=dtype,
+                return_as=return_as,
+                cache=cache,
+                attrs_cache=attrs_cache,
+                preload=preload,
+                **kwargs,
+            )
+            datasets.append(dataset)
+        zip_as = {name: idx for idx, name in enumerate(names)}
         return cls(*datasets, zip_as=zip_as, strict=strict)
