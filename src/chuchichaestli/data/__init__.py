@@ -20,6 +20,10 @@ from chuchichaestli.data.procedural import (
     SwissRollDataset,
     generate_procedural_dataset,
 )
+from chuchichaestli.data.batching import (
+    HierarchicalBatchSampler,
+    HierarchicalFileBatchSampler,
+)
 
 __all__ = [
     "FileDataset",
@@ -42,4 +46,6 @@ __all__ = [
     "GaussiansDataset",
     "SwissRollDataset",
     "generate_procedural_dataset",
+    "HierarchicalBatchSampler",
+    "HierarchicalFileBatchSampler",
 ]
