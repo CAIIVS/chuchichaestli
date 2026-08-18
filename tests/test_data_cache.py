@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the cache module."""
 
+import pickle
 import pytest
 import numpy as np
 import torch
@@ -1022,3 +1023,33 @@ class TestSharedDictList:
         cache[0] = arr
         assert np.array_equal(cache[0], arr)
         cache.clear_allocation()
+
+
+class TestSharedCachePickle:
+    """A pickled cache re-attaches to the same segment (spawn-worker sharing)."""
+
+    def test_shared_array_roundtrip_shares_segment(self):
+        """A pickled SharedArray attaches to the owner's segment (both ways)."""
+        owner = _make_array(shape=(5, 3))
+        owner[0] = torch.ones(3)
+        attached = pickle.loads(pickle.dumps(owner))
+        assert torch.equal(attached[0], torch.ones(3))  # sees owner's write
+        attached[1] = torch.full((3,), 2.0)
+        assert torch.equal(owner[1], torch.full((3,), 2.0))  # owner sees write
+        assert attached._owner_pid is None  # attacher never unlinks
+        attached.clear_allocation()
+        assert torch.equal(owner[0], torch.ones(3))  # attacher did not unlink
+        owner.clear_allocation()
+
+    def test_shared_dict_list_roundtrip_shares_segment(self):
+        """A pickled SharedDictList attaches to the owner's segment (both ways)."""
+        owner = _make_dict_list()
+        owner[0] = {"a": 1}
+        attached = pickle.loads(pickle.dumps(owner))
+        assert attached[0] == {"a": 1}
+        attached[1] = {"b": 2}
+        assert owner[1] == {"b": 2}
+        assert attached._owner_pid is None
+        attached.clear_allocation()
+        assert owner[0] == {"a": 1}
+        owner.clear_allocation()

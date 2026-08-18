@@ -524,9 +524,11 @@ class CachingDataset(FileDataset, ABC):
     Required definitions:
         - `load`: load the memory map(s).
         - `close`: close the memory map(s).
-    """
 
-    _TRANSIENT_ATTRS: tuple[str, ...] = ("cache", "attrs_cache")
+    The shared-memory caches (`cache`, `attrs_cache`) are picklable and re-attach
+    by name in worker processes, so they are shared across `spawn`/`forkserver`
+    workers (and inherited under `fork`) rather than dropped.
+    """
 
     def __init__(
         self,
@@ -672,17 +674,6 @@ class CachingDataset(FileDataset, ABC):
                 allow_overwrite=True,
                 verbose=False,
             )
-
-    def _restore_transient(self):
-        """Reopen handles, then re-allocate the (per-process) caches.
-
-        Under `spawn`/`forkserver` each worker gets its own fresh cache; under
-        `fork` this is never called and the cache stays inherited/shared.
-        """
-        self.cache = None
-        self.attrs_cache = None
-        super()._restore_transient()  # rebuilds memory maps via load()
-        self.init_cache(self._req_cache_size, self._req_attrs_cache_size)
 
     def preload_cache(self):
         """Pre-load data and cache it."""

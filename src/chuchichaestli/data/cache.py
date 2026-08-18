@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Caching for tensors from PyTorch datasets."""
 
+import os
 import struct
 import pickle
 import uuid
+import threading
 from enum import Enum
 import ctypes
 from functools import wraps
@@ -57,6 +59,25 @@ C_DTYPES = {
 }
 
 _SENTINEL = object()
+
+
+def _attach_shm(name: str) -> SharedMemory:
+    """Attach to an existing shared-memory segment by name.
+
+    DataLoader `spawn`/`forkserver` workers share the main process's
+    `resource_tracker`, so a plain attach is correct across Python 3.10-3.14: the
+    tracker persists with the (creating) main process, workers never unlink on
+    exit, and only the owner unlinks (see the per-instance `_owner_pid` guard).
+
+    Args:
+        name: Name of the shared-memory segment to attach to.
+    """
+    return SharedMemory(name=name, create=False)
+
+
+def _np_dtype(dtype: torch.dtype) -> np.dtype:
+    """Return the numpy dtype matching a torch dtype."""
+    return np.dtype(torch.empty((), dtype=dtype).numpy().dtype)
 
 
 def npy_to_torch_dtype(dtype: str | np.dtype | type) -> torch.dtype | None:
@@ -250,6 +271,7 @@ class SharedArray:
         use_lock: bool = True,
         allow_overwrite: bool = True,
         verbose: bool = False,
+        descr: str | None = None,
     ):
         """Constructor.
 
@@ -258,9 +280,11 @@ class SharedArray:
             size: Maximum cache size in GiB (if int or float); default `"4.0G"`.
             dtype: PyTorch dtype (default `torch.float32`). Must be type with corresponding ctype,
               i.e. bool, uint8, int8/16/32/64, or float32/64.
-            use_lock: If `True`, applies a threading lock for multiprocessing.
+            use_lock: If `True`, applies an intra-process threading lock on writes.
             allow_overwrite: If `True`, cache slots can be overwritten.
             verbose: Print information to the stdout.
+            descr: Descriptor ID for shared memory access. If `None`, a unique ID
+                is generated so independent instances never share a segment.
         """
         if isinstance(size, nbytes):
             self.cache_size = size
@@ -276,11 +300,13 @@ class SharedArray:
                 f"Unsupported dtype: {dtype}. Must be one of {list(C_DTYPES.keys())}"
             )
 
-        self._lock: mp.synchronize.Lock | DummyLock = (
-            Lock() if use_lock else DummyLock()
-        )
+        self.dtype = dtype
+        self.descr = descr if descr is not None else f"shm_arr_{uuid.uuid4().hex}"
+        self._lock = threading.Lock() if use_lock else DummyLock()
         if not shape:
             shape = (0,)
+        self._shape = tuple(shape)
+        self._slot_shape = tuple(shape[1:])
 
         slot_size = int(prod(shape[1:]))
         elem_size = torch.empty((), dtype=dtype).element_size()
@@ -307,20 +333,56 @@ class SharedArray:
                     f"requested cache size ({self.cache_size}).\n"
                     f"Allocating cache for {n_slots} data samples."
                 )
-        mp_arr = mp.Array(C_DTYPES[dtype], n_slots * slot_size, lock=use_lock)  # type: ignore
-        shm_arr = np.ctypeslib.as_array(
-            mp_arr.get_obj() if hasattr(mp_arr, "get_obj") else mp_arr
-        )
-        shm_arr = shm_arr.reshape((n_slots, *shape[1:]))
-        self._slots = torch.from_numpy(shm_arr)
-        self._slots *= 0
-
-        mp_states_arr = mp.Array(C_DTYPES[torch.uint8], shape[0], lock=True)  # type: ignore
-        shm_states_arr = np.ctypeslib.as_array(mp_states_arr.get_obj())
-        self._shm_states = torch.from_numpy(shm_states_arr)
-        self._shm_states *= 0
-        self._shm_states[n_slots:] = SlotState.OOC.value
+        self._n_slots = n_slots
         self._slot_bytes = slot_bytes
+        self._owner_pid: int | None = os.getpid()
+        self._allocate(create=True)
+
+    def _allocate(self, create: bool):
+        """Create or attach the data/states shared-memory segments.
+
+        Args:
+            create: If `True`, create+initialize the segments (owner); if
+                `False`, attach to existing segments by name (worker).
+        """
+        n = self._shape[0]
+        slot_elems = int(prod(self._slot_shape))
+        elem = torch.empty((), dtype=self.dtype).element_size()
+        data_size = self._n_slots * slot_elems * elem
+
+        if data_size > 0:
+            self._data_shm = (
+                SharedMemory(name=self.descr, create=True, size=data_size)
+                if create
+                else _attach_shm(self.descr)
+            )
+            arr = np.ndarray(
+                (self._n_slots, *self._slot_shape),
+                dtype=_np_dtype(self.dtype),
+                buffer=self._data_shm.buf,
+            )
+            self._slots = torch.from_numpy(arr)
+        else:
+            self._data_shm = None
+            self._slots = torch.zeros((self._n_slots, *self._slot_shape), dtype=self.dtype)
+
+        if n > 0:
+            self._states_shm = (
+                SharedMemory(name=f"{self.descr}_states", create=True, size=n)
+                if create
+                else _attach_shm(f"{self.descr}_states")
+            )
+            sarr = np.ndarray((n,), dtype=np.uint8, buffer=self._states_shm.buf)
+            self._shm_states = torch.from_numpy(sarr)
+        else:
+            self._states_shm = None
+            self._shm_states = torch.zeros((n,), dtype=torch.uint8)
+
+        if create:
+            if self._data_shm is not None:
+                self._slots.zero_()
+            self._shm_states.zero_()
+            self._shm_states[self._n_slots :] = SlotState.OOC.value
 
     @property
     def array(self) -> torch.Tensor:
@@ -376,9 +438,59 @@ class SharedArray:
                 self._shm_states[idx] = SlotState.OOC.value
 
     def clear_allocation(self):
-        """Delete shared memory allocation."""
-        del self._slots
-        del self._shm_states
+        """Close the shared segments; only the owning process unlinks them."""
+        owner_pid = getattr(self, "_owner_pid", None)
+        is_owner = owner_pid is not None and os.getpid() == owner_pid
+        self._slots = None
+        self._shm_states = None
+        for attr in ("_data_shm", "_states_shm"):
+            shm = getattr(self, attr, None)
+            if shm is None:
+                continue
+            try:
+                shm.close()
+            except Exception:
+                pass
+            if is_owner:
+                try:
+                    shm.unlink()
+                except FileNotFoundError:
+                    pass
+                except Exception:
+                    pass
+            setattr(self, attr, None)
+
+    def __del__(self):
+        """Release shared memory on garbage collection."""
+        try:
+            self.clear_allocation()
+        except Exception:
+            pass
+
+    def __getstate__(self) -> dict:
+        """Pickle only the picklable spec; handles are re-attached on unpickle."""
+        return {
+            "cache_size": self.cache_size,
+            "allow_overwrite": self.allow_overwrite,
+            "verbose": self.verbose,
+            "dtype": self.dtype,
+            "descr": self.descr,
+            "_shape": self._shape,
+            "_slot_shape": self._slot_shape,
+            "_n_slots": self._n_slots,
+            "_slot_bytes": self._slot_bytes,
+        }
+
+    def __setstate__(self, state: dict):
+        """Attach to the existing segments (create fresh if they are gone)."""
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+        try:
+            self._allocate(create=False)
+            self._owner_pid = None  # attacher: never unlinks
+        except FileNotFoundError:
+            self._owner_pid = os.getpid()  # segment gone -> own a fresh one
+            self._allocate(create=True)
 
     def __getitem__(self, index: int | None) -> torch.Tensor | None:
         """Fetch sample tensor from cache if stored, otherwise returns None."""
@@ -696,7 +808,7 @@ class SharedDictList:
               biggest entry, otherwise a maximum size is estimated).
             size: Maximum cache size in GiB (if int or float); default "64.0 MiB".
             serializer: Serializer for the encoding of the dictionary data.
-            use_lock: If True, applies a threading lock for multiprocessing.
+            use_lock: If `True`, applies an intra-process threading lock on writes.
             allow_overwrite: If True, cache slots can be overwritten.
             verbose: Print information to the stdout.
 
@@ -708,9 +820,7 @@ class SharedDictList:
 
         self.descr = descr if descr is not None else f"shm_list_{uuid.uuid4().hex}"
         self.serializer = serializer
-        self._lock: mp.synchronize.Lock | DummyLock = (
-            Lock() if use_lock else DummyLock()
-        )
+        self._lock = threading.Lock() if use_lock else DummyLock()
         self.allow_overwrite = True
         self.verbose = verbose
         if isinstance(size, nbytes):
@@ -750,6 +860,9 @@ class SharedDictList:
                     f"Allocating cache for {n_slots} data samples."
                 )
 
+        self._n = n
+        self._n_slots = n_slots
+        self._owner_pid: int | None = os.getpid()
         self._slots, self._shm_states_mem, self._shm_states = self.get_allocation(
             name=self.descr, n_slots=n_slots, slot_size=int(slot_bytes), size=n
         )
@@ -787,8 +900,10 @@ class SharedDictList:
         states_name = f"{self.descr}_states"
         try:
             shm_list = ShareableList(name=name)
+            self._owner_pid = None  # attached -> creator owns the unlink
         except FileNotFoundError:
             shm_list = ShareableList([bytes(slot_size)] * n_slots, name=name)
+            self._owner_pid = os.getpid()  # created -> owner
         states_size = size * torch.uint8.itemsize
         try:
             shm_states_mem = SharedMemory(name=states_name)
@@ -827,33 +942,64 @@ class SharedDictList:
                 self._shm_states[idx] = SlotState.OOC.value
 
     def clear_allocation(self):
-        """Delete shared memory allocation."""
-        if hasattr(self, "_shm_states"):
-            del self._shm_states
-        if hasattr(self, "_slots"):
+        """Close the shared segments; only the owning process unlinks them."""
+        owner_pid = getattr(self, "_owner_pid", None)
+        is_owner = owner_pid is not None and os.getpid() == owner_pid
+        self._shm_states = None  # drop the states view before closing its segment
+        if getattr(self, "_slots", None) is not None:
+            self._close_shm(self._slots.shm, is_owner)
+            self._slots = None
+        if getattr(self, "_shm_states_mem", None) is not None:
+            self._close_shm(self._shm_states_mem, is_owner)
+            self._shm_states_mem = None
+
+    @staticmethod
+    def _close_shm(shm: SharedMemory, unlink: bool) -> None:
+        """Close a shared-memory segment, unlinking it only when `unlink`."""
+        try:
+            shm.close()
+        except Exception:
+            pass
+        if unlink:
             try:
-                self._slots.shm.unlink()
-            except FileNotFoundError:
-                pass  # already unlinked
-            finally:
-                try:
-                    self._slots.shm.close()
-                except Exception:
-                    pass  # already closed
-            del self._slots
-        if hasattr(self, "_shm_states_mem"):
-            try:
-                if self._shm_states_mem is not None:
-                    self._shm_states_mem.unlink()
+                shm.unlink()
             except FileNotFoundError:
                 pass
-            finally:
-                try:
-                    if self._shm_states_mem is not None:
-                        self._shm_states_mem.close()
-                except Exception:
-                    pass
-            del self._shm_states_mem
+            except Exception:
+                pass
+
+    def __del__(self):
+        """Release shared memory on garbage collection."""
+        try:
+            self.clear_allocation()
+        except Exception:
+            pass
+
+    def __getstate__(self) -> dict:
+        """Pickle only the picklable spec; segments are re-attached on unpickle."""
+        return {
+            "descr": self.descr,
+            "cache_size": self.cache_size,
+            "allow_overwrite": self.allow_overwrite,
+            "verbose": self.verbose,
+            "serializer": self.serializer,
+            "_n": self._n,
+            "_n_slots": self._n_slots,
+            "_slot_bytes": self._slot_bytes,
+        }
+
+    def __setstate__(self, state: dict):
+        """Attach to the existing segments (create fresh if they are gone)."""
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+        # get_allocation attaches when the named segments exist (setting
+        # _owner_pid=None) and otherwise creates fresh ones (owner).
+        self._slots, self._shm_states_mem, self._shm_states = self.get_allocation(
+            name=self.descr,
+            n_slots=self._n_slots,
+            slot_size=int(self._slot_bytes),
+            size=self._n,
+        )
 
     @property
     def slots(self) -> Any:

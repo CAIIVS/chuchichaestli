@@ -125,3 +125,27 @@ class TestDataLoaderWorkers:
             assert seen == n
         finally:
             ds.close()
+
+
+class TestSharedCache:
+    """The shared-memory cache is populated by, and shared across, workers."""
+
+    @pytest.mark.parametrize("ctx", CONTEXTS)
+    def test_workers_populate_main_cache(self, ctx, temp_dir):
+        """After a worker epoch the main process sees the cached slots.
+
+        Under both fork and spawn/forkserver the workers write into the same
+        segment the main process holds (attached by name under spawn, inherited
+        under fork) -- not a per-worker copy.
+        """
+        ds, n = _build("numpy", temp_dir)  # cache="4M" holds all samples
+        try:
+            assert ds.cache.cached_states == 0
+            loader = DataLoader(
+                ds, batch_size=2, num_workers=2, multiprocessing_context=ctx
+            )
+            for _ in loader:
+                pass
+            assert ds.cache.cached_states > 0
+        finally:
+            ds.close()
