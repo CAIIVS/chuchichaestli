@@ -717,10 +717,10 @@ class CachingDataset(FileDataset, ABC):
 
         Args:
             index: Sample index.
-            attrs: Attributes to metaadata cache (typically a dict).
+            attrs: Attributes to store in the metadata cache (typically a dict).
             overwrite: If True, overwrite existing cached attribute.
         """
-        if not self.attrs_cache or attrs is not None:
+        if not self.attrs_cache:
             return
         if overwrite or index not in self.attrs_cache:
             self.attrs_cache[index] = attrs

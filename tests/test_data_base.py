@@ -816,8 +816,7 @@ class TestCachingDataset:
         attrs = {'id': 0, 'label': 'test'}
         dataset.cache_attrs(0, attrs)
         cached_attrs = dataset.get_cached_attrs(0)
-        if cached_attrs is not None:
-            assert cached_attrs == attrs
+        assert cached_attrs == attrs
         dataset.close()
 
     def test_get_cached_attrs_miss(self, create_test_files):
