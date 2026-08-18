@@ -9,12 +9,32 @@ from pathlib import Path
 from types import SimpleNamespace
 import torch
 from torch.utils.data import default_collate
+from torchvision.transforms.v2 import Transform
 from chuchichaestli.data.base import IndexedSample, WithIndices, with_indices
+from chuchichaestli.data.transforms import RandomCropND
 from chuchichaestli.data.collate import (
     SequenceCollate,
     sequence_collate,
-    _first_leaf,
+    _flatten_leaves,
 )
+
+
+class _AddOnce(Transform):
+    """Test transform: records `make_params` calls; adds a shared value."""
+
+    _transformed_types = (torch.Tensor,)
+
+    def __init__(self, value):
+        super().__init__()
+        self.value = value
+        self.calls = []
+
+    def make_params(self, flat_inputs):
+        self.calls.append(len(flat_inputs))
+        return {"add": self.value}
+
+    def transform(self, inpt, params):
+        return inpt + params["add"]
 
 
 def _z_key(path: Path) -> str:
@@ -44,23 +64,26 @@ class TestWithIndices:
         assert sample.sample == {"v": 2}
 
 
-class TestFirstLeaf:
-    """Tests for the _first_leaf helper."""
+class TestFlattenLeaves:
+    """Tests for the _flatten_leaves helper."""
 
     def test_dict(self):
-        """First leaf of a dict is the first value's leaf."""
-        t = torch.zeros(2, 3)
-        assert _first_leaf({"a": t, "b": torch.ones(1)}) is t
+        """All dict values are flattened in order."""
+        a, b = torch.zeros(2, 3), torch.ones(1)
+        leaves = _flatten_leaves({"a": a, "b": b})
+        assert leaves[0] is a and leaves[1] is b and len(leaves) == 2
 
     def test_nested(self):
-        """First leaf recurses through tuples/lists."""
-        t = torch.zeros(4)
-        assert _first_leaf({"a": (t, torch.ones(1))}) is t
+        """Recurses through tuples/lists."""
+        t, u = torch.zeros(4), torch.ones(1)
+        leaves = _flatten_leaves({"a": (t, u)})
+        assert leaves[0] is t and leaves[1] is u and len(leaves) == 2
 
     def test_tensor_passthrough(self):
-        """A bare tensor is its own first leaf."""
+        """A bare tensor flattens to a single-element list."""
         t = torch.zeros(4)
-        assert _first_leaf(t) is t
+        leaves = _flatten_leaves(t)
+        assert leaves == [t] and leaves[0] is t
 
 
 class TestSequenceCollateNoTransform:
@@ -89,54 +112,41 @@ class TestSequenceCollateNoTransform:
 
 
 class TestSequenceCollateSharedTransform:
-    """Tests for shared per-batch transform params."""
+    """Tests for the v2-Transform path (shared per-batch params)."""
 
-    def test_param_fn_sampled_once_and_shared(self):
-        """param_fn is called once; the same params reach every item + field."""
-        calls = []
-
-        def param_fn(leaf):
-            calls.append(leaf.shape)
-            return 5.0
-
-        def transform(leaf, params):
-            return leaf + params
-
+    def test_make_params_called_once_and_shared(self):
+        """make_params runs once; the same params reach every item + field."""
+        t = _AddOnce(5.0)
         samples = [{"a": torch.zeros(2), "b": torch.zeros(2)} for _ in range(3)]
-        out = SequenceCollate(transform=transform, param_fn=param_fn)(samples)
-        assert len(calls) == 1  # sampled once per batch, not per item
+        out = SequenceCollate(transform=t)(samples)
+        assert len(t.calls) == 1  # sampled once per batch, not per item
+        assert t.calls[0] == 2  # both leaves of the first sample
         # every field of every step got the same +5
         assert torch.equal(out["a"], torch.full((3, 2), 5.0))
         assert torch.equal(out["b"], torch.full((3, 2), 5.0))
 
-    def test_shared_crop_keeps_fields_aligned(self):
-        """A shared crop box crops both paired fields identically."""
+    def test_shared_crop_keeps_all_fields_aligned(self):
+        """RandomCropND crops *both* paired fields with the same box.
 
-        def param_fn(leaf):
-            return (1, 4)  # start, size along last dim
-
-        def crop(leaf, params):
-            start, size = params
-            return leaf[..., start : start + size]
-
+        Guards against torchvision's `forward` heuristic, which would transform
+        only the first pure tensor of a sample.
+        """
         samples = [
             {"xfrac": torch.arange(8).float(), "ionrates": torch.arange(8).float()}
             for _ in range(2)
         ]
-        out = SequenceCollate(transform=crop, param_fn=param_fn)(samples)
+        out = SequenceCollate(transform=RandomCropND((4,)))(samples)
         assert out["xfrac"].shape == (2, 4)
+        assert out["ionrates"].shape == (2, 4)  # not passed through uncropped
         assert torch.equal(out["xfrac"], out["ionrates"])
-        assert torch.equal(out["xfrac"][0], torch.tensor([1.0, 2.0, 3.0, 4.0]))
 
-    def test_transform_without_param_fn(self):
-        """param_fn=None passes params=None to the transform."""
-
-        def transform(leaf, params):
-            assert params is None
-            return leaf + 1
-
-        out = SequenceCollate(transform=transform)([{"a": torch.zeros(2)}])
-        assert torch.equal(out["a"], torch.ones(1, 2))
+    def test_non_tensor_leaves_pass_through(self):
+        """Non-tensor leaves are left untouched by the transform."""
+        t = _AddOnce(1.0)
+        samples = [{"x": torch.zeros(2), "label": i} for i in range(2)]
+        out = SequenceCollate(transform=t)(samples)
+        assert torch.equal(out["x"], torch.ones(2, 2))
+        assert out["label"].tolist() == [0, 1]
 
 
 class TestSequenceCollateProvenance:
