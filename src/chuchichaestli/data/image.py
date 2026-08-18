@@ -95,13 +95,13 @@ class ImageTensorView:
         return 1
 
     def __getitem__(self, idx: int) -> torch.Tensor:
-        """Decode the image and return a tensor in `(1, C, H, W)` order.
+        """Decode the image and return a tensor in `(C, H, W)` order.
 
         Args:
             idx: Must be `0` (single-sample view).
         """
         if idx != 0 and not isinstance(idx, slice):
-            raise IndexError(f"_SingleImageView index {idx} out of range (len=1).")
+            raise IndexError(f"ImageTensorView index {idx} out of range (len=1).")
         t = decode_image(
             self._path,
             mode=self._mode,

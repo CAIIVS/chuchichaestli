@@ -247,7 +247,7 @@ class FileDataset(Dataset, ABC):
     @property
     def sample_shape(self) -> tuple[int, ...]:
         """Shape of a single sample (excluding batch dimension)."""
-        return self.shape[1:] if len(self.shape) >= 1 else 0
+        return self.shape[1:] if len(self.shape) >= 1 else ()
 
     def __len__(self) -> int:
         """Dataset length."""
