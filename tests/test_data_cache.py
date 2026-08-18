@@ -993,3 +993,32 @@ class TestSharedDictList:
         cache.clear(None)
         assert cache.cached_states == 0
         cache.clear_allocation()
+
+    def test_undersized_cache_clamps_slots_without_crashing(self):
+        """An undersized cache clamps to 0 slots instead of a negative count."""
+        cache = SharedDictList(10, slot_size="8b", size="5b", use_lock=False)
+        assert len(cache.slots) == 0
+        cache[0] = {"x": 1}  # out-of-cache -> silently skipped, no IndexError
+        assert cache[0] is None
+        assert cache.cached_states == 0
+        cache.clear_allocation()
+
+    def test_default_descr_instances_are_independent(self):
+        """Two default-descr instances get unique segments and never collide."""
+        a = SharedDictList(4, slot_size="256b", size="4M", use_lock=False)
+        b = SharedDictList(4, slot_size="256b", size="4M", use_lock=False)
+        assert a.descr != b.descr
+        a[0] = {"x": 1}
+        b[0] = {"x": 2}
+        assert a[0] == {"x": 1}
+        assert b[0] == {"x": 2}
+        a.clear_allocation()
+        b.clear_allocation()
+
+    def test_caches_non_dict_values(self):
+        """Non-dict values (e.g. numpy arrays) are serialized and round-trip."""
+        cache = _make_dict_list()
+        arr = np.arange(6).reshape(2, 3)
+        cache[0] = arr
+        assert np.array_equal(cache[0], arr)
+        cache.clear_allocation()

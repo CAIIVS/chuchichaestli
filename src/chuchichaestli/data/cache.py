@@ -5,6 +5,7 @@
 
 import struct
 import pickle
+import uuid
 from enum import Enum
 import ctypes
 from functools import wraps
@@ -287,7 +288,7 @@ class SharedArray:
         total_bytes = dataset_bytes + states_bytes
 
         if total_bytes > cache_bytes:
-            n_slots = int((cache_bytes - states_bytes) / slot_bytes)
+            n_slots = max(0, int((cache_bytes - states_bytes) / slot_bytes))
             if self.verbose:
                 print(
                     f"Requested memory ({total_bytes}) "
@@ -441,7 +442,7 @@ class SharedDict:
 
     def __init__(
         self,
-        descr: str = "shm_dict",
+        descr: str | None = None,
         size: int | float | str | nbytes = "16M",
         serializer: DictSerializer = PickleSerializer(),
         use_lock: bool = True,
@@ -451,7 +452,8 @@ class SharedDict:
         """Constructor.
 
         Args:
-            descr: Descriptor ID for shared memory access.
+            descr: Descriptor ID for shared memory access. If `None`, a unique ID
+                is generated so independent instances never share a segment.
             size: Maximum cache size in GiB (if int or float); default "16.0 MiB".
             serializer: Serializer for the encoding of the dictionary data.
             use_lock: If True, applies a threading lock for multiprocessing.
@@ -463,7 +465,7 @@ class SharedDict:
           use instead '__{key}'.
         """
         super().__init__()
-        self.descr = descr
+        self.descr = descr if descr is not None else f"shm_dict_{uuid.uuid4().hex}"
         self.allow_overwrite = True
         if isinstance(size, nbytes):
             self.cache_size = size
@@ -671,7 +673,7 @@ class SharedDictList:
         self,
         n: int,
         *sequence: int | float | bool | str | bytes | dict | None,
-        descr: str = "shm_list",
+        descr: str | None = None,
         slot_size: int | float | str | nbytes = "650b",
         size: int | float | str | nbytes = "64M",
         serializer: DictSerializer = PickleSerializer(),
@@ -684,7 +686,8 @@ class SharedDictList:
         Args:
             n: Number of samples in the list (can be larger than the number of memory slots).
             sequence: Sequence of built-in types.
-            descr: Descriptor ID for shared memory access.
+            descr: Descriptor ID for shared memory access. If `None`, a unique ID
+                is generated so independent instances never share a segment.
             slot_size: Size of a single list entry (should be big enough for even the
               biggest entry, otherwise a maximum size is estimated).
             size: Maximum cache size in GiB (if int or float); default "64.0 MiB".
@@ -699,7 +702,7 @@ class SharedDictList:
         """
         super().__init__()
 
-        self.descr = descr
+        self.descr = descr if descr is not None else f"shm_list_{uuid.uuid4().hex}"
         self.serializer = serializer
         self._lock: mp.synchronize.Lock | DummyLock = (
             Lock() if use_lock else DummyLock()
@@ -727,7 +730,7 @@ class SharedDictList:
         if total_bytes > cache_bytes:
             n_slots = 0
             if slot_bytes > 0:
-                n_slots = int((cache_bytes - states_bytes) / slot_bytes)
+                n_slots = max(0, int((cache_bytes - states_bytes) / slot_bytes))
             if self.verbose:
                 print(
                     f"Requested memory ({total_bytes}) "
@@ -910,9 +913,7 @@ class SharedDictList:
                 raise RuntimeError(f"Failed to deserialize item at index {idx}: {e}")
         return data
 
-    def __setitem__(
-        self, index: int, item: int | float | bool | str | bytes | dict | None
-    ):
+    def __setitem__(self, index: int, item: Any):
         """Fill the cache at specified slot."""
         state, idx = self.get_state(index)
         if state == SlotState.OOC or idx is None:
@@ -921,13 +922,15 @@ class SharedDictList:
             raise RuntimeError(
                 f"{self} is locked and does not allow overwrites at index={idx}."
             )
-        if isinstance(item, dict):
+        # ShareableList only stores scalar primitives natively; serialize anything
+        # else (dicts, numpy arrays, sequences, ...) so non-dict attrs cache too.
+        if not isinstance(item, int | float | bool | str | bytes | None):
             item_bytes = self.serializer.dumps(item)
             if len(item_bytes) > self._slot_bytes:
                 raise RuntimeError(
-                    f"Serialized dict at index {idx} ({len(item_bytes)} bytes) "
+                    f"Serialized item at index {idx} ({len(item_bytes)} bytes) "
                     f"exceeds slot size ({self._slot_bytes} bytes). "
-                    f"Increase slot_size or reduce dict size."
+                    f"Increase slot_size or reduce item size."
                 )
             item = item_bytes
         self._lock.acquire()
