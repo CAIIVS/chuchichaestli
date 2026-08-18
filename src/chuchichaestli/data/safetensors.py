@@ -94,6 +94,9 @@ class SafetensorsDataset(CachingDataset):
 
     FILE_EXTENSIONS = [".safetensors"]
 
+    # safe_open handles are unpickleable
+    _TRANSIENT_ATTRS = ("st_buffers",)
+
     def __init__(
         self,
         path: str | Path | Sequence[str] | Sequence[Path],
@@ -235,6 +238,11 @@ class SafetensorsDataset(CachingDataset):
                 if fnmatch.fnmatch(key, pattern) and key not in matched:
                     matched.append(key)
         return matched
+
+    def _restore_transient(self):
+        """Reset handle list before reopening files in the worker process."""
+        self.st_buffers = []
+        super()._restore_transient()
 
     def close(self):
         """Close all open safetensors buffers and clean up resources."""

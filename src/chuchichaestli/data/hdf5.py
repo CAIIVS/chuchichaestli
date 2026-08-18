@@ -31,6 +31,9 @@ class HDF5Dataset(CachingDataset):
 
     FILE_EXTENSIONS = [".hdf", ".h5", ".hdf5", ".he5"]
 
+    # h5py handles are unpickleable and not fork-safe
+    _TRANSIENT_ATTRS = ("h5_buffers", "h5_datasets", "h5_attrs", "_virt_files")
+
     def __init__(
         self,
         path: str | Path | Sequence[str] | Sequence[Path],
@@ -268,6 +271,14 @@ class HDF5Dataset(CachingDataset):
                             if not is_data_ds and obj not in attrs:
                                 attrs.append(obj)
         return attrs
+
+    def _restore_transient(self):
+        """Reset handle lists before reopening files in the worker process."""
+        self.h5_buffers = []
+        self.h5_datasets = []
+        self.h5_attrs = []
+        self._virt_files = []
+        super()._restore_transient()
 
     def close(self):
         """Close HDF5 files and clean up resources."""

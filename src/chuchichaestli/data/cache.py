@@ -112,6 +112,10 @@ class nbytes(float):
             n_bytes = float(n_bytes) * units
         return float.__new__(cls, n_bytes)
 
+    def __reduce__(self) -> tuple:
+        """Reconstruct from the plain byte count (`units` is a class constant)."""
+        return (self.__class__, (float(self),))
+
     def __add__(self, other: int | float) -> "nbytes":
         """Addition of nbyte instances."""
         return self.__class__(float.__add__(self, float(other)))

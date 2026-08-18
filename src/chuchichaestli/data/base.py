@@ -43,6 +43,10 @@ class FileDataset(Dataset, ABC):
 
     FILE_EXTENSIONS: list[str] = []  # override in subclasses.
 
+    # Attributes dropped on pickling (unpickleable handles / mmap views / caches)
+    # and rebuilt in the worker by `_restore_transient`.
+    _TRANSIENT_ATTRS: tuple[str, ...] = ("_mmap", "_mmap_attrs")
+
     def __init__(
         self,
         path: str | Path | Sequence[str] | Sequence[Path] | None = None,
@@ -483,6 +487,30 @@ class FileDataset(Dataset, ABC):
         """Close any open file handles and clean up resources."""
         ...
 
+    def __getstate__(self) -> dict:
+        """Drop transient/unpickleable state so the dataset survives pickling.
+
+        Enables `DataLoader(num_workers>0)` under the `spawn`/`forkserver` start
+        methods; the dropped state is rebuilt by `__setstate__` in the worker.
+        """
+        drop = set().union(
+            *(getattr(c, "_TRANSIENT_ATTRS", ()) for c in type(self).__mro__)
+        )
+        return {k: v for k, v in self.__dict__.items() if k not in drop}
+
+    def __setstate__(self, state: dict):
+        """Restore config and rebuild transient state in the (worker) process."""
+        self.__dict__.update(state)
+        self._restore_transient()
+
+    def _restore_transient(self):
+        """Reopen handles and rebuild the memory maps (mirrors `__init__`)."""
+        self._mmap = []
+        self._mmap_attrs = []
+        self._file_offsets = []
+        if self.has_files:
+            self.load()
+
 
 class CachingDataset(FileDataset, ABC):
     """Base class for file-based datasets with shared memory caching support.
@@ -497,6 +525,8 @@ class CachingDataset(FileDataset, ABC):
         - `load`: load the memory map(s).
         - `close`: close the memory map(s).
     """
+
+    _TRANSIENT_ATTRS: tuple[str, ...] = ("cache", "attrs_cache")
 
     def __init__(
         self,
@@ -642,6 +672,17 @@ class CachingDataset(FileDataset, ABC):
                 allow_overwrite=True,
                 verbose=False,
             )
+
+    def _restore_transient(self):
+        """Reopen handles, then re-allocate the (per-process) caches.
+
+        Under `spawn`/`forkserver` each worker gets its own fresh cache; under
+        `fork` this is never called and the cache stays inherited/shared.
+        """
+        self.cache = None
+        self.attrs_cache = None
+        super()._restore_transient()  # rebuilds memory maps via load()
+        self.init_cache(self._req_cache_size, self._req_attrs_cache_size)
 
     def preload_cache(self):
         """Pre-load data and cache it."""
