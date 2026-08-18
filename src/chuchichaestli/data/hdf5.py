@@ -278,6 +278,13 @@ class HDF5Dataset(CachingDataset):
             except Exception:
                 pass
 
+        # Remove temporary virtual-dataset files (created with delete=False)
+        for virt_path in self._virt_files:
+            try:
+                virt_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
         # Clear references
         self.h5_buffers.clear()
         self.h5_datasets.clear()
