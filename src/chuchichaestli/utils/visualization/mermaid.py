@@ -14,14 +14,10 @@ from torch import nn
 from typing import get_args, Literal, Any
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from chuchichaestli.utils import (
-    info_forward_pass,
-    get_chuchichaestli_block_type,
-    get_layer_type,
-    metric_suffix,
-)
-from chuchichaestli.utils.modules import LayerInfo
+from chuchichaestli.utils import get_layer_type, metric_suffix
 from chuchichaestli.utils.visualization import get_color, color_variant
+from chuchichaestli.utils.visualization.build import build_ir
+from chuchichaestli.utils.visualization.ir import EdgeKind, IRNode
 
 __all__ = ["MermaidDiagram", "mermaid_diagram"]
 
@@ -242,6 +238,7 @@ class MermaidDiagram:
             input_dtype: Input tensor type for forward tracing (default: `torch.float32`).
             auto: If `True`, graph structure will be extracted upon initialization.
             direction: Diagram direction, e.g. T(op)D(own), L(eft)R(ight), etc.
+            group_direction: Direction within grouped subgraphs.
             max_depth: Maximum depth for module recursion; for `None` full depth is used.
             positions: Mapping of node IDs to custom positions.
             group_by: Strategy for grouping layers into subgraphs.
@@ -285,7 +282,8 @@ class MermaidDiagram:
             self.style_classes.update(style_classes)
 
         # model content analysis
-        self.model_graph: list[LayerInfo] = []
+        self.model_graph: Any = None
+        self._ir = None
         self._nodes: list[dict[str, Any]] = []
         self._edges: list[tuple[str, str, str | None]] = []
         self._subgraphs = defaultdict(list)
@@ -363,91 +361,50 @@ class MermaidDiagram:
     def extract_model_graph(
         self, input_shape: Sequence[int] | torch.Size | None = None
     ):
-        """Construct info graph from model."""
+        """Build the semantic IR graph from the model."""
         if input_shape is None:
             input_shape = self.input_shape
-        if self.trace_forward:
-            if input_shape is None:
-                graph = info_forward_pass(
-                    self.model, size=32, input_dtype=self.input_dtype
-                )
-            else:
-                graph = info_forward_pass(
-                    self.model, input_shape=input_shape, input_dtype=self.input_dtype
-                )
-        else:
-            graph = info_forward_pass(self.model)
-        self.model_graph = graph
-
-    def _extract_level_number(self, name: str) -> int | None:
-        """Extract level number from layer name.
-        
-        Handles patterns like:
-        - down_blocks.0, down_blocks.1, etc.
-        - encoder_0, encoder_1, etc.
-        - level0, level1, etc.
-        - down.0, up.0, etc.
-        
-        Args:
-            name: Layer name
-            
-        Returns:
-            Extracted level number or None
-        """
-        import re
-        
-        # Try different patterns (ordered by specificity)
-        patterns = [
-            r'(?:down_blocks|up_blocks|down|up|encoder|decoder)\.(\d+)',  # blocks.0 style
-            r'(?:down_blocks|up_blocks|down|up|encoder|decoder)_(\d+)',   # blocks_0 style
-            r'level[_\.]?(\d+)',    # level0, level_0 style
-            r'block[_\.]?(\d+)',    # block0, block_0 style
-            r'layer[_\.]?(\d+)',    # layer0, layer_0 style
-            r'\.(\d+)\.',           # .0., .1. in middle of name
-            r'_(\d+)_',             # _0_, _1_ in middle of name
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, name)
-            if match:
-                return int(match.group(1))
-        
-        # Last resort: extract any digit at the end
-        match = re.search(r'(\d+)$', name)
-        if match:
-            return int(match.group(1))
-        
-        return None
+        self._ir = build_ir(
+            self.model,
+            input_shape=input_shape if self.trace_forward else None,
+            input_dtype=self.input_dtype,
+        )
+        self.model_graph = self._ir
 
     def _aggregate_components(self):
-        """Build nodes and edges from the model graph."""
-        if not self.model_graph:
+        """Build nodes, edges, and subgraphs from the semantic IR."""
+        if self._ir is None:
             return
-
-        filtered_layers = [
-            layer for layer in self.model_graph if self._layer_filter(layer)
+        cutoff = self.max_depth if self.max_depth is not None else 3
+        view = self._ir.view(cutoff)
+        drawables = [
+            n for n in view.root.walk() if n.depth == cutoff or not n.children
         ]
-
-        for i, layer_info in enumerate(filtered_layers):
-            layer_type = self._get_layer_type(layer_info.module)
-            node_id = self._sanitize_mermaid_id(layer_info.name, layer_info.layer_id)
-            label = self._create_node_name(layer_info)
-            node = {
-                "id": node_id,
-                "type": layer_type,
-                "label": label,
-                "layer_info": layer_info,
-            }
-            self._nodes.append(node)
-
-            group_key = self._get_group_key(layer_info)
+        idmap: dict[str, str] = {}
+        for node in drawables:
+            node_id = self._sanitize_mermaid_id(node.id)
+            idmap[node.id] = node_id
+            self._nodes.append(
+                {
+                    "id": node_id,
+                    "type": self._ir_type(node),
+                    "label": self._ir_label(node),
+                    "ir": node,
+                }
+            )
+            group_key = self._ir_group_key(node)
             if group_key:
                 self._subgraphs[group_key].append(node_id)
-
-            if i > 0:
-                prev_node = self._nodes[i - 1]
-                self._edges.append((prev_node["id"], node_id, None))
-            
+        for edge in view.edges:
+            if edge.source_id not in idmap or edge.target_id not in idmap:
+                continue
+            src, tgt = idmap[edge.source_id], idmap[edge.target_id]
+            if edge.kind == EdgeKind.SKIP:
+                self._edges.append((src, tgt, "skip"))
+            elif edge.kind == EdgeKind.RESIDUAL:
+                self._edges.append((src, tgt, "residual"))
+            else:
+                self._edges.append((src, tgt, None))
 
     def nodes(self, _reload: bool = False) -> list[dict[str, Any]]:
         """Get nodes from the model graph.
@@ -488,40 +445,13 @@ class MermaidDiagram:
             self._aggregate_components()
         return dict(self._subgraphs)
 
-    def _layer_filter(self, layer_info: LayerInfo) -> bool:
-        """Determine if a layer should be included in diagram based on depth criteria."""
-        # only show leaves if no max depth set
-        if self.max_depth is None:
-            return layer_info.is_leaf_layer
-
-        # exclude everything beyond max depth
-        if self.max_depth < layer_info.depth:
-            return False
-
-        # include layers exactly at max depth (target visualization level)
-        if layer_info.depth == self.max_depth:
-            return True
-
-        # for layer above max depth, only include if they have no children beyond max depth
-        if layer_info.children:
-            has_visible_children = any(
-                child.depth <= self.max_depth for child in layer_info.children
-            )
-            return not has_visible_children
-
-        return True
-
-    def _get_layer_type(self, module: nn.Module) -> str:
-        """Determine the layer type from a PyTorch module class."""
-        if self.class_fn:
-            layer_type = self.class_fn(module)
-        if layer_type is None:
-            layer_type = get_chuchichaestli_block_type(module)
-        if layer_type is None:
-            layer_type = get_layer_type(module)
-        if layer_type in self.type_map:
-            return self.type_map[layer_type]
-        return layer_type
+    def _ir_type(self, node: IRNode) -> str:
+        """Mermaid style-class key for an IR node."""
+        label = self.class_fn(node.module) if node.module is not None else None
+        label = label or node.type_label
+        if label not in self.layer_styles and node.module is not None:
+            label = get_layer_type(node.module)
+        return self.type_map.get(label, label)
 
     def set_type_name(self, default_type: str, type_renamed: str):
         """Change default labelling."""
@@ -540,42 +470,35 @@ class MermaidDiagram:
             sanitized = f"{sanitized}_{layer_id}"
         return sanitized or "node"
 
-    def _create_node_name(self, layer_info: LayerInfo) -> str:
-        """Create a name for a node with optional parameter count."""
+    def _ir_label(self, node: IRNode) -> str:
+        """Node label with optional parameter count and output shape."""
         labels = []
         if self.show_names:
-            labels.append(layer_info.get_layer_name(show_name=False, show_depth=False))
-        if self.show_params and layer_info.num_params > 0:
-            labels.append(f"{self._format_number(layer_info.num_params)} params")
-        if self.show_shapes and layer_info.input_size:
-            labels.append(f"{str(layer_info.input_size)}")
+            labels.append(node.label)
+        if self.show_params and node.num_params > 0:
+            labels.append(f"{metric_suffix(node.num_params, 1)} params")
+        if self.show_shapes and node.info is not None and node.info.output_size:
+            labels.append(str(node.info.output_size))
         return "</br>".join(labels)
 
-    def _format_number(self, num: int) -> str:
-        """Format large numbers with metric suffixes."""
-        return metric_suffix(num, 1)
-
-    def _get_group_key(self, layer_info: LayerInfo) -> str:
-        """Determine the group key for a module based on grouping strategy."""
+    def _ir_group_key(self, node: IRNode) -> str | None:
+        """Subgraph key for an IR node per the grouping strategy."""
         if self.group_by == "type":
-            return self._get_layer_type(layer_info.module)
-        elif self.group_by == "depth":
-            return f"Depth {layer_info.depth}"
-        elif self.group_by == "level":
-            level = self._extract_level_number(layer_info.name)
-            if level is not None:
-                return f"Level {level}"
-        elif self.group_by == "encoder_decoder":
-            name_lower = layer_info.name.lower()
-            if "encoder" in name_lower or "down" in name_lower:
-                return "Encoder"
-            elif "decoder" in name_lower or "up" in name_lower:
-                return "Decoder"
-            elif "bottleneck" in name_lower or "mid" in name_lower:
-                return "Bottleneck"
-            return "I/O"
-        else:
-            return None
+            return self._ir_type(node)
+        if self.group_by == "depth":
+            return f"Depth {node.depth}"
+        if self.group_by == "level":
+            idx = node.geometry.level_index
+            return f"Level {idx}" if idx is not None else None
+        if self.group_by == "encoder_decoder":
+            side = node.id.split("/")[1] if "/" in node.id else ""
+            return {
+                "encoder": "Encoder",
+                "decoder": "Decoder",
+                "bottleneck": "Bottleneck",
+                "latent": "Latent",
+            }.get(side, "I/O")
+        return None
 
     def _get_node_shape(self, layer_type: str, name: str) -> str:
         """Get the mermaid shape syntax for a node."""
@@ -725,7 +648,10 @@ class MermaidDiagram:
         """Save the diagram to file.
 
         Args:
-            filepath: Path to save the diagram
+            filename: Output path; the suffix selects the format (mmd/svg/png/pdf).
+            width: Target width in pixels (image formats).
+            height: Target height in pixels (image formats).
+            scale: Resolution scale factor (image formats).
         """
         diagram = self.generate()
         filepath = Path(filename)
@@ -747,7 +673,7 @@ class MermaidDiagram:
                 tmpf.write(diagram)
                 tmpf_path = tmpf.name
             try:
-                result = subprocess.run(
+                subprocess.run(
                     [
                         "mmdc",
                         "-i",
