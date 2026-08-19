@@ -18,7 +18,12 @@ from chuchichaestli.utils.modules import (
     get_chuchichaestli_block_type,
     get_layer_type,
 )
-from chuchichaestli.utils.visualization import MermaidDiagram, mermaid_diagram
+from chuchichaestli.utils.visualization import (
+    MermaidDiagram,
+    mermaid_diagram,
+    matplotlib_diagram,
+    build_ir,
+)
 
 __all__ = [
     "partialclass",
@@ -34,4 +39,6 @@ __all__ = [
     "get_layer_type",
     "MermaidDiagram",
     "mermaid_diagram",
+    "matplotlib_diagram",
+    "build_ir",
 ]
