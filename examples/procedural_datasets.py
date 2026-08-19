@@ -21,9 +21,6 @@ Run from repository root:
 ```
 """
 
-from pathlib import Path
-import torch
-from torch.utils.data import DataLoader
 from chuchichaestli.data import (
     HalfMoonsDataset,
     SpiralsDataset,
