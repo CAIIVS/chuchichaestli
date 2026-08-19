@@ -121,7 +121,9 @@ class HDF5Dataset(CachingDataset):
                 attrs = self._find_attrs(h5_file, self.attrs_patterns)
                 self.h5_attrs.append(attrs)
                 if attrs:
-                    self._mmap_attrs.append(attrs[0])
+                    # Many matches -> one metadata object per sample.
+                    # Single match -> file-level metadata.
+                    self._mmap_attrs.append(attrs if len(attrs) > 1 else attrs[0])
         self._build_index()
 
     def _get_from_mmap_attrs(self, file_idx, local_idx, copy: bool = True):
@@ -133,22 +135,30 @@ class HDF5Dataset(CachingDataset):
             copy: Whether to manually copy from mmap_attrs.
         """
         attr_obj = self._mmap_attrs[file_idx]
+        # Per-sample metadata: a list holds one attribute object per sample.
+        if isinstance(attr_obj, list):
+            attr_obj = attr_obj[0 if local_idx is None else local_idx]
+            if isinstance(attr_obj, h5py.AttributeManager):
+                return self._attrs_to_dict(attr_obj)
+            return attr_obj
         if isinstance(attr_obj, h5py.AttributeManager):
-            # Per-group attributes
-            attrs_dict = {}
-            for key in attr_obj.keys():
-                value = attr_obj[key]
-                # Convert for JSON serialization
-                if isinstance(value, np.ndarray):
-                    if value.size == 1:
-                        attrs_dict[key] = value.item()
-                    else:
-                        attrs_dict[key] = value.tolist()
-                else:
-                    attrs_dict[key] = value
-            return attrs_dict
+            # Per-group (file-level) attributes
+            return self._attrs_to_dict(attr_obj)
         # for h5py.Dataset, base class behaviour is fine
         return super()._get_from_mmap_attrs(file_idx, local_idx, copy=copy)
+
+    @staticmethod
+    def _attrs_to_dict(attr_mgr: h5py.AttributeManager) -> dict:
+        """Convert an h5py `AttributeManager` to a JSON-friendly dict."""
+        attrs_dict = {}
+        for key in attr_mgr.keys():
+            value = attr_mgr[key]
+            # Convert for JSON serialization
+            if isinstance(value, np.ndarray):
+                attrs_dict[key] = value.item() if value.size == 1 else value.tolist()
+            else:
+                attrs_dict[key] = value
+        return attrs_dict
 
     @staticmethod
     def _create_vds(
@@ -242,7 +252,6 @@ class HDF5Dataset(CachingDataset):
         Returns:
             List of attribute managers or metadata datasets.
         """
-        attrs: list[h5py.AttributeManager | h5py.Dataset] = []
         # Construct group path tree
         paths: list[str] = []
 
@@ -251,25 +260,28 @@ class HDF5Dataset(CachingDataset):
 
         h5_file.visititems(visitor)
 
-        # Match patterns and get metadata
+        # Match patterns, deduplicating by path. Sort so per-sample metadata
+        # groups (e.g. zero-padded names) align with their sample rows.
+        matched: list[str] = []
+        seen: set[str] = set()
         for pattern in patterns:
             for path in paths:
-                if fnmatch.fnmatch(path, pattern):
-                    if path in h5_file:
-                        obj = h5_file[path]
-                        # Check if group has attributes
-                        if isinstance(obj, h5py.Group) and len(obj.attrs) > 0:
-                            if obj.attrs not in attrs:
-                                attrs.append(obj.attrs)
-                        # Or a dataset that serves as metadata
-                        elif isinstance(obj, h5py.Dataset):
-                            is_data_ds = any(
-                                obj == ds
-                                for ds in self.h5_datasets[-1]
-                                if self.h5_datasets
-                            )
-                            if not is_data_ds and obj not in attrs:
-                                attrs.append(obj)
+                if path not in seen and fnmatch.fnmatch(path, pattern):
+                    matched.append(path)
+                    seen.add(path)
+        matched.sort()
+
+        # Resolve matched paths to attribute managers / metadata datasets
+        attrs: list[h5py.AttributeManager | h5py.Dataset] = []
+        data_ds = self.h5_datasets[-1] if self.h5_datasets else []
+        for path in matched:
+            obj = h5_file[path]
+            # A group carrying HDF5 attributes -> its AttributeManager
+            if isinstance(obj, h5py.Group) and len(obj.attrs) > 0:
+                attrs.append(obj.attrs)
+            # Or a (non-data) dataset that serves as metadata
+            elif isinstance(obj, h5py.Dataset) and not any(obj == ds for ds in data_ds):
+                attrs.append(obj)
         return attrs
 
     def _restore_transient(self):
@@ -347,14 +359,31 @@ class HDF5Dataset(CachingDataset):
         summary += f"Sample size:        {self.sample_size}\n"
         summary += f"Group patterns:     {self.group_patterns}\n"
         if self.h5_datasets:
-            summary += f"Dataset groups:     {self.dataset_groups}\n"
+            summary += f"Dataset groups:     {self._fmt_groups(self.dataset_groups)}\n"
         if self.attrs_patterns:
             summary += f"Attr patterns:      {self.attrs_patterns}\n"
             if self.h5_attrs:
-                summary += f"Attr groups:        {self.attr_groups}\n"
+                summary += f"Attr groups:        {self._fmt_groups(self.attr_groups)}\n"
         if print_:
             print(summary)
         return summary
+
+    @staticmethod
+    def _fmt_groups(groups: list[list[str]], preview: int = 3) -> str:
+        """Compactly summarize a (per-file) list of group paths for `info`.
+
+        Collapses large/repetitive listings (e.g. per-sample metadata groups)
+        into a count plus a short preview of the unique paths.
+        """
+        flat = [g for sub in groups for g in sub]
+        if not flat:
+            return "[]"
+        uniq = list(dict.fromkeys(flat))
+        if len(uniq) <= preview:
+            shown = ", ".join(uniq)
+            return f"[{shown}]" if len(flat) == len(uniq) else f"{len(flat)} ({shown})"
+        shown = ", ".join(uniq[:preview])
+        return f"{len(flat)} groups, {len(uniq)} unique ({shown}, ...)"
 
 
 class ZipHDF5Dataset(ZipDataset):

@@ -119,6 +119,30 @@ def group_attrs_file(temp_dir):
 
 
 @pytest.fixture
+def per_sample_meta_file(temp_dir):
+    """HDF5 file with one metadata *group per sample* (each with attrs).
+
+    Mirrors the TNG50 layout: `data/images` is a stack of N samples and
+    `data/metadata/<NNNN>` groups carry per-sample attributes, including an
+    array-valued attribute (which breaks value-based dedup in ``_find_attrs``).
+    """
+    file_path = temp_dir / "per_sample_meta.h5"
+    n = 6
+    with h5py.File(file_path, "w") as f:
+        grp = f.create_group("data")
+        grp.create_dataset(
+            "images", data=np.random.randn(n, 4, 4).astype(np.float32)
+        )
+        meta = grp.create_group("metadata")
+        for i in range(n):
+            g = meta.create_group(f"{i:04d}")
+            g.attrs["gid"] = i
+            g.attrs["name"] = f"sample_{i:04d}"
+            g.attrs["extent"] = np.array([-1.0 * i, 1.0 * i], dtype=np.float64)
+    return file_path, n
+
+
+@pytest.fixture
 def paired_hdf5_files(temp_dir):
     """Two HDF5 files each containing a different group, same sample count."""
     file_a = temp_dir / "file_a.h5"
@@ -399,6 +423,41 @@ class TestHDF5Dataset:
         assert isinstance(ds.attr_groups, list)
         assert isinstance(ds.attr_groups[0], list)
         assert ds.attr_groups[0][0] == "/meta"
+
+    def test_per_sample_metadata_groups(self, per_sample_meta_file):
+        """Per-sample metadata groups map to their own sample (by local_idx)."""
+        fp, n = per_sample_meta_file
+        ds = HDF5Dataset(
+            fp,
+            groups="data/images",
+            attrs_groups="data/metadata/*",  # one group per sample
+            return_as="dict",
+        )
+        assert len(ds) == n
+        for i in range(n):
+            attrs = ds[i]["attrs"]
+            assert attrs["gid"] == i
+            assert attrs["name"] == f"sample_{i:04d}"
+            # array-valued attr survives (previously crashed _find_attrs)
+            assert attrs["extent"] == [-1.0 * i, 1.0 * i]
+        ds.close()
+
+    def test_per_sample_metadata_multifile_alignment(self, temp_dir):
+        """Across concatenated files, metadata still aligns with each sample."""
+        paths = []
+        for fi in range(2):
+            fp = temp_dir / f"psm_{fi}.h5"
+            with h5py.File(fp, "w") as f:
+                grp = f.create_group("data")
+                grp.create_dataset("images", data=np.zeros((3, 2, 2), np.float32))
+                meta = grp.create_group("metadata")
+                for i in range(3):
+                    meta.create_group(f"{i:04d}").attrs["gid"] = 100 * fi + i
+            paths.append(fp)
+        ds = HDF5Dataset(paths, groups="data/images",
+                         attrs_groups="data/metadata/*", return_as="dict")
+        assert [ds[i]["attrs"]["gid"] for i in range(6)] == [0, 1, 2, 100, 101, 102]
+        ds.close()
 
 
 class TestZipHDF5Dataset:
