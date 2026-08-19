@@ -26,7 +26,11 @@ def main() -> None:
     ASSETS.mkdir(exist_ok=True)
     for level in (0, 1, 2):
         matplotlib_diagram(
-            model, level=level, input_shape=INPUT_SHAPE, title=f"PatchGAN (level {level})"
+            model,
+            level=level,
+            input_shape=INPUT_SHAPE,
+            color_labels=level >= 1,
+            title=f"PatchGAN (level {level})",
         ).save(ASSETS / f"gan_level{level}.pdf")
     mermaid_diagram(model, input_shape=INPUT_SHAPE).save(ASSETS / "gan.mmd")
     print(f"Wrote PatchGAN figures to {ASSETS}")

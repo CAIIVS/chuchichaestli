@@ -43,7 +43,11 @@ def main() -> None:
     ASSETS.mkdir(exist_ok=True)
     for level in range(4):
         matplotlib_diagram(
-            model, level=level, input_shape=INPUT_SHAPE, title=f"VAE (level {level})"
+            model,
+            level=level,
+            input_shape=INPUT_SHAPE,
+            color_labels=level >= 2,
+            title=f"VAE (level {level})",
         ).save(ASSETS / f"vae_level{level}.pdf")
 
     graph = build_ir(model, input_shape=INPUT_SHAPE)

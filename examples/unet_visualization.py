@@ -36,7 +36,11 @@ def main() -> None:
     ASSETS.mkdir(exist_ok=True)
     for level in range(4):
         matplotlib_diagram(
-            model, level=level, input_shape=INPUT_SHAPE, title=f"U-Net (level {level})"
+            model,
+            level=level,
+            input_shape=INPUT_SHAPE,
+            color_labels=level >= 2,
+            title=f"U-Net (level {level})",
         ).save(ASSETS / f"unet_level{level}.pdf")
 
     graph = build_ir(model, input_shape=INPUT_SHAPE)

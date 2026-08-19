@@ -121,6 +121,9 @@ matplotlib_diagram(
     model, level=1, zoom="model/encoder/level0/block0", input_shape=(1, 3, 256, 256)
 ).save("unet_zoom.pdf")
 
+# colour-code nodes and move (long) names into the legend
+matplotlib_diagram(model, level=2, color_labels=True, input_shape=(1, 3, 256, 256)).save("blocks.pdf")
+
 # a quick mermaid diagram (skip connections render as dashed edges)
 print(mermaid_diagram(model, input_shape=(1, 3, 256, 256)))
 ```
