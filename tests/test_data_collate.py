@@ -178,6 +178,41 @@ class TestSequenceCollateProvenance:
         assert out["xfrac"].shape == (3, 2)
         assert out["ionrates"].shape == (3, 2)
 
+    def test_multi_source_attaches_per_field_files(self):
+        """A sequence of sources yields one path list per source."""
+        xfrac = SimpleNamespace(
+            files=[Path(f"xfrac_z9.940_{n}.npy") for n in (2, 3, 10)],
+            _file_offsets=[0, 1, 2, 3], new_axis=True,
+        )
+        ionrates = SimpleNamespace(
+            files=[Path(f"IonRates_z9.940_{n}.npy") for n in (2, 3, 10)],
+            _file_offsets=[0, 1, 2, 3], new_axis=True,
+        )
+        coll = SequenceCollate(source=[xfrac, ionrates], key_fn=_z_key)
+        samples = [
+            IndexedSample(i, {"xfrac": torch.zeros(2), "ionrates": torch.ones(2)})
+            for i in (0, 2, 1)
+        ]
+        out = coll(samples)
+        xfrac_files, ionrates_files = out["files"]
+        assert [p.name for p in xfrac_files] == [
+            "xfrac_z9.940_2.npy", "xfrac_z9.940_10.npy", "xfrac_z9.940_3.npy",
+        ]
+        assert [p.name for p in ionrates_files] == [
+            "IonRates_z9.940_2.npy", "IonRates_z9.940_10.npy", "IonRates_z9.940_3.npy",
+        ]
+        # key is still derived from the first source's first file
+        assert out["key"] == "9.940"
+
+    def test_single_element_sequence_stays_flat(self):
+        """A one-element source sequence keeps the flat (back-compat) shape."""
+        coll = SequenceCollate(source=[self._source()])
+        samples = [IndexedSample(i, {"x": torch.zeros(2)}) for i in (0, 1)]
+        out = coll(samples)
+        assert [p.name for p in out["files"]] == [
+            "xfrac_z9.940_2.npy", "xfrac_z9.940_3.npy",
+        ]
+
     def test_no_source_skips_provenance(self):
         """Without source, IndexedSample data is collated but no provenance."""
         coll = SequenceCollate()
