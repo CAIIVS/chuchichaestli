@@ -4,11 +4,11 @@
 """PyTorch batch sampler for hierarchical or grouped batching."""
 
 import re
-import random
 import warnings
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
+import torch
 from torch.utils.data import Sampler
 from chuchichaestli.data.base import FileDataset
 
@@ -34,9 +34,9 @@ class HierarchicalBatchSampler(Sampler):
     def __iter__(self):
         """Iterator."""
         if self.shuffle:
-            batches = self._batches.copy()
-            random.shuffle(batches)
-            yield from batches
+            # Shuffle via torch's RNG
+            order = torch.randperm(len(self._batches)).tolist()
+            yield from (self._batches[i] for i in order)
         else:
             yield from self._batches
 
@@ -155,17 +155,6 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
                     )
 
         return batches
-
-    def __iter__(self):
-        """Yield list of indices for a each batch."""
-        # Rebuild each epoch so shuffle produces different orderings.
-        if self.shuffle:
-            self._batches = self._build_batches()
-        yield from self._batches
-
-    def __len__(self) -> int:
-        """Number of batches."""
-        return len(self._batches)
 
     @classmethod
     def from_filename(

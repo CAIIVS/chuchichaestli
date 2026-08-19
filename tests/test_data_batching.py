@@ -5,6 +5,7 @@
 
 import re
 import pytest
+import torch
 from pathlib import Path
 from types import SimpleNamespace
 from chuchichaestli.data.batching import (
@@ -383,7 +384,7 @@ class TestWholeGroupBatching:
         assert list(keep) == list(drop) == [[0, 1, 2]]
 
     def test_shuffle_preserves_intra_batch_order(self):
-        """shuffle reorders batches but each batch stays order_fn-monotonic."""
+        """Shuffle reorders batches but each batch stays order_fn-monotonic."""
         ds = make_file_dataset([
             ("s1_10.npy", 1),
             ("s1_2.npy", 1),
@@ -399,6 +400,23 @@ class TestWholeGroupBatching:
             for batch in sampler:
                 ns = [_order_n(ds.files[i]) for i in batch]
                 assert ns == sorted(ns)
+
+    def test_shuffle_actually_varies_batch_order(self):
+        """shuffle=True yields a batch order that differs from insertion order."""
+        specs = [(f"g{i}_1.npy", 1) for i in range(8)]
+        key_fn = lambda p: p.name.split("_")[0]  # one group per file  # noqa: E731
+        ref = list(HierarchicalFileBatchSampler(
+            make_file_dataset(specs), key_fn=key_fn, batch_size=None, shuffle=False
+        ))
+        sampler = HierarchicalFileBatchSampler(
+            make_file_dataset(specs), key_fn=key_fn, batch_size=None, shuffle=True
+        )
+        torch.manual_seed(1234)
+        epochs = [list(sampler) for _ in range(10)]
+        # Contents are always preserved; only the order may change.
+        assert all(sorted(e) == sorted(ref) for e in epochs)
+        # But shuffle must produce a different order in at least one epoch.
+        assert any(e != ref for e in epochs)
 
 
 class TestHierarchicalFileBatchSamplerFromSequences:
