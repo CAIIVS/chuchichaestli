@@ -1,0 +1,591 @@
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Architecture-aware adapters mapping models to the semantic IR."""
+
+from __future__ import annotations
+import re
+from types import SimpleNamespace
+from typing import Protocol, runtime_checkable
+from torch import nn
+from chuchichaestli.utils.modules import (
+    LayerInfo,
+    get_chuchichaestli_block_type,
+    get_layer_type,
+)
+from chuchichaestli.utils.visualization.ir import (
+    NodeRole,
+    EdgeKind,
+    Geometry,
+    IRNode,
+    IREdge,
+    IRGraph,
+)
+
+__all__ = [
+    "SemanticAdapter",
+    "AdapterRegistry",
+    "UNetAdapter",
+    "AutoencoderAdapter",
+    "SequentialAdapter",
+    "GenericAdapter",
+    "default_registry",
+]
+
+_CLASSES: SimpleNamespace | None = None
+
+
+def _classes() -> SimpleNamespace:
+    """Lazily import and cache the model classes used for isinstance dispatch."""
+    global _CLASSES
+    if _CLASSES is not None:
+        return _CLASSES
+    from chuchichaestli.models.blocks import (
+        BaseConvBlock,
+        DownBlock,
+        MidBlock,
+        UpBlock,
+        AutoencoderDownBlock,
+        AutoencoderMidBlock,
+        AutoencoderUpBlock,
+        ResidualBlock,
+        ResidualBottleneck,
+        LiteResidualBlock,
+        GaussianNoiseBlock,
+    )
+    from chuchichaestli.models.downsampling import (
+        Downsample,
+        DownsampleInterpolate,
+        DownsampleUnshuffle,
+    )
+    from chuchichaestli.models.upsampling import (
+        Upsample,
+        UpsampleInterpolate,
+        UpsampleShuffle,
+    )
+    from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
+    from chuchichaestli.models.autoencoder.vae import VAE
+    from chuchichaestli.models.autoencoder.vqvae import VQVAE
+
+    residual = (ResidualBlock, ResidualBottleneck, LiteResidualBlock)
+    containers = (nn.Sequential, nn.ModuleList, nn.ModuleDict)
+    blocks = (
+        BaseConvBlock,
+        DownBlock,
+        MidBlock,
+        UpBlock,
+        AutoencoderDownBlock,
+        AutoencoderMidBlock,
+        AutoencoderUpBlock,
+    ) + residual
+    _CLASSES = SimpleNamespace(
+        Autoencoder=Autoencoder,
+        VAE=VAE,
+        VQVAE=VQVAE,
+        GaussianNoiseBlock=GaussianNoiseBlock,
+        RESIDUAL=residual,
+        RECURSE=containers + blocks,
+        DOWNSAMPLE=(Downsample, DownsampleInterpolate, DownsampleUnshuffle),
+        UPSAMPLE=(Upsample, UpsampleInterpolate, UpsampleShuffle),
+    )
+    return _CLASSES
+
+
+def _san(name: str) -> str:
+    """Sanitize a path segment (no separators/whitespace)."""
+    return re.sub(r"[^0-9A-Za-z._-]", "_", str(name))
+
+
+def _type_label(module: nn.Module) -> str:
+    """Human-readable type label for a module."""
+    return get_chuchichaestli_block_type(module) or get_layer_type(module)
+
+
+@runtime_checkable
+class SemanticAdapter(Protocol):
+    """Maps a model family to the semantic IR."""
+
+    def matches(self, model: nn.Module) -> bool:
+        """Whether this adapter can decompose `model`.
+
+        Args:
+            model: Root module to test.
+        """
+        ...
+
+    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+        """Build the IR graph for `model`.
+
+        Args:
+            model: Root module to decompose.
+            info_by_id: Map from id(module) to LayerInfo.
+        """
+        ...
+
+
+class _Builder:
+    """Shared IR-construction helpers for concrete adapters."""
+
+    def __init__(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> None:
+        """Constructor.
+
+        Args:
+            model: Root module being decomposed.
+            info_by_id: Map from id(module) to LayerInfo.
+        """
+        self.model = model
+        self.info_by_id = info_by_id
+        self.edges: list[IREdge] = []
+        self._leaves: list[IRNode] = []
+        self._used: set[str] = set()
+
+    def _uid(self, candidate: str) -> str:
+        uid, i = candidate, 2
+        while uid in self._used:
+            uid = f"{candidate}_{i}"
+            i += 1
+        self._used.add(uid)
+        return uid
+
+    def _info(self, module: nn.Module | None) -> LayerInfo | None:
+        return self.info_by_id.get(id(module)) if module is not None else None
+
+    def _geom(
+        self,
+        info: LayerInfo | None,
+        module: nn.Module | None = None,
+        level_index: int | None = None,
+        is_down: bool = False,
+        is_up: bool = False,
+    ) -> Geometry:
+        channels = spatial = None
+        if info is not None and len(info.output_size) > 1:
+            channels = info.output_size[1]
+            if len(info.output_size) > 2:
+                spatial = tuple(info.output_size[2:])
+        if channels is None and module is not None:
+            channels = getattr(module, "out_channels", None) or getattr(
+                module, "channels", None
+            )
+        return Geometry(channels, spatial, level_index, is_down, is_up)
+
+    def _root(self) -> IRNode:
+        return IRNode(
+            id=self._uid("model"),
+            role=NodeRole.MODEL,
+            type_label=_type_label(self.model) or self.model.__class__.__name__,
+            label=self.model.__class__.__name__,
+            module=self.model,
+            info=self._info(self.model),
+            depth=0,
+        )
+
+    def _child(
+        self,
+        parent: IRNode,
+        key: str,
+        role: NodeRole,
+        label: str,
+        module: nn.Module | None = None,
+        geometry: Geometry | None = None,
+    ) -> IRNode:
+        nid = self._uid(f"{parent.id}/{_san(key)}")
+        info = self._info(module)
+        node = IRNode(
+            id=nid,
+            role=role,
+            type_label=_type_label(module) if module is not None else label,
+            label=label,
+            module=module,
+            info=info,
+            depth=nid.count("/"),
+            geometry=geometry or self._geom(info, module),
+            num_params=info.num_params if info is not None else 0,
+        )
+        parent.add(node)
+        return node
+
+    def _level(self, component: IRNode, index: int) -> IRNode:
+        return self._child(
+            component,
+            f"level{index}",
+            NodeRole.LEVEL,
+            f"Level {index}",
+            geometry=Geometry(level_index=index),
+        )
+
+    def _block(
+        self,
+        level: IRNode,
+        key: str,
+        module: nn.Module,
+        level_index: int | None = None,
+        is_down: bool = False,
+        is_up: bool = False,
+    ) -> IRNode:
+        info = self._info(module)
+        node = self._child(
+            level,
+            key,
+            NodeRole.BLOCK,
+            module.__class__.__name__,
+            module=module,
+            geometry=self._geom(info, module, level_index, is_down, is_up),
+        )
+        self._emit_layers(node, module)
+        self._maybe_residual(node, module)
+        return node
+
+    def _layer(self, block: IRNode, base_id: str, module: nn.Module) -> IRNode:
+        nid = self._uid(base_id)
+        info = self._info(module)
+        node = IRNode(
+            id=nid,
+            role=NodeRole.LAYER,
+            type_label=_type_label(module),
+            label=module.__class__.__name__,
+            module=module,
+            info=info,
+            depth=nid.count("/"),
+            geometry=self._geom(info, module),
+            num_params=info.num_params if info is not None else 0,
+        )
+        block.add(node)
+        self._leaves.append(node)
+        return node
+
+    def _emit_layers(self, block: IRNode, module: nn.Module) -> None:
+        recurse = _classes().RECURSE
+
+        def walk(m: nn.Module, prefix: str) -> None:
+            kids = list(m.named_children())
+            if kids and isinstance(m, recurse):
+                for name, child in kids:
+                    walk(child, f"{prefix}/{_san(name)}")
+            else:
+                self._layer(block, prefix, m)
+
+        kids = list(module.named_children())
+        if kids and isinstance(module, recurse):
+            for name, child in kids:
+                walk(child, f"{block.id}/{_san(name)}")
+        else:
+            self._layer(block, f"{block.id}/{_san(module.__class__.__name__)}", module)
+
+    def _maybe_residual(self, block: IRNode, module: nn.Module) -> None:
+        residual = _classes().RESIDUAL
+        if len(block.children) >= 2 and any(
+            isinstance(sm, residual) for sm in module.modules()
+        ):
+            self.edges.append(
+                IREdge(block.children[0].id, block.children[-1].id, EdgeKind.RESIDUAL)
+            )
+
+    def _chain_forward(self) -> None:
+        for prev, nxt in zip(self._leaves, self._leaves[1:]):
+            self.edges.append(IREdge(prev.id, nxt.id, EdgeKind.FORWARD))
+
+    def _graph(self, root: IRNode) -> IRGraph:
+        self._chain_forward()
+        return IRGraph(root=root, edges=self.edges)
+
+
+class UNetAdapter:
+    """Adapter for `UNet` models with encoder/bottleneck/decoder and skips."""
+
+    def matches(self, model: nn.Module) -> bool:
+        """Match any module exposing the U-Net attribute contract.
+
+        Args:
+            model: Root module to test.
+        """
+        return (
+            hasattr(model, "down_blocks")
+            and hasattr(model, "up_blocks")
+            and hasattr(model, "mid_block")
+            and not isinstance(model, _classes().Autoencoder)
+        )
+
+    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+        """Decompose a U-Net into the IR, replaying its skip pairing.
+
+        Args:
+            model: U-Net model.
+            info_by_id: Map from id(module) to LayerInfo.
+        """
+        c = _classes()
+        b = _Builder(model, info_by_id)
+        root = b._root()
+        nbpl = getattr(model, "num_blocks_per_level", 1)
+        skip_to_all = getattr(model, "skip_connection_to_all_blocks", False)
+
+        if getattr(model, "time_emb", None) is not None:
+            cond = b._child(root, "conditioning", NodeRole.COMPONENT, "Conditioning")
+            lvl = b._level(cond, 0)
+            b._block(lvl, "time_emb", model.time_emb)
+
+        enc = b._child(root, "encoder", NodeRole.COMPONENT, "Encoder", module=model)
+        li = 0
+        level = b._level(enc, li)
+        b._block(level, "conv_in", model.conv_in, level_index=li)
+        skip_sources: list[str] = []
+        for i, m in enumerate(model.down_blocks):
+            if isinstance(m, c.DOWNSAMPLE):
+                b._block(level, f"downsample{li}", m, level_index=li, is_down=True)
+                li += 1
+                level = b._level(enc, li)
+                continue
+            if isinstance(m, c.GaussianNoiseBlock):
+                b._block(level, f"noise{i}", m, level_index=li)
+                continue
+            block = b._block(level, f"block{i}", m, level_index=li)
+            if (i + 1) % nbpl == 0:
+                skip_sources.append(block.id)
+
+        bottleneck = b._child(
+            root, "bottleneck", NodeRole.COMPONENT, "Bottleneck", module=model.mid_block
+        )
+        b._block(b._level(bottleneck, 0), "mid", model.mid_block)
+
+        dec = b._child(root, "decoder", NodeRole.COMPONENT, "Decoder", module=model)
+        dli = 0
+        level = b._level(dec, dli)
+        no_count = 0
+        for i, m in enumerate(model.up_blocks):
+            if isinstance(m, (*c.UPSAMPLE, c.GaussianNoiseBlock)):
+                is_up = isinstance(m, c.UPSAMPLE)
+                b._block(level, f"sample{i}", m, level_index=dli, is_up=is_up)
+                no_count += 1
+                if is_up:
+                    dli += 1
+                    level = b._level(dec, dli)
+                continue
+            block = b._block(level, f"block{i}", m, level_index=dli)
+            src = None
+            if (i - no_count) % nbpl == 0 and skip_sources:
+                src = skip_sources.pop()
+            elif skip_to_all and skip_sources:
+                src = skip_sources[-1]
+            action = getattr(m, "skip_connection_action", None)
+            if src is not None and action is not None:
+                b.edges.append(IREdge(src, block.id, EdgeKind.SKIP, str(action)))
+        b._block(level, "out_block", model.out_block)
+
+        return b._graph(root)
+
+
+class AutoencoderAdapter:
+    """Adapter for `Autoencoder` and its `VAE`/`VQVAE`/`DCAE` subclasses."""
+
+    def matches(self, model: nn.Module) -> bool:
+        """Match any `Autoencoder` subclass.
+
+        Args:
+            model: Root module to test.
+        """
+        return isinstance(model, _classes().Autoencoder)
+
+    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+        """Decompose an autoencoder into encoder/latent/decoder (no skips).
+
+        Args:
+            model: Autoencoder model.
+            info_by_id: Map from id(module) to LayerInfo.
+        """
+        c = _classes()
+        b = _Builder(model, info_by_id)
+        root = b._root()
+
+        enc = b._child(
+            root, "encoder", NodeRole.COMPONENT, "Encoder", module=model.encoder
+        )
+        self._sequential_component(b, c, enc, model.encoder, down=True)
+
+        kind = (
+            "reparameterization"
+            if isinstance(model, c.VAE)
+            else "codebook"
+            if isinstance(model, c.VQVAE)
+            else "projection"
+        )
+        latent = b._child(root, "latent", NodeRole.COMPONENT, "Latent")
+        latent.meta["latent_kind"] = kind
+        llv = b._level(latent, 0)
+        if getattr(model, "latent_proj", None) is not None:
+            b._block(llv, "latent_proj", model.latent_proj)
+        if isinstance(model, c.VAE):
+            b._child(llv, "reparameterize", NodeRole.BLOCK, "Reparameterize (μ, σ)")
+        if isinstance(model, c.VQVAE) and getattr(model, "quantize", None) is not None:
+            b._block(llv, "quantize", model.quantize)
+        if getattr(model, "latent_deproj", None) is not None:
+            b._block(llv, "latent_deproj", model.latent_deproj)
+
+        dec = b._child(
+            root, "decoder", NodeRole.COMPONENT, "Decoder", module=model.decoder
+        )
+        self._sequential_component(b, c, dec, model.decoder, down=False)
+
+        return b._graph(root)
+
+    def _sequential_component(
+        self,
+        b: _Builder,
+        c: SimpleNamespace,
+        component: IRNode,
+        sub: nn.Module,
+        down: bool,
+    ) -> None:
+        """Populate an encoder/decoder component from its stage list."""
+        stages = sub.down_blocks if down else sub.up_blocks
+        boundary = c.DOWNSAMPLE if down else c.UPSAMPLE
+        idx = 0
+        level = b._level(component, idx)
+        if down and hasattr(sub, "conv_in"):
+            b._block(level, "conv_in", sub.conv_in, level_index=idx)
+        if not down and hasattr(sub, "in_block"):
+            b._block(level, "in_block", sub.in_block, level_index=idx)
+        if not down:
+            for j, m in enumerate(getattr(sub, "mid_blocks", [])):
+                b._block(level, f"mid{j}", m, level_index=idx)
+        bi = 0
+        for m in stages:
+            if isinstance(m, boundary):
+                b._block(
+                    level,
+                    f"sample{idx}",
+                    m,
+                    level_index=idx,
+                    is_down=down,
+                    is_up=not down,
+                )
+                idx += 1
+                level = b._level(component, idx)
+                continue
+            for stage_block in m:
+                b._block(level, f"block{bi}", stage_block, level_index=idx)
+                bi += 1
+        if down:
+            for j, m in enumerate(getattr(sub, "mid_blocks", [])):
+                b._block(level, f"mid{j}", m, level_index=idx)
+        cap = sub.out_block if hasattr(sub, "out_block") else None
+        if cap is not None:
+            b._block(level, "out_block", cap, level_index=idx)
+
+
+class SequentialAdapter:
+    """Adapter for `nn.Sequential`-based models such as discriminators."""
+
+    def matches(self, model: nn.Module) -> bool:
+        """Match sequential models.
+
+        Args:
+            model: Root module to test.
+        """
+        return isinstance(model, nn.Sequential)
+
+    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+        """Decompose a sequential model into a single-level block chain.
+
+        Args:
+            model: Sequential model.
+            info_by_id: Map from id(module) to LayerInfo.
+        """
+        b = _Builder(model, info_by_id)
+        root = b._root()
+        component = b._child(root, "network", NodeRole.COMPONENT, "Network")
+        level = b._level(component, 0)
+        for i, (name, child) in enumerate(model.named_children()):
+            b._block(level, name or f"block{i}", child, level_index=0)
+        return b._graph(root)
+
+
+class GenericAdapter:
+    """Fallback adapter using LayerInfo depth banding for any model."""
+
+    def matches(self, model: nn.Module) -> bool:
+        """Match everything.
+
+        Args:
+            model: Root module (unused).
+        """
+        del model
+        return True
+
+    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+        """Decompose an arbitrary module by LayerInfo depth.
+
+        Args:
+            model: Any model.
+            info_by_id: Map from id(module) to LayerInfo.
+        """
+        residual = _classes().RESIDUAL
+        b = _Builder(model, info_by_id)
+        root_info = info_by_id[id(model)]
+        roles = [NodeRole.MODEL, NodeRole.COMPONENT, NodeRole.LEVEL, NodeRole.BLOCK]
+
+        def role_of(info: LayerInfo) -> NodeRole:
+            if info.is_leaf_layer:
+                return NodeRole.LAYER
+            return roles[min(info.depth, len(roles) - 1)]
+
+        def rec(info: LayerInfo, parent: IRNode | None) -> IRNode:
+            if parent is None:
+                node = b._root()
+            else:
+                node = b._child(
+                    parent, info.name, role_of(info), info.class_name, module=info.module
+                )
+            if info.is_leaf_layer:
+                b._leaves.append(node)
+            for child in info.children:
+                rec(child, node)
+            if isinstance(info.module, residual) and len(node.children) >= 2:
+                b.edges.append(
+                    IREdge(node.children[0].id, node.children[-1].id, EdgeKind.RESIDUAL)
+                )
+            return node
+
+        root = rec(root_info, None)
+        return b._graph(root)
+
+
+class AdapterRegistry:
+    """Ordered registry resolving the first matching adapter."""
+
+    def __init__(self, adapters: list[SemanticAdapter] | None = None) -> None:
+        """Constructor.
+
+        Args:
+            adapters: Ordered adapters (first match wins); defaults are used if None.
+        """
+        self.adapters: list[SemanticAdapter] = adapters or []
+
+    def register(self, adapter: SemanticAdapter, priority: int = -1) -> None:
+        """Insert an adapter.
+
+        Args:
+            adapter: Adapter to register.
+            priority: Insertion index; appended before the fallback if -1.
+        """
+        if priority < 0:
+            self.adapters.insert(max(len(self.adapters) - 1, 0), adapter)
+        else:
+            self.adapters.insert(priority, adapter)
+
+    def resolve(self, model: nn.Module) -> SemanticAdapter:
+        """Return the first adapter matching `model`.
+
+        Args:
+            model: Model to resolve an adapter for.
+        """
+        for adapter in self.adapters:
+            if adapter.matches(model):
+                return adapter
+        raise RuntimeError("No adapter matched (GenericAdapter should always match).")
+
+
+def default_registry() -> AdapterRegistry:
+    """Build the default adapter registry."""
+    return AdapterRegistry(
+        [UNetAdapter(), AutoencoderAdapter(), SequentialAdapter(), GenericAdapter()]
+    )
