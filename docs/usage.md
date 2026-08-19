@@ -89,6 +89,46 @@ print(model)
 ```
 
 
+### Visualization
+
+The [visualization][chuchichaestli.utils.visualization] utilities turn a model
+into a publication-ready schematic. A backend-agnostic semantic graph
+([`build_ir`][chuchichaestli.utils.visualization.build_ir]) understands the
+architecture hierarchy — components (encoder/bottleneck/decoder), spatial
+levels, blocks, and layers — including skip and residual connections. Two
+backends consume it: a matplotlib backend for vector figures (PDF/SVG/PNG) and
+the mermaid backend for quick markdown/web diagrams.
+
+The matplotlib backend is an optional dependency:
+
+```console
+pip install 'chuchichaestli[viz]'
+```
+
+#### Example
+
+`level` selects the abstraction (0=components, 1=levels, 2=blocks, 3=layers);
+`zoom` adds an "exemplary zoom" callout expanding one block into its layers.
+
+```python
+from chuchichaestli.utils.visualization import matplotlib_diagram, mermaid_diagram
+
+# abstract encoder/decoder trapezoids with labelled skip arcs
+matplotlib_diagram(model, level=0, input_shape=(1, 3, 256, 256)).save("unet.pdf")
+
+# a composite figure with one block zoomed into its layers
+matplotlib_diagram(
+    model, level=1, zoom="model/encoder/level0/block0", input_shape=(1, 3, 256, 256)
+).save("unet_zoom.pdf")
+
+# a quick mermaid diagram (skip connections render as dashed edges)
+print(mermaid_diagram(model, input_shape=(1, 3, 256, 256)))
+```
+
+Runnable end-to-end scripts for a U-Net, a VAE, and a PatchGAN discriminator
+live in [`examples/`](https://github.com/CAIIVS/chuchichaestli/tree/main/examples).
+
+
 ### Metrics
 
 The [metrics][chuchichaestli.metrics] module provides various metrics
