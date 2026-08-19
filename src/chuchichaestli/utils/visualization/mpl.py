@@ -330,7 +330,7 @@ class MatplotlibRenderer(Renderer):
                 )
         max_top = _H_MID
         for i, (src, tgt, label) in enumerate(skips):
-            max_top = max(max_top, self._arc(mpl, ax, src, tgt, label, 1.5 + i))
+            max_top = max(max_top, self._arc(mpl, ax, src, tgt, label, 1.0 + 0.9 * i))
         for node in view.root.walk():
             if (
                 node.meta.get("has_residual")
@@ -361,12 +361,13 @@ class MatplotlibRenderer(Renderer):
             )
         )
 
-    def _arc(self, mpl, ax, src, tgt, label, peak) -> float:
-        """Draw a skip arc with a bounded height; return the apex y-coordinate."""
+    def _arc(self, mpl, ax, src, tgt, label, bulge) -> float:
+        """Draw a skip arc bulging `bulge` above its chord; return the apex y."""
         x0, x1 = (src[0] + src[1]) / 2, (tgt[0] + tgt[1]) / 2
         y0, y1 = src[3] / 2, tgt[3] / 2
         dist = max(abs(x1 - x0), 1e-6)
-        rad = peak / dist
+        # arc3 bulges by 0.5 * rad * dist at the apex, so rad = 2 * bulge / dist
+        rad = 2.0 * bulge / dist
         rad = -rad if x1 > x0 else rad
         ax.add_patch(
             mpl.FancyArrowPatch(
@@ -381,13 +382,13 @@ class MatplotlibRenderer(Renderer):
                 zorder=3,
             )
         )
-        apex = max(y0, y1) + peak
+        apex = (y0 + y1) / 2 + bulge
         if label:
             ax.text(
-                (x0 + x1) / 2, apex + 0.12, label, ha="center", va="bottom",
-                fontsize=_FS - 1, color=get_color("pink"),
+                (x0 + x1) / 2, apex + 0.1, label, ha="center", va="bottom",
+                fontsize=_FS - 1, color=get_color("pink"), zorder=5,
             )
-        return apex + 0.9
+        return apex + 0.6
 
     def _draw_zoom(
         self,
