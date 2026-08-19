@@ -42,6 +42,7 @@ def test_nbytes_null(x):
     assert isinstance(b.to("G"), nbytes)
     assert isinstance(b.to("G"), float)
 
+
 def test_serial_byte_size():
     """Test the serial_byte_size function."""
     test_dict = {

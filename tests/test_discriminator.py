@@ -5,7 +5,7 @@
 
 import pytest
 import torch
-from chuchichaestli.models.adversarial.blocks import BaseConvBlock
+from chuchichaestli.models.blocks import BaseConvBlock
 from chuchichaestli.models.adversarial.discriminator import (
     BlockDiscriminator,
     PixelDiscriminator,

@@ -9,7 +9,7 @@ from chuchichaestli.debug.memory_usage import (
     CudaMemoryStatsVisitor,
     MPSMemoryAllocationVisitor,
 )
-from chuchichaestli.models.resnet import ResidualBlock
+from chuchichaestli.models.blocks import ResidualBlock
 
 
 def test_cuda_memory_stats_visitor():

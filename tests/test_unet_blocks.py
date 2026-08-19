@@ -6,7 +6,7 @@
 import pytest
 import torch
 from chuchichaestli.models.unet import UNet
-from chuchichaestli.models.unet.blocks import (
+from chuchichaestli.models.blocks import (
     GaussianNoiseBlock,
     DownBlock,
     MidBlock,

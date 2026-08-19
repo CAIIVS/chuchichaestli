@@ -5,6 +5,7 @@
 
 from chuchichaestli.utils.functools import (
     partialclass,
+    alias_kwargs,
     prod,
     nested_list_size,
     map_nested,
@@ -21,6 +22,7 @@ from chuchichaestli.utils.visualization import MermaidDiagram, mermaid_diagram
 
 __all__ = [
     "partialclass",
+    "alias_kwargs",
     "prod",
     "nested_list_size",
     "map_nested",

@@ -13,7 +13,7 @@ from torch import Tensor
 
 class DDIM(DDPM):
     """Denoising Diffusion Implicit Model (DDIM).
-    
+
     As described in the paper:
     "Denoising Diffusion Implicit Models" by Song et al. (2020);
     see https://arxiv.org/abs/2010.02502.
