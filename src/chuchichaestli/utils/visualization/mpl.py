@@ -22,8 +22,10 @@ from chuchichaestli.utils.visualization.ir import IRGraph, IRNode, EdgeKind, Nod
 
 __all__ = ["MatplotlibRenderer"]
 
-_H_MIN, _H_MAX, _H_MID = 0.9, 3.2, 1.8
-_SLOT, _GAP = 1.0, 0.7
+_H_MIN, _H_MAX, _H_MID = 1.4, 4.6, 2.6
+_SLOT, _GAP = 2.2, 0.9
+_IPU = 0.85  # inches per data unit (deterministic layout scale)
+_FS = 12  # base label font size (points)
 
 
 def _require_mpl() -> SimpleNamespace:
@@ -149,11 +151,19 @@ class MatplotlibRenderer(Renderer):
         if not drawables:
             drawables = [n for n in view.root.walk() if not n.children]
 
-        fig, ax = mpl.plt.subplots(figsize=(max(6, 1.6 * len(drawables)), 5))
+        xspan = max(len(drawables), 1) * (_SLOT + _GAP)
+        yspan = _H_MAX + 3.0
+        figw = min(48.0, _IPU * xspan + 1.0)
+        figh = _IPU * yspan + 1.0
+        fig, ax = mpl.plt.subplots(figsize=(figw, figh))
         boxes = self._layout(mpl, ax, drawables)
         self._draw_edges(mpl, ax, view, boxes)
         if self.zoom is not None:
             self._draw_zoom(mpl, ax, boxes)
+        xmax = max((b[1] for b in boxes.values()), default=_SLOT)
+        hmax = max((b[3] for b in boxes.values()), default=_H_MID)
+        ax.set_xlim(-0.6, xmax + 0.6)
+        ax.set_ylim(-hmax / 2 - 1.5, hmax / 2 + 2.5)
         self._finish(mpl, ax, drawables)
         return fig
 
@@ -243,7 +253,7 @@ class MatplotlibRenderer(Renderer):
             text,
             ha="center",
             va="center",
-            fontsize=8,
+            fontsize=_FS,
             zorder=5,
             color=get_color("dark"),
         )
@@ -313,7 +323,7 @@ class MatplotlibRenderer(Renderer):
         )
         ax.add_patch(patch)
         if label:
-            ax.text((x0 + x1) / 2, top, label, ha="center", va="bottom", fontsize=7,
+            ax.text((x0 + x1) / 2, top, label, ha="center", va="bottom", fontsize=_FS - 1,
                     color=get_color("pink"))
 
     def _draw_zoom(
@@ -348,14 +358,14 @@ class MatplotlibRenderer(Renderer):
                     linewidth=1.3,
                 )
             )
-            inset.text(0.5, y, layer.label, ha="center", va="center", fontsize=7,
+            inset.text(0.5, y, layer.label, ha="center", va="center", fontsize=_FS - 2,
                        color=get_color("dark"))
             if i:
                 inset.annotate(
                     "", xy=(0.5, y - 0.36), xytext=(0.5, y - 0.64),
                     arrowprops=dict(arrowstyle="-|>", color=get_color("darkish")),
                 )
-        inset.set_title(target.label, fontsize=8, color=get_color("dark"))
+        inset.set_title(target.label, fontsize=_FS - 1, color=get_color("dark"))
         if anchor is not None:
             b = anchor
             ax.add_patch(
@@ -388,11 +398,9 @@ class MatplotlibRenderer(Renderer):
 
     def _finish(self, mpl: SimpleNamespace, ax: Any, drawables: list[IRNode]) -> None:
         ax.set_aspect("equal")
-        ax.autoscale_view()
-        ax.margins(0.12)
         ax.axis("off")
         if self.title:
-            ax.set_title(self.title, fontsize=11, color=get_color("dark"))
+            ax.set_title(self.title, fontsize=_FS + 3, color=get_color("dark"), pad=14)
         if self.show_legend:
             self._legend(mpl, ax, drawables)
 
@@ -419,7 +427,7 @@ class MatplotlibRenderer(Renderer):
                 loc="lower center",
                 bbox_to_anchor=(0.5, -0.08),
                 ncol=min(len(seen), 5),
-                fontsize=7,
+                fontsize=_FS - 1,
                 frameon=False,
             )
 
@@ -430,8 +438,9 @@ class MatplotlibRenderer(Renderer):
     def _save_impl(
         self, artifact: Any, filepath: Path, width: int, height: int, scale: int
     ) -> None:
-        """Write the figure to disk via savefig."""
-        dpi = 100 * scale
-        artifact.set_size_inches(width / dpi, height / dpi)
+        """Write the figure at its content size; dpi controls raster sharpness."""
+        del width, height
+        figw = artifact.get_size_inches()[0]
+        dpi = min(100 * scale, int(9000 / max(figw, 1.0)))
         artifact.savefig(filepath, dpi=dpi, bbox_inches="tight", transparent=True)
         _require_mpl().plt.close(artifact)
