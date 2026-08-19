@@ -324,7 +324,7 @@ class UNetAdapter:
             lvl = b._level(cond, 0)
             b._block(lvl, "time_emb", model.time_emb)
 
-        enc = b._child(root, "encoder", NodeRole.COMPONENT, "Encoder", module=model)
+        enc = b._child(root, "encoder", NodeRole.COMPONENT, "Encoder")
         li = 0
         level = b._level(enc, li)
         b._block(level, "conv_in", model.conv_in, level_index=li)
@@ -342,12 +342,10 @@ class UNetAdapter:
             if (i + 1) % nbpl == 0:
                 skip_sources.append(block.id)
 
-        bottleneck = b._child(
-            root, "bottleneck", NodeRole.COMPONENT, "Bottleneck", module=model.mid_block
-        )
+        bottleneck = b._child(root, "bottleneck", NodeRole.COMPONENT, "Bottleneck")
         b._block(b._level(bottleneck, 0), "mid", model.mid_block)
 
-        dec = b._child(root, "decoder", NodeRole.COMPONENT, "Decoder", module=model)
+        dec = b._child(root, "decoder", NodeRole.COMPONENT, "Decoder")
         dli = 0
         level = b._level(dec, dli)
         no_count = 0
