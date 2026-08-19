@@ -26,6 +26,10 @@ _H_MIN, _H_MAX, _H_MID = 1.4, 4.6, 2.6
 _SLOT, _GAP = 2.2, 0.9
 _IPU = 0.85  # inches per data unit (deterministic layout scale)
 _FS = 12  # base label font size (points)
+_PALETTE = [
+    "blue", "green", "orange", "red", "purple", "cyan", "golden", "pink",
+    "turquoise", "marguerite", "brown", "purpleblue", "yellow", "darkish",
+]
 
 
 def _require_mpl() -> SimpleNamespace:
@@ -72,6 +76,7 @@ class MatplotlibRenderer(Renderer):
         zoom: ZoomSpec | str | None = None,
         show_params: bool = True,
         show_legend: bool = True,
+        color_labels: bool = False,
         title: str | None = None,
     ) -> None:
         """Constructor.
@@ -81,7 +86,10 @@ class MatplotlibRenderer(Renderer):
             level: Abstraction level (0=components ... 3=layers).
             zoom: Optional exemplary-zoom target (node id or `ZoomSpec`).
             show_params: Whether to annotate parameter counts.
-            show_legend: Whether to draw a type legend.
+            show_legend: Whether to draw a legend.
+            color_labels: If True, colour nodes by name and move names to the
+                legend (keeps only the parameter count inside each shape); useful
+                when block names are too long to fit.
             title: Optional figure title.
         """
         super().__init__(graph)
@@ -93,8 +101,10 @@ class MatplotlibRenderer(Renderer):
         self.zoom = zoom
         self.show_params = show_params
         self.show_legend = show_legend
+        self.color_labels = color_labels
         self.title = title
         self._sizes = self._collect_sizes()
+        self._label_colors: dict[str, str] = {}
 
     def _collect_sizes(self) -> dict[str, float | None]:
         sizes: dict[str, float | None] = {}
@@ -139,6 +149,28 @@ class MatplotlibRenderer(Renderer):
             text += f"\n{metric_suffix(node.num_params, 1)}"
         return text
 
+    def _color_name(self, node: IRNode) -> str | None:
+        if self.color_labels:
+            return self._label_colors.get(node.label, "grey")
+        if node.role == NodeRole.COMPONENT:
+            return component_color(node)
+        return None
+
+    def _fill(self, node: IRNode) -> str:
+        name = self._color_name(node)
+        return color_variant(name, 150) if name else type_fill(node.type_label)
+
+    def _stroke(self, node: IRNode) -> str:
+        name = self._color_name(node)
+        return get_color(name) if name else type_color(node.type_label)
+
+    def _inner(self, node: IRNode) -> str:
+        if self.color_labels:
+            if self.show_params and node.num_params:
+                return metric_suffix(node.num_params, 1)
+            return ""
+        return self._label(node)
+
     def render(self) -> Any:
         """Build and return the matplotlib `Figure`."""
         mpl = _require_mpl()
@@ -150,20 +182,30 @@ class MatplotlibRenderer(Renderer):
         drawables = [n for n in view.root.walk() if n.depth == self.depth]
         if not drawables:
             drawables = [n for n in view.root.walk() if not n.children]
+        if self.color_labels:
+            names: list[str] = []
+            for node in drawables:
+                if node.label not in names:
+                    names.append(node.label)
+            self._label_colors = {
+                name: _PALETTE[i % len(_PALETTE)] for i, name in enumerate(names)
+            }
 
+        n_skips = sum(1 for e in view.edges if e.kind == EdgeKind.SKIP)
+        peak_extra = (2.5 + max(n_skips - 1, 0)) if n_skips else 0.0
         xspan = max(len(drawables), 1) * (_SLOT + _GAP)
-        yspan = _H_MAX + 3.0
+        yspan = _H_MAX + 3.0 + peak_extra
         figw = min(48.0, _IPU * xspan + 1.0)
         figh = _IPU * yspan + 1.0
         fig, ax = mpl.plt.subplots(figsize=(figw, figh))
         boxes = self._layout(mpl, ax, drawables)
-        self._draw_edges(mpl, ax, view, boxes)
+        max_top = self._draw_edges(mpl, ax, view, boxes)
         if self.zoom is not None:
             self._draw_zoom(mpl, ax, boxes)
         xmax = max((b[1] for b in boxes.values()), default=_SLOT)
         hmax = max((b[3] for b in boxes.values()), default=_H_MID)
         ax.set_xlim(-0.6, xmax + 0.6)
-        ax.set_ylim(-hmax / 2 - 1.5, hmax / 2 + 2.5)
+        ax.set_ylim(-hmax / 2 - 1.5, max(hmax / 2 + 2.5, max_top + 0.8))
         self._finish(mpl, ax, drawables)
         return fig
 
@@ -200,11 +242,11 @@ class MatplotlibRenderer(Renderer):
             h,
             boxstyle="round,pad=0.02,rounding_size=0.08",
             linewidth=1.6,
-            facecolor=type_fill(node.type_label),
-            edgecolor=type_color(node.type_label),
+            facecolor=self._fill(node),
+            edgecolor=self._stroke(node),
         )
         ax.add_patch(patch)
-        self._text(ax, x + _SLOT / 2, 0, self._label(node))
+        self._text(ax, x + _SLOT / 2, 0, self._inner(node))
 
     def _trapezoid(
         self,
@@ -215,9 +257,6 @@ class MatplotlibRenderer(Renderer):
         h_right: float,
         node: IRNode,
     ) -> None:
-        color = component_color(node) if node.role == NodeRole.COMPONENT else None
-        stroke = get_color(color) if color else type_color(node.type_label)
-        fill = color_variant(color, 150) if color else type_fill(node.type_label)
         verts = [
             (x, -h_left / 2),
             (x, h_left / 2),
@@ -225,13 +264,17 @@ class MatplotlibRenderer(Renderer):
             (x + _SLOT, -h_right / 2),
         ]
         ax.add_patch(
-            mpl.Polygon(verts, closed=True, facecolor=fill, edgecolor=stroke, linewidth=1.8)
+            mpl.Polygon(
+                verts,
+                closed=True,
+                facecolor=self._fill(node),
+                edgecolor=self._stroke(node),
+                linewidth=1.8,
+            )
         )
-        self._text(ax, x + _SLOT / 2, 0, self._label(node))
+        self._text(ax, x + _SLOT / 2, 0, self._inner(node))
 
     def _hourglass(self, mpl: SimpleNamespace, ax: Any, x: float, h: float, node: IRNode) -> None:
-        stroke = get_color(component_color(node))
-        fill = color_variant(component_color(node), 150)
         waist = h * 0.28
         verts = [
             (x, -h / 2),
@@ -242,9 +285,15 @@ class MatplotlibRenderer(Renderer):
             (x + _SLOT / 2, -waist / 2),
         ]
         ax.add_patch(
-            mpl.Polygon(verts, closed=True, facecolor=fill, edgecolor=stroke, linewidth=1.8)
+            mpl.Polygon(
+                verts,
+                closed=True,
+                facecolor=self._fill(node),
+                edgecolor=self._stroke(node),
+                linewidth=1.8,
+            )
         )
-        self._text(ax, x + _SLOT / 2, 0, self._label(node))
+        self._text(ax, x + _SLOT / 2, 0, self._inner(node))
 
     def _text(self, ax: Any, x: float, y: float, text: str) -> None:
         ax.text(
@@ -264,21 +313,24 @@ class MatplotlibRenderer(Renderer):
         ax: Any,
         view: IRGraph,
         boxes: dict[str, tuple[float, float, float, float]],
-    ) -> None:
+    ) -> float:
+        skips: list[tuple[tuple, tuple, str | None]] = []
         for edge in view.edges:
             if edge.source_id not in boxes or edge.target_id not in boxes:
                 continue
             src, tgt = boxes[edge.source_id], boxes[edge.target_id]
             if edge.kind == EdgeKind.FORWARD:
-                self._arrow(mpl, ax, (src[1], 0), (tgt[0], 0), "-|>", "solid", 1.2)
+                self._arrow(mpl, ax, (src[1], 0), (tgt[0], 0), "-|>", "solid", 1.4)
             elif edge.kind == EdgeKind.SKIP:
-                top = max(src[3], tgt[3]) / 2 + 0.5
-                self._arc(mpl, ax, src, tgt, top, edge.label)
+                skips.append((src, tgt, edge.label))
             elif edge.kind == EdgeKind.RESIDUAL:
                 self._arrow(
                     mpl, ax, (src[0], -src[3] / 2), (tgt[1], -tgt[3] / 2), "-|>",
-                    "dashed", 1.0, rad=-0.4,
+                    "dashed", 1.1, rad=-0.4,
                 )
+        max_top = _H_MID
+        for i, (src, tgt, label) in enumerate(skips):
+            max_top = max(max_top, self._arc(mpl, ax, src, tgt, label, 1.5 + i))
         for node in view.root.walk():
             if (
                 node.meta.get("has_residual")
@@ -288,8 +340,9 @@ class MatplotlibRenderer(Renderer):
                 b = boxes[node.id]
                 self._arrow(
                     mpl, ax, (b[0], -b[3] / 2), (b[1], -b[3] / 2), "-|>",
-                    "dashed", 1.0, rad=-0.5,
+                    "dashed", 1.1, rad=-0.6,
                 )
+        return max_top
 
     def _arrow(
         self, mpl, ax, p0, p1, arrowstyle, ls, lw, rad=0.0
@@ -308,23 +361,33 @@ class MatplotlibRenderer(Renderer):
             )
         )
 
-    def _arc(self, mpl, ax, src, tgt, top, label) -> None:
+    def _arc(self, mpl, ax, src, tgt, label, peak) -> float:
+        """Draw a skip arc with a bounded height; return the apex y-coordinate."""
         x0, x1 = (src[0] + src[1]) / 2, (tgt[0] + tgt[1]) / 2
-        patch = mpl.FancyArrowPatch(
-            (x0, src[3] / 2),
-            (x1, tgt[3] / 2),
-            arrowstyle="-|>",
-            mutation_scale=12,
-            linewidth=1.4,
-            linestyle="dashed",
-            color=get_color("pink"),
-            connectionstyle=f"arc3,rad={-0.5 if x1 > x0 else 0.5}",
-            zorder=3,
+        y0, y1 = src[3] / 2, tgt[3] / 2
+        dist = max(abs(x1 - x0), 1e-6)
+        rad = peak / dist
+        rad = -rad if x1 > x0 else rad
+        ax.add_patch(
+            mpl.FancyArrowPatch(
+                (x0, y0),
+                (x1, y1),
+                arrowstyle="-|>",
+                mutation_scale=13,
+                linewidth=1.6,
+                linestyle="dashed",
+                color=get_color("pink"),
+                connectionstyle=f"arc3,rad={rad}",
+                zorder=3,
+            )
         )
-        ax.add_patch(patch)
+        apex = max(y0, y1) + peak
         if label:
-            ax.text((x0 + x1) / 2, top, label, ha="center", va="bottom", fontsize=_FS - 1,
-                    color=get_color("pink"))
+            ax.text(
+                (x0 + x1) / 2, apex + 0.12, label, ha="center", va="bottom",
+                fontsize=_FS - 1, color=get_color("pink"),
+            )
+        return apex + 0.9
 
     def _draw_zoom(
         self,
@@ -407,7 +470,10 @@ class MatplotlibRenderer(Renderer):
     def _legend(self, mpl: SimpleNamespace, ax: Any, drawables: list[IRNode]) -> None:
         seen: dict[str, Any] = {}
         for node in drawables:
-            if node.role == NodeRole.COMPONENT:
+            if self.color_labels:
+                key = node.label
+                fill, stroke = self._fill(node), self._stroke(node)
+            elif node.role == NodeRole.COMPONENT:
                 key, fill, stroke = (
                     node.label,
                     color_variant(component_color(node), 150),
@@ -424,9 +490,9 @@ class MatplotlibRenderer(Renderer):
         if seen:
             ax.legend(
                 handles=list(seen.values()),
-                loc="lower center",
-                bbox_to_anchor=(0.5, -0.08),
-                ncol=min(len(seen), 5),
+                loc="upper center",
+                bbox_to_anchor=(0.5, -0.02),
+                ncol=min(len(seen), 4),
                 fontsize=_FS - 1,
                 frameon=False,
             )

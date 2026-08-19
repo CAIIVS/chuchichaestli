@@ -49,6 +49,7 @@ def matplotlib_diagram(
     input_dtype: torch.dtype = torch.float32,
     show_params: bool = True,
     show_legend: bool = True,
+    color_labels: bool = False,
     title: str | None = None,
 ):
     """Create a matplotlib diagram of a model at a given abstraction level.
@@ -60,7 +61,9 @@ def matplotlib_diagram(
         input_shape: Input shape for shape tracing; structure-only if None.
         input_dtype: Input dtype for tracing.
         show_params: Whether to annotate parameter counts.
-        show_legend: Whether to draw a type legend.
+        show_legend: Whether to draw a legend.
+        color_labels: Colour nodes by name and list names in the legend instead
+            of inside the shapes (useful for long block names).
         title: Optional figure title.
     """
     from chuchichaestli.utils.visualization.mpl import MatplotlibRenderer
@@ -72,5 +75,6 @@ def matplotlib_diagram(
         zoom=zoom,
         show_params=show_params,
         show_legend=show_legend,
+        color_labels=color_labels,
         title=title,
     )
