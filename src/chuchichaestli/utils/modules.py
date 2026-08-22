@@ -330,10 +330,9 @@ class LayerInfo:
         labels = [self.name]
         parent_info = self.parent_info
         while parent_info:
-            labels.append(parent_info.label)
+            labels.append(parent_info.name)
             parent_info = parent_info.parent_info
         return ".".join(reversed(labels))
-            
 
     def calculate_num_params(self):
         """Set `num_params`,`trainable`,`inner_layers`,`kernel_size` using the parameters."""
