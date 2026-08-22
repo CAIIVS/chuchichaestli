@@ -26,11 +26,16 @@ class ZoomSpec:
 
     Args:
         target: Node id to expand into its layers.
-        loc: Inset placement. `"right"`/`"left"` dock a tall panel just
-            outside the axes (no overlap); `"upper right"`/`"upper left"`/
-            `"lower right"`/`"lower left"`/`"center"` place it inside.
-        size: Inset size as a fraction of the axes (panel width for the
-            outside dockings, square side for the inside placements).
+        loc: Inset placement relative to the main axes. Side docks sit just
+            outside the axes: `"left"`/`"right"` are full-height columns and
+            `"top"`/`"bottom"` are full-width strips. The corners
+            `"top-left"`/`"top-right"`/`"bottom-left"`/`"bottom-right"` hang a
+            shorter column off that corner (also outside). Any value without a
+            side/corner keyword (e.g. `"center"`) is a centred square inset
+            inside the axes.
+        size: Inset size as a fraction of the axes: the column width for
+            `"left"`/`"right"` and the corners, the strip height for
+            `"top"`/`"bottom"`, or the square side for a centred inset.
         bounds: Explicit `[x, y, w, h]` axes-fraction bounds; overrides
             `loc`/`size` when given (values outside `[0, 1]` place the
             inset in the figure margin).
