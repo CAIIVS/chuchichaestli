@@ -12,17 +12,18 @@ import tempfile
 import torch
 from torch import nn
 from typing import get_args, Literal, Any
+from dataclasses import dataclass
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from chuchichaestli.utils import get_layer_type, metric_suffix
 from chuchichaestli.utils.visualization import get_color, color_variant
-from chuchichaestli.utils.visualization.build import build_ir
-from chuchichaestli.utils.visualization.ir import EdgeKind, IRNode
+from chuchichaestli.utils.visualization.base import LabelField, LABEL_FIELDS, TYPE_COLOR
+from chuchichaestli.utils.ir import EdgeKind, IRNode, build_ir
 
-__all__ = ["MermaidDiagram", "mermaid_diagram"]
+__all__ = ["MermaidDiagram"]
 
 
-DiagramDirections = Literal[
+DiagramDirection = Literal[
     "TB",
     "TD",
     "BT",
@@ -54,8 +55,10 @@ DiagramDirections = Literal[
     "left",
 ]
 
+_GroupBy = Literal["type", "depth", "level", "block", "encoder_decoder"]
 
-def _mermaid_direction(direction: DiagramDirections) -> str:
+
+def _mermaid_direction(direction: DiagramDirection) -> str:
     """Map directions to the mermaid standard."""
     direction = direction.lower().strip()
     if direction == "left":
@@ -97,107 +100,69 @@ def _mermaid_shape_brackets(shape: str) -> tuple[str, str]:
         return ("([", "])")
 
 
+@dataclass(frozen=True)
+class MermaidClass:
+    """A mermaid style class: CSS name, legend text, node shape, and stroke.
+
+    Args:
+        name: CSS class name (lowercase); its capitalization is the key used to
+            look up a node's style (matches `DEFAULT_MODULE_LABELS` values).
+        desc: Human-readable legend description.
+        shape: Node shape key (see `_mermaid_shape_brackets`).
+        stroke_width: Border width in pixels.
+        dashed: Whether the border is dashed (used for concat/merge operations).
+        color: Palette colour name; None derives it from the shared type palette
+            (`base.TYPE_COLOR`, keyed by the capitalized name).
+    """
+
+    name: str
+    desc: str
+    shape: str
+    stroke_width: int = 3
+    dashed: bool = False
+    color: str | None = None
+
+    @property
+    def fill(self) -> str:
+        """Palette colour name, derived from `TYPE_COLOR` when not set."""
+        return self.color or TYPE_COLOR.get(self.name.capitalize(), "grey")
+
+    @property
+    def props(self) -> str:
+        """The `classDef` stroke/colour suffix."""
+        dash = ",stroke-dasharray: 5 5" if self.dashed else ""
+        return (
+            f"stroke-width:{self.stroke_width}px{dash}"
+            f",color:{color_variant('dark', shift=-30)}"
+        )
+
+    @property
+    def style(self) -> str:
+        """The full mermaid `classDef` style string."""
+        return f"fill:{color_variant(self.fill, 150)},stroke:{get_color(self.fill)},{self.props}"
+
+
 MermaidClasses = [
-    "conv",
-    "linear",
-    "norm",
-    "dropout",
-    "pool",
-    "upsample",
-    "downsample",
-    "activation",
-    "attention",
-    "embedding",
-    "recurrent",
-    "concat",
-    "merge",
-    "default",
+    MermaidClass("conv", "Convolutional Layer", "stadium"),
+    MermaidClass("linear", "Linear/Dense Layer", "stadium"),
+    MermaidClass("norm", "Normalization Layer", "stadium", stroke_width=2),
+    MermaidClass("dropout", "Dropout Layer", "rounded", stroke_width=2),
+    MermaidClass("upsample", "Upsampling Layer", "trapezoid-up"),
+    MermaidClass("downsample", "Downsampling Layer", "trapezoid-down"),
+    MermaidClass("activation", "Activation Function", "rounded", stroke_width=2),
+    MermaidClass("attention", "Attention Mechanism", "stadium"),
+    MermaidClass("embedding", "Embedding Layer", "stadium"),
+    MermaidClass("recurrent", "Recurrent Layer (LSTM/GRU)", "stadium"),
+    MermaidClass("concat", "Concatentation", "diamond", stroke_width=4, dashed=True, color="golden"),
+    MermaidClass("merge", "Merge/Add Operation", "diamond", stroke_width=4, dashed=True, color="brown"),
+    MermaidClass("default", "Layer", "stadium", color="grey"),
 ]
 
-MermaidClassDescriptions = [
-    "Convolutional Layer",
-    "Linear/Dense Layer",
-    "Normalization Layer",
-    "Dropout Layer",
-    "Pooling Layer",
-    "Upsampling Layer",
-    "Downsampling Layer",
-    "Activation Function",
-    "Attention Mechanism",
-    "Embedding Layer",
-    "Recurrent Layer (LSTM/GRU)",
-    "Concatentation",
-    "Merge/Add Operation",
-    "Layer",
-]
-
-MermaidClassColors = [
-    "green",
-    "blue",
-    "orange",
-    "red",
-    "purple",
-    "turquoise",
-    "marguerite",
-    "pink",
-    "cyan",
-    "yellow",
-    "purpleblue",
-    "golden",
-    "brown",
-    "dark",
-]
-
-MermaidClassShapes = [
-    "stadium",
-    "stadium",
-    "stadium",
-    "rounded",
-    "stadium",
-    "trapezoid-up",
-    "trapezoid-down",
-    "rounded",
-    "stadium",
-    "stadium",
-    "stadium",
-    "diamond",
-    "diamond",
-    "stadium",
-]
-
-MermaidClassProps = [
-    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:2px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:2px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:2px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:4px,stroke-dasharray: 5 5,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:4px,stroke-dasharray: 5 5,color:{color_variant('dark', shift=-30)}",
-    f"stroke-width:3px,color:{color_variant('dark', shift=-30)}",
-]
-
-MermaidStyleClasses = {
-    cls: f"fill:{color_variant(clr, 150)},stroke:{get_color(clr)},{props}"
-    for cls, clr, props in zip(
-        MermaidClasses,
-        MermaidClassColors,
-        MermaidClassProps,
-    )
-}
+MermaidStyleClasses = {c.name: c.style for c in MermaidClasses}
 
 MermaidLayerStyles = {
-    cls.capitalize(): {"shape": s, "class": cls, "desc": d}
-    for cls, s, d in zip(
-        MermaidClasses,
-        MermaidClassShapes,
-        MermaidClassDescriptions,
-    )
+    c.name.capitalize(): {"shape": c.shape, "class": c.name, "desc": c.desc}
+    for c in MermaidClasses
 }
 
 
@@ -215,18 +180,16 @@ class MermaidDiagram:
         input_shape: Sequence[int] | torch.Size | None = None,
         input_dtype: torch.dtype = torch.float32,
         auto: bool = True,
-        direction: DiagramDirections = "horizontal",
-        group_direction: DiagramDirections = "vertical",
+        direction: DiagramDirection = "horizontal",
+        group_direction: DiagramDirection = "vertical",
         max_depth: int | None = None,
         positions: dict | None = None,
-        group_by: Literal["type", "depth", "level", "encoder_decoder"] | None = None,
+        group_by: _GroupBy | list[_GroupBy] | None = None,
         type_map: dict[str, str] | None = None,
         class_fn: Callable[[nn.Module], str | None] | None = None,
         layer_styles: dict[str, dict[str, str]] | None = None,
         style_classes: dict[str, str] | None = None,
-        show_names: bool = True,
-        show_params: bool = True,
-        show_shapes: bool = False,
+        label_fields: Sequence[LabelField] = ("name", "params"),
         show_legend: bool = False,
     ):
         """Constructor.
@@ -246,17 +209,28 @@ class MermaidDiagram:
                   - 'type': Group by layer type
                   - 'depth': Group by graph depth.
                   - 'level': Group by resolution level
+                  - 'block': Group layers under their parent block (at
+                    max_depth=4, blocks become subgraphs of their layers).
                   - 'encoder_decoder': Group by architectural functionality.
                   - None: No grouping (default)
+                  - list: Nest several strategies outer->inner, e.g.
+                    `["encoder_decoder", "block"]` nests block subgraphs
+                    inside encoder/decoder subgraphs.
             type_map: Mapping from default layer types to custom names.
             class_fn: Function to categorize unknown layers (or alternative to default layers).
             layer_styles: Additional layer style definitions.
             style_classes: Additional CSS style class definitions.
-            show_names: Whether to show the layer names.
-            show_params: Whether to show parameter counts of layers.
-            show_shapes: Whether to show tensor shapes.
-            show_legend: Whether to shwo the legend explaining components.
+            label_fields: Which fields to label nodes with (shared with the
+                matplotlib backend), any of `"name"`, `"channels"`,
+                `"resolution"`, `"params"` (`"channels"`/`"resolution"`
+                both show the tensor shape; `"kernel"` is not rendered here).
+            show_legend: Whether to show the legend explaining components.
         """
+        unknown = [f for f in label_fields if f not in LABEL_FIELDS]
+        if unknown:
+            raise ValueError(
+                f"Unknown label field(s) {unknown}; choose from {list(LABEL_FIELDS)}"
+            )
         self.model = model
         self.trace_forward = trace_forward
         self.input_shape = input_shape
@@ -265,9 +239,10 @@ class MermaidDiagram:
         self.group_direction = self.parse_direction(group_direction)
         self.max_depth = max_depth
         self.positions = positions or {}
-        self.show_names = show_names
-        self.show_params = show_params
-        self.show_shapes = show_shapes
+        self.label_fields = tuple(label_fields)
+        self.show_names = "name" in self.label_fields
+        self.show_params = "params" in self.label_fields
+        self.show_shapes = bool(set(self.label_fields) & {"channels", "resolution"})
         self.show_legend = show_legend
         self.group_by = group_by
         self.type_map = type_map or {}
@@ -287,12 +262,14 @@ class MermaidDiagram:
         self._nodes: list[dict[str, Any]] = []
         self._edges: list[tuple[str, str, str | None]] = []
         self._subgraphs = defaultdict(list)
+        self._group_labels: dict[str, str] = {}
+        self._group_paths: dict[str, list[str]] = {}
         if auto:
             self.extract_model_graph()
             self._aggregate_components()
 
     @staticmethod
-    def parse_direction(direction: DiagramDirections) -> str:
+    def parse_direction(direction: DiagramDirection) -> str:
         """Parse direction string and convert to mermaid format.
 
         Args:
@@ -319,7 +296,7 @@ class MermaidDiagram:
         Returns:
             List of valid direction strings.
         """
-        return list(get_args(DiagramDirections))
+        return list(get_args(DiagramDirection))
 
     @staticmethod
     def list_default_style_classes() -> list[tuple[str, str]]:
@@ -375,6 +352,8 @@ class MermaidDiagram:
         """Build nodes, edges, and subgraphs from the semantic IR."""
         if self._ir is None:
             return
+        self._group_labels = {}
+        self._group_paths = {}
         cutoff = self.max_depth if self.max_depth is not None else 3
         view = self._ir.view(cutoff)
         drawables = [
@@ -392,9 +371,12 @@ class MermaidDiagram:
                     "ir": node,
                 }
             )
-            group_key = self._ir_group_key(node)
-            if group_key:
-                self._subgraphs[group_key].append(node_id)
+            keys = self._ir_group_keys(node)
+            self._group_paths[node_id] = keys
+            for key in keys:
+                self._group_labels.setdefault(key, self._ir_group_label(key))
+            if keys:
+                self._subgraphs[keys[-1]].append(node_id)
         for edge in view.edges:
             if edge.source_id not in idmap or edge.target_id not in idmap:
                 continue
@@ -481,16 +463,29 @@ class MermaidDiagram:
             labels.append(str(node.info.output_size))
         return "</br>".join(labels)
 
-    def _ir_group_key(self, node: IRNode) -> str | None:
-        """Subgraph key for an IR node per the grouping strategy."""
-        if self.group_by == "type":
+    def _ir_group_keys(self, node: IRNode) -> list[str]:
+        """Ordered subgraph keys (outer->inner) for the active strategies."""
+        strategies = self.group_by if isinstance(self.group_by, list) else [self.group_by]
+        keys = []
+        for strategy in strategies:
+            key = self._ir_group_key(node, strategy)
+            if key:
+                keys.append(key)
+        return keys
+
+    def _ir_group_key(self, node: IRNode, strategy: str | None) -> str | None:
+        """Subgraph key for an IR node under a single grouping strategy."""
+        if strategy == "type":
             return self._ir_type(node)
-        if self.group_by == "depth":
+        if strategy == "depth":
             return f"Depth {node.depth}"
-        if self.group_by == "level":
+        if strategy == "level":
             idx = node.geometry.level_index
             return f"Level {idx}" if idx is not None else None
-        if self.group_by == "encoder_decoder":
+        if strategy == "block":
+            parts = node.id.split("/")
+            return "/".join(parts[:4]) if len(parts) >= 4 else node.id
+        if strategy == "encoder_decoder":
             side = node.id.split("/")[1] if "/" in node.id else ""
             return {
                 "encoder": "Encoder",
@@ -499,6 +494,53 @@ class MermaidDiagram:
                 "latent": "Latent",
             }.get(side, "I/O")
         return None
+
+    def _ir_group_label(self, key: str) -> str:
+        """Display title for a subgraph key (a node id maps to its label)."""
+        node = self._ir.index.get(key) if self._ir is not None else None
+        return node.label if node is not None else key
+
+    def _subgraph_tree(self) -> dict[str, Any]:
+        """Nest nodes into a tree following each node's group-key path."""
+        root: dict[str, Any] = {"children": {}, "nodes": []}
+        for node in self._nodes:
+            cursor = root
+            for key in self._group_paths.get(node["id"], []):
+                cursor = cursor["children"].setdefault(
+                    key, {"children": {}, "nodes": []}
+                )
+            cursor["nodes"].append(node["id"])
+        return root
+
+    def _emit_group_nodes(self, node_ids: list[str], indent: str) -> list[str]:
+        """Emit node declarations + style classes at the given indent."""
+        lines = []
+        for node_id in node_ids:
+            node = next(n for n in self._nodes if n["id"] == node_id)
+            shape = self._get_node_shape(node["type"], node["label"])
+            lines.append(f"{indent}{node['id']}{shape}")
+            layer_style = self.layer_styles.get(
+                node["type"], self.layer_styles.get("Default", {})
+            )
+            css_class = layer_style.get("class", "default")
+            lines.append(f"{indent}class {node['id']} {css_class}")
+        return lines
+
+    def _emit_group_tree(
+        self, tree: dict[str, Any], indent: str, prefix: str = ""
+    ) -> list[str]:
+        """Recursively emit nested subgraphs, then this level's direct nodes."""
+        lines = []
+        for key, sub in tree["children"].items():
+            gid = self._sanitize_mermaid_id(f"{prefix}{key}")
+            title = self._group_labels.get(key, key)
+            lines.append(f'{indent}subgraph {gid}["{title}"]')
+            lines.append(f"{indent}    direction {self.group_direction}")
+            lines.extend(self._emit_group_tree(sub, indent + "    ", f"{prefix}{key}/"))
+            lines.append(f"{indent}end")
+            lines.append("")
+        lines.extend(self._emit_group_nodes(tree["nodes"], indent))
+        return lines
 
     def _get_node_shape(self, layer_type: str, name: str) -> str:
         """Get the mermaid shape syntax for a node."""
@@ -581,39 +623,14 @@ class MermaidDiagram:
             lines.append(f"    classDef {css_class} {style_def}")
         lines.append("")
 
-        # Add groups instead of nodes
-        if self._subgraphs:
+        # Add nodes, nested in subgraphs per the (possibly multi-level) grouping
+        tree = self._subgraph_tree()
+        if tree["children"]:
             lines.append("    %% Grouped layers")
-            for group_name, node_ids in self._subgraphs.items():
-                sanitized_group = self._sanitize_mermaid_id(group_name)
-                lines.append(f'    subgraph {sanitized_group}["{group_name}"]')
-                lines.append(f"       direction {self.group_direction}")
-                for node_id in node_ids:
-                    # insert node
-                    node = next(n for n in self._nodes if n["id"] == node_id)
-                    shape = self._get_node_shape(node["type"], node["label"])
-                    lines.append(f"        {node['id']}{shape}")
-                    # style node
-                    layer_style = self.layer_styles.get(
-                        node["type"], self.layer_styles.get("Default", {})
-                    )
-                    css_class = layer_style.get("class", "default")
-                    lines.append(f"        class {node['id']} {css_class}")
-                lines.append("    end")
-                lines.append("")
-        # Add all nodes
+            lines.extend(self._emit_group_tree(tree, "    "))
         else:
             lines.append("    %% Model architecture")
-            for node in self._nodes:
-                # insert node
-                shape = self._get_node_shape(node["type"], node["label"])
-                lines.append(f"    {node['id']}{shape}")
-                # style node
-                layer_style = self.layer_styles.get(
-                    node["type"], self.layer_styles.get("Default", {})
-                )
-                css_class = layer_style.get("class", "default")
-                lines.append(f"        class {node['id']} {css_class}")
+            lines.extend(self._emit_group_nodes(tree["nodes"], "    "))
             lines.append("")
 
         # Add edges
@@ -705,43 +722,6 @@ class MermaidDiagram:
         return filepath
 
 
-def mermaid_diagram(
-    model: nn.Module,
-    direction: DiagramDirections = "horizontal",
-    max_depth: int | None = None,
-    positions: dict | None = None,
-    show_params: bool = True,
-    show_shapes: bool = False,
-    show_legend: bool = False,
-    **kwargs,
-) -> MermaidDiagram:
-    """Create a mermaid diagram from a model.
-
-    Args:
-        model: Model instance from chuchichaestli.
-        direction: Diagram direction, e.g. T(op)D(own), L(eft)R(ight), etc.
-        max_depth: Maximum depth for module recursion; for `None` full depth is used.
-        positions: Mapping of node IDs to custom positions.
-        show_params: Whether to show parameter counts of layers.
-        show_shapes: Whether to show tensor shapes.
-        show_legend: Whether to shwo the legend explaining components.
-        kwargs: Other keyword arguments for `MermaidDiagram`.
-
-    Note:
-        The diagram generation might work on other PyTorch modules, but is not guaranteed.
-    """
-    return MermaidDiagram(
-        model,
-        direction=direction,
-        positions=positions,
-        max_depth=max_depth,
-        show_params=show_params,
-        show_shapes=show_shapes,
-        show_legend=show_legend,
-        **kwargs,
-    )
-
-
 if __name__ == "__main__":
     from pprint import pprint
     from chuchichaestli.models.unet import UNet
@@ -760,13 +740,11 @@ if __name__ == "__main__":
         skip_connection_action="concat",
     )
 
-    mmd = mermaid_diagram(
+    mmd = MermaidDiagram(
         model,
         direction="LR",
         group_by=None,
-        show_names=True,
-        show_params=False,
-        show_shapes=False,
+        label_fields=("name",),
         show_legend=True,
         max_depth=2,
     )

@@ -13,7 +13,7 @@ from chuchichaestli.utils.modules import (
     get_chuchichaestli_block_type,
     get_layer_type,
 )
-from chuchichaestli.utils.visualization.ir import (
+from chuchichaestli.utils.ir import (
     NodeRole,
     EdgeKind,
     Geometry,
@@ -257,18 +257,22 @@ class _Builder:
     def _emit_layers(self, block: IRNode, module: nn.Module) -> None:
         recurse = _classes().RECURSE
 
-        def walk(m: nn.Module, prefix: str) -> None:
+        # Leaf layers are direct tree children of the block; the nested module
+        # path is flattened into one dotted id segment (e.g. `res_block.conv1`)
+        # so a layer's id depth equals its true tree depth (block depth + 1).
+        def walk(m: nn.Module, name_path: tuple[str, ...]) -> None:
             kids = list(m.named_children())
             if kids and isinstance(m, recurse):
                 for name, child in kids:
-                    walk(child, f"{prefix}/{_san(name)}")
+                    walk(child, (*name_path, name))
             else:
-                self._layer(block, prefix, m)
+                suffix = ".".join(_san(p) for p in name_path)
+                self._layer(block, f"{block.id}/{suffix}", m)
 
         kids = list(module.named_children())
         if kids and isinstance(module, recurse):
             for name, child in kids:
-                walk(child, f"{block.id}/{_san(name)}")
+                walk(child, (name,))
         else:
             self._layer(block, f"{block.id}/{_san(module.__class__.__name__)}", module)
 
@@ -510,7 +514,12 @@ class GenericAdapter:
         return True
 
     def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
-        """Decompose an arbitrary module by LayerInfo depth.
+        """Decompose an arbitrary module by its `named_children` hierarchy.
+
+        Roles are assigned by module-tree depth (leaves are layers); LayerInfo
+        supplies shapes and parameter counts. The real module tree is used
+        rather than `LayerInfo.children` (which links transitive descendants
+        and would duplicate nodes).
 
         Args:
             model: Any model.
@@ -518,32 +527,28 @@ class GenericAdapter:
         """
         residual = _classes().RESIDUAL
         b = _Builder(model, info_by_id)
-        root_info = info_by_id[id(model)]
         roles = [NodeRole.MODEL, NodeRole.COMPONENT, NodeRole.LEVEL, NodeRole.BLOCK]
 
-        def role_of(info: LayerInfo) -> NodeRole:
-            if info.is_leaf_layer:
-                return NodeRole.LAYER
-            return roles[min(info.depth, len(roles) - 1)]
-
-        def rec(info: LayerInfo, parent: IRNode | None) -> IRNode:
+        def rec(module: nn.Module, parent: IRNode | None, name: str, depth: int) -> IRNode:
             if parent is None:
                 node = b._root()
             else:
+                leaf = not any(module.children())
+                role = NodeRole.LAYER if leaf else roles[min(depth, len(roles) - 1)]
                 node = b._child(
-                    parent, info.name, role_of(info), info.class_name, module=info.module
+                    parent, name, role, module.__class__.__name__, module=module
                 )
-            if info.is_leaf_layer:
-                b._leaves.append(node)
-            for child in info.children:
-                rec(child, node)
-            if isinstance(info.module, residual) and len(node.children) >= 2:
+                if leaf:
+                    b._leaves.append(node)
+            for child_name, child in module.named_children():
+                rec(child, node, child_name, depth + 1)
+            if isinstance(module, residual) and len(node.children) >= 2:
                 b.edges.append(
                     IREdge(node.children[0].id, node.children[-1].id, EdgeKind.RESIDUAL)
                 )
             return node
 
-        root = rec(root_info, None)
+        root = rec(model, None, "", 0)
         return b._graph(root)
 
 

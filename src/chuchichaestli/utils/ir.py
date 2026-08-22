@@ -1,16 +1,51 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Backend-agnostic semantic IR for model visualization."""
+"""Generic semantic intermediate representation (IR) for visualization."""
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from enum import Enum
-from collections.abc import Iterator
+from enum import Enum, IntEnum
+from collections.abc import Iterator, Sequence
+from typing import TYPE_CHECKING
+import torch
 from torch import nn
-from chuchichaestli.utils.modules import LayerInfo
+from chuchichaestli.utils.modules import LayerInfo, info_forward_pass
 
-__all__ = ["NodeRole", "EdgeKind", "Geometry", "IRNode", "IREdge", "IRGraph"]
+if TYPE_CHECKING:
+    from chuchichaestli.utils.adapters import AdapterRegistry
+
+__all__ = [
+    "NodeRole",
+    "EdgeKind",
+    "GraphLevel",
+    "normalize_level",
+    "Geometry",
+    "IRNode",
+    "IREdge",
+    "IRGraph",
+    "build_ir",
+]
+
+
+class GraphLevel(IntEnum):
+    """Abstraction level selected for rendering."""
+
+    COMPONENT = 0
+    LEVEL = 1
+    BLOCK = 2
+    LAYER = 3
+
+
+def normalize_level(level: int | str | GraphLevel) -> int:
+    """Return the node-depth cutoff for a requested abstraction level.
+
+    Args:
+        level: Level as int, name, or `GraphLevel`.
+    """
+    if isinstance(level, str):
+        level = GraphLevel[level.upper()]
+    return int(level) + 1
 
 
 class NodeRole(str, Enum):
@@ -56,13 +91,13 @@ class IRNode:
     """A semantic node in the visualization hierarchy.
 
     Args:
-        id: Stable structural path, e.g. ``model/encoder/level0/block0``.
+        id: Stable structural path, e.g. `model/encoder/level0/block0`.
         role: Semantic role.
         type_label: Human-readable type (from the labelling helpers).
         label: Display label for the renderer.
         module: Backing module, or None for synthetic grouping nodes.
         info: Backing LayerInfo for metadata, or None.
-        depth: Abstraction depth; equals ``id.count("/")``.
+        depth: Abstraction depth; equals `id.count("/")`.
         children: Ordered child nodes.
         geometry: Renderer size hints.
         num_params: Parameter count of this node's subtree.
@@ -123,14 +158,14 @@ class IRGraph:
     Args:
         root: The MODEL node.
         edges: All edges at all levels.
-        index: Map from node id to node (built by `finalize`).
+        index: Map from node id to node (built by `compile`).
     """
 
     root: IRNode
     edges: list[IREdge] = field(default_factory=list)
     index: dict[str, IRNode] = field(default_factory=dict)
 
-    def finalize(self) -> IRGraph:
+    def compile(self) -> IRGraph:
         """Populate `index` and aggregate subtree parameter counts."""
         self.index = {node.id: node for node in self.root.walk()}
         self._aggregate_params(self.root)
@@ -138,10 +173,9 @@ class IRGraph:
 
     @staticmethod
     def _aggregate_params(node: IRNode) -> int:
-        if node.children:
-            node.num_params = sum(
-                IRGraph._aggregate_params(child) for child in node.children
-            )
+        # Synthetic group nodes have no info, so they aggregate from children.
+        child_sum = sum(IRGraph._aggregate_params(child) for child in node.children)
+        node.num_params = node.info.num_params if node.info is not None else child_sum
         return node.num_params
 
     def node(self, node_id: str) -> IRNode:
@@ -163,11 +197,34 @@ class IRGraph:
     def representative(self, role: NodeRole = NodeRole.BLOCK) -> IRNode | None:
         """Pick a representative node of a role for exemplary zoom.
 
+        Prefers the first node with more than one child (a real multi-layer
+        block over a single-layer head like `conv_in`); falls back to the
+        first match.
+
         Args:
             role: Role to find a representative for.
         """
         matches = self.nodes_by_role(role)
-        return matches[0] if matches else None
+        if not matches:
+            return None
+        return next((n for n in matches if len(n.children) > 1), matches[0])
+
+    def zoom_targets(self) -> list[str]:
+        """Node ids suitable as exemplary-zoom targets (nodes with layers)."""
+        return [
+            node.id
+            for node in self.root.walk()
+            if node.role != NodeRole.LAYER
+            and any(c.role == NodeRole.LAYER for c in node.walk())
+        ]
+
+    def _unknown_zoom_error(self, node_id: str) -> ValueError:
+        targets = self.zoom_targets()
+        hint = "\n  ".join(targets) if targets else "(none)"
+        return ValueError(
+            f"Unknown zoom target {node_id!r}. Pass zoom=True to auto-pick, or "
+            f"one of these node ids:\n  {hint}"
+        )
 
     def view(self, depth: int) -> IRGraph:
         """Return a copy collapsed to a maximum node depth.
@@ -175,7 +232,7 @@ class IRGraph:
         Deeper nodes are pruned; their parameters remain aggregated in the
         surviving boundary node. Edges are rewritten to the nearest surviving
         ancestor and de-duplicated; a residual edge collapsing within a single
-        node sets ``meta["has_residual"]`` there instead.
+        node sets `meta["has_residual"]` there instead.
 
         Args:
             depth: Maximum node depth to keep (0 = MODEL only).
@@ -190,7 +247,7 @@ class IRGraph:
             depth: Base collapse depth for the rest of the graph.
         """
         if node_id not in self.index:
-            raise ValueError(f"Unknown zoom target: {node_id!r}")
+            raise self._unknown_zoom_error(node_id)
         return self._project(depth, zoom_id=node_id)
 
     def _survivor(self, node_id: str, depth: int, zoom_id: str | None) -> str:
@@ -228,7 +285,7 @@ class IRGraph:
         root = clone(self.root)
         index = {node.id: node for node in root.walk()}
         edges: list[IREdge] = []
-        seen: set[tuple[str, str, EdgeKind]] = set()
+        seen: dict[tuple[str, str, EdgeKind], IREdge] = {}
         for edge in self.edges:
             source = self._survivor(edge.source_id, depth, zoom_id)
             target = self._survivor(edge.target_id, depth, zoom_id)
@@ -236,11 +293,46 @@ class IRGraph:
                 if edge.kind == EdgeKind.RESIDUAL and source in index:
                     index[source].meta["has_residual"] = True
                 continue
-            key = (source, target, edge.kind)
-            if key in seen or source not in index or target not in index:
+            if source not in index or target not in index:
                 continue
-            seen.add(key)
-            edges.append(IREdge(source, target, edge.kind, edge.label))
+            key = (source, target, edge.kind)
+            existing = seen.get(key)
+            if existing is None:
+                new_edge = IREdge(source, target, edge.kind, edge.label, {"count": 1})
+                seen[key] = new_edge
+                edges.append(new_edge)
+            else:
+                existing.meta["count"] += 1
         graph = IRGraph(root=root, edges=edges)
         graph.index = index
         return graph
+
+
+def build_ir(
+    model: nn.Module,
+    input_shape: Sequence[int] | torch.Size | None = None,
+    input_dtype: torch.dtype = torch.float32,
+    registry: AdapterRegistry | None = None,
+) -> IRGraph:
+    """Build a semantic IR graph for a model.
+
+    Traces the module once (with shapes if `input_shape` is given, structure-only
+    otherwise), resolves an adapter, and returns the compiled graph.
+
+    Args:
+        model: Model to visualize.
+        input_shape: Input shape for shape tracing; structure-only if None.
+        input_dtype: Input dtype for tracing.
+        registry: Adapter registry (defaults to the built-in one).
+    """
+    from chuchichaestli.utils.adapters import default_registry
+
+    if input_shape is not None:
+        info_list = info_forward_pass(
+            model, input_shape=input_shape, input_dtype=input_dtype, use_cache=False
+        )
+    else:
+        info_list = info_forward_pass(model, use_cache=False)
+    info_by_id = {info.layer_id: info for info in info_list}
+    adapter = (registry or default_registry()).resolve(model)
+    return adapter.build(model, info_by_id).compile()

@@ -7,9 +7,16 @@ import subprocess
 import sys
 import pytest
 from chuchichaestli.models.unet import UNet
-from chuchichaestli.utils.visualization import matplotlib_diagram, mermaid_diagram
+from chuchichaestli.utils.visualization import (
+    matplotlib_diagram,
+    mermaid_diagram,
+    build_ir,
+    ZoomSpec,
+    NodeRole,
+)
 
 pytest.importorskip("matplotlib")
+from chuchichaestli.utils.visualization.mpl import MatplotlibRenderer  # noqa: E402
 
 
 def _unet():
@@ -74,3 +81,77 @@ def test_unsupported_format_raises(tmp_path):
 def test_mermaid_renders_skip_edges():
     """The mermaid backend renders dashed skip edges for a U-Net."""
     assert "-.->" in str(mermaid_diagram(_unet(), input_shape=(1, 1, 64, 64)))
+
+
+@pytest.mark.parametrize("color_by", ["auto", "component", "type", "name"])
+def test_color_by_modes_render(color_by, tmp_path):
+    """Every color_by mode renders a non-empty figure."""
+    diagram = matplotlib_diagram(
+        _unet(), level=2, color_by=color_by, input_shape=(1, 1, 64, 64)
+    )
+    assert diagram.save(tmp_path / f"c_{color_by}.png").stat().st_size > 0
+
+
+def test_unknown_color_by_raises():
+    """An unknown color_by raises ValueError."""
+    with pytest.raises(ValueError):
+        matplotlib_diagram(_unet(), color_by="rainbow", input_shape=(1, 1, 64, 64))
+
+
+def test_label_fields_render(tmp_path):
+    """All label fields (incl. kernel) render at the layer level."""
+    diagram = matplotlib_diagram(
+        _unet(),
+        level=3,
+        label_fields=("name", "channels", "kernel", "resolution", "params"),
+        input_shape=(1, 1, 64, 64),
+    )
+    assert diagram.save(tmp_path / "lf.png").stat().st_size > 0
+
+
+def test_unknown_label_field_raises():
+    """An unknown label field raises ValueError."""
+    with pytest.raises(ValueError):
+        matplotlib_diagram(_unet(), label_fields=("bogus",), input_shape=(1, 1, 64, 64))
+
+
+def test_node_size_scales_and_validates():
+    """node_size scales the node width; an unknown value raises."""
+    graph = build_ir(_unet(), input_shape=(1, 1, 64, 64))
+    slots = [MatplotlibRenderer(graph, node_size=s)._slot for s in ("small", "medium", "large")]
+    assert slots[0] < slots[1] < slots[2]
+    with pytest.raises(ValueError):
+        MatplotlibRenderer(graph, node_size="huge")
+
+
+def test_zoom_locations_have_unique_bounds():
+    """Each zoom location (edges, corners, center) maps to a distinct inset box."""
+    graph = build_ir(_unet(), input_shape=(1, 1, 64, 64))
+    target = graph.nodes_by_role(NodeRole.BLOCK)[0].id
+    locs = [
+        "left", "right", "top", "bottom", "center",
+        "top-left", "top-right", "bottom-left", "bottom-right",
+    ]
+    bounds = {
+        tuple(
+            MatplotlibRenderer(
+                graph, zoom=ZoomSpec(target, loc=loc, size=0.2)
+            )._inset_bounds(ZoomSpec(target, loc=loc, size=0.2))
+        )
+        for loc in locs
+    }
+    assert len(bounds) == len(locs)
+
+
+def test_multi_zoom_draws_multiple_insets():
+    """A list of zoom targets draws one inset per target."""
+    graph = build_ir(_unet(), input_shape=(1, 1, 64, 64))
+    blocks = [n.id for n in graph.nodes_by_role(NodeRole.BLOCK)]
+    fig = matplotlib_diagram(
+        _unet(),
+        level=1,
+        input_shape=(1, 1, 64, 64),
+        zoom=[ZoomSpec(blocks[0], loc="left"), ZoomSpec(blocks[-1], loc="right")],
+    ).render()
+    n_insets = sum(len(ax.child_axes) for ax in fig.axes)
+    assert n_insets >= 2

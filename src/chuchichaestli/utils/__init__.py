@@ -18,11 +18,12 @@ from chuchichaestli.utils.modules import (
     get_chuchichaestli_block_type,
     get_layer_type,
 )
+from chuchichaestli.utils.ir import build_ir
+from chuchichaestli.utils.info import summary
 from chuchichaestli.utils.visualization import (
     MermaidDiagram,
     mermaid_diagram,
     matplotlib_diagram,
-    build_ir,
 )
 
 __all__ = [
@@ -41,4 +42,5 @@ __all__ = [
     "mermaid_diagram",
     "matplotlib_diagram",
     "build_ir",
+    "summary",
 ]

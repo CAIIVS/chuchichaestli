@@ -6,34 +6,18 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import IntEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args
 from chuchichaestli.utils.modules import DEFAULT_MODULE_LABELS as _L
+from chuchichaestli.utils.ir import IRGraph, IRNode
 from chuchichaestli.utils.visualization.colors import get_color, color_variant
-from chuchichaestli.utils.visualization.ir import IRGraph, IRNode
 
-__all__ = ["DiagramLevel", "ZoomSpec", "Renderer", "type_color", "type_fill"]
-
-
-class DiagramLevel(IntEnum):
-    """Abstraction level selected for rendering."""
-
-    COMPONENT = 0
-    LEVEL = 1
-    BLOCK = 2
-    LAYER = 3
+__all__ = ["LabelField", "TYPE_COLOR", "ZoomSpec", "Renderer", "type_color", "type_fill"]
 
 
-def normalize_level(level: int | str | DiagramLevel) -> int:
-    """Return the node-depth cutoff for a requested abstraction level.
-
-    Args:
-        level: Level as int, name, or `DiagramLevel`.
-    """
-    if isinstance(level, str):
-        level = DiagramLevel[level.upper()]
-    return int(level) + 1
+# Node label fields shared by both backends.
+LabelField = Literal["name", "channels", "kernel", "resolution", "params"]
+LABEL_FIELDS = get_args(LabelField)
 
 
 @dataclass
@@ -42,16 +26,27 @@ class ZoomSpec:
 
     Args:
         target: Node id to expand into its layers.
-        loc: Inset location (matplotlib `inset_axes` style corner).
-        size: Inset size as a fraction of the axes.
+        loc: Inset placement. `"right"`/`"left"` dock a tall panel just
+            outside the axes (no overlap); `"upper right"`/`"upper left"`/
+            `"lower right"`/`"lower left"`/`"center"` place it inside.
+        size: Inset size as a fraction of the axes (panel width for the
+            outside dockings, square side for the inside placements).
+        bounds: Explicit `[x, y, w, h]` axes-fraction bounds; overrides
+            `loc`/`size` when given (values outside `[0, 1]` place the
+            inset in the figure margin).
+        fields: Which fields to label each zoom layer with (comma-separated),
+            any of `"name"`, `"channels"`, `"kernel"`, `"resolution"`,
+            `"params"`; None shows all that apply.
     """
 
     target: str
-    loc: str = "upper right"
-    size: float = 0.36
+    loc: str = "right"
+    size: float = 0.22
+    bounds: tuple[float, float, float, float] | None = None
+    fields: tuple[str, ...] | None = None
 
 
-_TYPE_COLOR: dict[str, str] = {
+TYPE_COLOR: dict[str, str] = {
     _L.CONV.value: "green",
     _L.LIN.value: "blue",
     _L.NORM.value: "orange",
@@ -70,6 +65,25 @@ _TYPE_COLOR: dict[str, str] = {
     _L.C3LI_CONVATTN.value: "cyan",
     _L.C3LI_NOISEBLOCK.value: "purple",
     _L.C3LI_TIME_EMB.value: "yellow",
+    # Structural blocks, so color_by="type" is meaningful at the block level.
+    # (Chosen among the hues that lighten to a visible fill, not near-white.)
+    _L.C3LI_UNET_ENCODER.value: "green",
+    _L.C3LI_UNET_DECODER.value: "turquoise",
+    _L.C3LI_UNET_DOWNBLOCK.value: "green",
+    _L.C3LI_UNET_UPBLOCK.value: "turquoise",
+    _L.C3LI_UNET_MIDBLOCK.value: "purple",
+    _L.C3LI_UNET_DOWNSAMP.value: "orange",
+    _L.C3LI_UNET_UPSAMP.value: "golden",
+    _L.C3LI_UNET_ATTNDOWNBLOCK.value: "pink",
+    _L.C3LI_UNET_ATTNMIDBLOCK.value: "cyan",
+    _L.C3LI_UNET_ATTNUPBLOCK.value: "yellow",
+    _L.C3LI_UNET_GATEDATTNBLOCK.value: "cyan",
+    _L.C3LI_GAN_CONVBLOCK.value: "orange",
+    _L.C3LI_GAN_ATTNBLOCK.value: "cyan",
+    _L.C3LI_VAE_DOWNBLOCK.value: "green",
+    _L.C3LI_VAE_MIDBLOCK.value: "purple",
+    _L.C3LI_VAE_UPBLOCK.value: "turquoise",
+    _L.C3LI_DISCRIMINATOR.value: "brown",
 }
 
 _COMPONENT_COLOR: dict[str, str] = {
@@ -88,7 +102,7 @@ def type_color(label: str) -> str:
     Args:
         label: IR node `type_label`.
     """
-    return get_color(_TYPE_COLOR.get(label, "grey"))
+    return get_color(TYPE_COLOR.get(label, "grey"))
 
 
 def type_fill(label: str) -> str:
@@ -97,7 +111,7 @@ def type_fill(label: str) -> str:
     Args:
         label: IR node `type_label`.
     """
-    return color_variant(_TYPE_COLOR.get(label, "grey"), 150)
+    return color_variant(TYPE_COLOR.get(label, "grey"), 150)
 
 
 def component_color(node: IRNode) -> str:
