@@ -375,7 +375,12 @@ class MermaidDiagram:
             return
         self._group_labels = {}
         self._group_paths = {}
-        cutoff = self.max_depth if self.max_depth is not None else 3
+        # `None` renders the full model: the deepest node depth keeps every node.
+        cutoff = (
+            self.max_depth
+            if self.max_depth is not None
+            else max(n.depth for n in self._ir.root.walk())
+        )
         view = self._ir.view(cutoff)
         drawables = [
             n for n in view.root.walk() if n.depth == cutoff or not n.children
