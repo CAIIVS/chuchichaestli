@@ -100,7 +100,7 @@ def nested_list_size(inputs: Sequence[Any] | torch.Tensor) -> tuple[list[int], i
 def map_nested(
     data: Any,
     action_fn: Callable[..., Any],
-    aggregate_fn: Callable[..., Any] = lambda result: result,
+    aggregate_fn: Callable[..., Any] = type,
 ) -> Any:
     """Traverse any type of nested data.
 
@@ -109,7 +109,9 @@ def map_nested(
     Args:
         data: Arbitrarily nested data structure.
         action_fn: Function to be mapped onto data.
-        aggregate_fn: Aggregate function for map results.
+        aggregate_fn: Given a container, returns the callable used to rebuild it
+            from the mapped members; defaults to `type`, which reconstructs
+            lists, tuples, dicts, and named tuples in place.
     """
     if isinstance(data, torch.Tensor):
         result = action_fn(data)
