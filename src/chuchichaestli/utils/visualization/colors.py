@@ -39,6 +39,14 @@ class Color(Enum):
     CYANDARK = "#24A38B"
 
 
+# Neutral shades make poor categorical hues; every other `Color` builds the
+# palette (in enum order), so it stays in sync with the enum definition.
+_NEUTRAL_SHADES = frozenset(
+    {"WHITE", "GRAY", "GREY", "DARKISH", "DARK", "DARKER", "DARKEST", "BLACK", "TEXTCOLOR"}
+)
+PALETTE = [color.name.lower() for color in Color if color.name not in _NEUTRAL_SHADES]
+
+
 def list_color_names() -> list[str]:
     """List the names of all colors."""
     return [c.name for c in Color]
