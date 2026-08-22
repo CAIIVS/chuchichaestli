@@ -58,21 +58,36 @@ DiagramDirection = Literal[
 _GroupBy = Literal["type", "depth", "level", "block", "encoder_decoder"]
 
 
-def _mermaid_direction(direction: DiagramDirection) -> str:
-    """Map directions to the mermaid standard."""
-    direction = direction.lower().strip()
-    if direction == "left":
-        return "RL"
-    elif direction in ("right", "horizontal") or direction.startswith("l"):
-        return "LR"
-    elif direction in ("down", "vertical") or direction.startswith("t"):
-        return "TB"
-    elif direction == "up" or direction.startswith("b"):
-        return "BT"
-    elif direction.startswith("r"):
-        return "RL"
-    else:
-        return "LR"
+def _mermaid_direction(direction: DiagramDirection) -> str | None:
+    """Map a recognized direction alias to its mermaid code.
+
+    Args:
+        direction: Direction alias (see `DiagramDirection`).
+
+    Returns:
+        The mermaid code (`"TB"`/`"BT"`/`"LR"`/`"RL"`), or `None` if the alias
+        is not recognized.
+    """
+    key = direction.lower().strip().replace("-", "").replace("_", "")
+    return {
+        "tb": "TB",
+        "td": "TB",
+        "topdown": "TB",
+        "topbottom": "TB",
+        "vertical": "TB",
+        "down": "TB",
+        "bt": "BT",
+        "downtop": "BT",
+        "bottomtop": "BT",
+        "up": "BT",
+        "lr": "LR",
+        "leftright": "LR",
+        "horizontal": "LR",
+        "right": "LR",
+        "rl": "RL",
+        "rightleft": "RL",
+        "left": "RL",
+    }.get(key)
 
 
 def _mermaid_shape_brackets(shape: str) -> tuple[str, str]:
@@ -601,7 +616,7 @@ class MermaidDiagram:
         lines.append("")
         return lines
 
-    def generate(self, auto_connect: bool = True) -> str:
+    def generate(self) -> str:
         """Generate a mermaid diagram string."""
         if not self.model_graph:
             self.extract_model_graph()
@@ -766,7 +781,7 @@ if __name__ == "__main__":
         pprint(mmd.generate_legend())
         print()
         print("Generate diagram:")
-        print(mmd.generate(auto_connect=True))
+        print(mmd.generate())
         print()
         print("Save diagram:")
         print(mmd.save("mermaid_diagram.png", 2160, 1440, 5))
