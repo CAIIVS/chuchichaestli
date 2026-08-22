@@ -394,7 +394,10 @@ class MatplotlibRenderer(Renderer):
             value = self._field(node, node_field)
             if value:
                 parts.append(value)
-        return "\n".join(parts) if parts else node.label
+        if parts:
+            return "\n".join(parts)
+        # Fall back to the name only when it wasn't deliberately omitted.
+        return node.label if include_name else ""
 
     def _inner(self, node: IRNode) -> str:
         # In name-colour mode the name moves to the legend, so drop it inside.
