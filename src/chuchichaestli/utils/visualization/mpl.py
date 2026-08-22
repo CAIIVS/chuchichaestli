@@ -783,11 +783,35 @@ class MatplotlibRenderer(Renderer):
         return {"pdf", "svg", "png"}
 
     def _save_impl(
-        self, artifact: Any, filepath: Path, width: int, height: int, scale: int
+        self, artifact: Any, filepath: Path, dpi: int, aspect: float | None
     ) -> None:
-        """Write the figure at its content size; dpi controls raster sharpness."""
-        del width, height
-        figw = artifact.get_size_inches()[0]
-        dpi = min(100 * scale, int(9000 / max(figw, 1.0)))
-        artifact.savefig(filepath, dpi=dpi, bbox_inches="tight", transparent=True)
-        _require_mpl().plt.close(artifact)
+        """Write the figure; `dpi` sets the resolution, `aspect` pads to a ratio.
+
+        With no `aspect` the figure keeps its content size (tight bounding box);
+        with an `aspect` the canvas is padded to that `w/h` ratio (content is
+        never cropped) so the raster matches the requested shape.
+
+        Args:
+            artifact: The matplotlib figure.
+            filepath: Output path.
+            dpi: Target resolution.
+            aspect: Target `w/h` ratio, or None for the content size.
+        """
+        mpl = _require_mpl()
+        if aspect is not None:
+            figw, figh = artifact.get_size_inches()
+            if aspect > figw / figh:
+                figw = figh * aspect
+            else:
+                figh = figw / aspect
+            artifact.set_size_inches(figw, figh)
+        figw, figh = artifact.get_size_inches()
+        # Matplotlib rasters cannot exceed 2**16 px per side.
+        dpi = min(dpi, int(65500 / max(figw, figh, 1.0)))
+        artifact.savefig(
+            filepath,
+            dpi=dpi,
+            bbox_inches="tight" if aspect is None else None,
+            transparent=True,
+        )
+        mpl.plt.close(artifact)

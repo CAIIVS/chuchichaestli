@@ -12,12 +12,44 @@ from chuchichaestli.utils.modules import DEFAULT_MODULE_LABELS as _L
 from chuchichaestli.utils.ir import IRGraph, IRNode
 from chuchichaestli.utils.visualization.colors import get_color, color_variant
 
-__all__ = ["LabelField", "TYPE_COLOR", "ZoomSpec", "Renderer", "type_color", "type_fill"]
+__all__ = [
+    "LabelField",
+    "TYPE_COLOR",
+    "ZoomSpec",
+    "Renderer",
+    "type_color",
+    "type_fill",
+    "AspectSpec",
+    "normalize_aspect",
+]
 
 
 # Node label fields shared by both backends.
 LabelField = Literal["name", "channels", "kernel", "resolution", "params"]
 LABEL_FIELDS = get_args(LabelField)
+
+# A target width/height ratio: a `w/h` float or a `(w, h)` pair.
+AspectSpec = float | tuple[int | float, int | float]
+
+
+def normalize_aspect(aspect: AspectSpec | None) -> float | None:
+    """Normalize an aspect argument to a positive `w/h` ratio.
+
+    Args:
+        aspect: A `w/h` float, a `(w, h)` pair, or None.
+
+    Returns:
+        The `w/h` ratio, or None when `aspect` is None.
+    """
+    if aspect is None:
+        return None
+    if isinstance(aspect, (tuple, list)):
+        w, h = aspect
+    else:
+        w, h = float(aspect), 1.0
+    if w <= 0 or h <= 0:
+        raise ValueError(f"aspect must be positive, got {aspect!r}")
+    return w / h
 
 
 @dataclass
@@ -149,24 +181,31 @@ class Renderer(ABC):
 
     @abstractmethod
     def _save_impl(
-        self, artifact: Any, filepath: Path, width: int, height: int, scale: int
+        self, artifact: Any, filepath: Path, dpi: int, aspect: float | None
     ) -> None:
-        """Write `artifact` to `filepath` (backend-specific)."""
+        """Write `artifact` to `filepath` (backend-specific).
+
+        Args:
+            artifact: The rendered artifact from `render()`.
+            filepath: Output path (parent already created).
+            dpi: Target output resolution.
+            aspect: Target `w/h` ratio (already normalized), or None for the
+                artifact's natural size.
+        """
 
     def save(
         self,
         filename: Path | str,
-        width: int = 1920,
-        height: int = 1080,
-        scale: int = 4,
+        dpi: int = 300,
+        aspect: AspectSpec | None = None,
     ) -> Path:
         """Render and save the diagram, inferring the format from the suffix.
 
         Args:
             filename: Output path; the suffix selects the format.
-            width: Target width in pixels.
-            height: Target height in pixels.
-            scale: Resolution scale factor.
+            dpi: Target output resolution (raster formats).
+            aspect: Target width/height ratio as a `w/h` float or `(w, h)`
+                pair; None keeps the diagram's natural size.
         """
         filepath = Path(filename)
         fmt = filepath.suffix[1:].lower()
@@ -176,5 +215,5 @@ class Renderer(ABC):
                 f"{sorted(self._supported_formats())}."
             )
         filepath.parent.mkdir(parents=True, exist_ok=True)
-        self._save_impl(self.render(), filepath, width, height, scale)
+        self._save_impl(self.render(), filepath, dpi, normalize_aspect(aspect))
         return filepath

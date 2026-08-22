@@ -17,7 +17,13 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from chuchichaestli.utils import get_layer_type, metric_suffix
 from chuchichaestli.utils.visualization import get_color, color_variant
-from chuchichaestli.utils.visualization.base import LabelField, LABEL_FIELDS, TYPE_COLOR
+from chuchichaestli.utils.visualization.base import (
+    LabelField,
+    LABEL_FIELDS,
+    TYPE_COLOR,
+    AspectSpec,
+    normalize_aspect,
+)
 from chuchichaestli.utils.ir import EdgeKind, IRNode, build_ir
 
 __all__ = ["MermaidDiagram"]
@@ -56,6 +62,9 @@ DiagramDirection = Literal[
 ]
 
 _GroupBy = Literal["type", "depth", "level", "block", "encoder_decoder"]
+
+# Base long-edge (inches) for the mermaid page when an aspect is imposed
+_MMD_BASE_INCHES = 8.0
 
 
 def _mermaid_direction(direction: DiagramDirection) -> str | None:
@@ -670,17 +679,17 @@ class MermaidDiagram:
     def save(
         self,
         filename: Path | str,
-        width: int = 1920,
-        height: int = 1080,
-        scale: int = 4,
+        dpi: int = 300,
+        aspect: AspectSpec | None = None,
     ):
         """Save the diagram to file.
 
         Args:
             filename: Output path; the suffix selects the format (mmd/svg/png/pdf).
-            width: Target width in pixels (image formats).
-            height: Target height in pixels (image formats).
-            scale: Resolution scale factor (image formats).
+            dpi: Target output resolution (image formats); mapped to the mermaid
+                CLI density and page pixels.
+            aspect: Target width/height ratio as a `w/h` float or `(w, h)` pair
+                sizing the page (image formats); None keeps the natural layout.
         """
         diagram = self.generate()
         filepath = Path(filename)
@@ -708,13 +717,8 @@ class MermaidDiagram:
                         "-i",
                         tmpf_path,
                         "-o",
-                        filepath,
-                        "-w",
-                        str(width),
-                        "-H",
-                        str(height),
-                        "-s",
-                        str(scale),
+                        str(filepath),
+                        *self._mmdc_size_args(dpi, normalize_aspect(aspect)),
                     ],
                     check=True,
                     capture_output=True,
@@ -732,6 +736,30 @@ class MermaidDiagram:
                 f"Unsupported file format: {_format}.Use 'mmd', 'svg', 'png', or 'pdf'."
             )
         return filepath
+
+    @staticmethod
+    def _mmdc_size_args(dpi: int, aspect: float | None) -> list[str]:
+        """Mermaid-CLI size flags from a dpi and optional `w/h` aspect.
+
+        The CLI page is expressed in CSS pixels (96 per inch) and the density
+        (`-s`) carries the dpi, so the rendered raster is `inches * dpi` per
+        side. Without an aspect the natural layout is kept and only scaled.
+
+        Args:
+            dpi: Target output resolution.
+            aspect: Target `w/h` ratio (already normalized), or None.
+        """
+        scale = max(1.0, dpi / 96)
+        args = ["-s", f"{scale:g}"]
+        if aspect is not None:
+            long_in = _MMD_BASE_INCHES
+            w_in, h_in = (
+                (long_in, long_in / aspect)
+                if aspect >= 1
+                else (long_in * aspect, long_in)
+            )
+            args += ["-w", str(round(w_in * 96)), "-H", str(round(h_in * 96))]
+        return args
 
 
 if __name__ == "__main__":
@@ -784,6 +812,6 @@ if __name__ == "__main__":
         print(mmd.generate())
         print()
         print("Save diagram:")
-        print(mmd.save("mermaid_diagram.png", 2160, 1440, 5))
+        print(mmd.save("mermaid_diagram.png", dpi=300, aspect=(3, 2)))
         # print("Mermaid diagram string:")
         # print(mmd)
