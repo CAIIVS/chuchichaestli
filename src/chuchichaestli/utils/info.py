@@ -85,7 +85,9 @@ def summary(
     def emit(node: IRNode, level: int) -> None:
         if cutoff is not None and level > cutoff:
             return
-        rows.append(["  " * level + node.label, *(fn(node) for fn in extractors)])
+        # Flatten multi-line labels to keep the name column on a single row
+        name = "  " * level + node.label.replace("\n", " ")
+        rows.append([name, *(fn(node) for fn in extractors)])
         for child in node.children:
             emit(child, level + 1)
 

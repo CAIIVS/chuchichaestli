@@ -416,7 +416,13 @@ class AutoencoderAdapter:
         if getattr(model, "latent_proj", None) is not None:
             b._block(llv, "latent_proj", model.latent_proj)
         if isinstance(model, c.VAE):
-            b._child(llv, "reparameterize", NodeRole.BLOCK, "Reparameterize (μ, σ)")
+            # Synthetic op (no module): thread it into the forward flow between
+            # the latent projection and deprojection instead of leaving it
+            # disconnected (`_chain_forward` links consecutive `_leaves`).
+            reparam = b._child(
+                llv, "reparameterize", NodeRole.BLOCK, "Reparameterize\n(μ, σ)"
+            )
+            b._leaves.append(reparam)
         if isinstance(model, c.VQVAE) and getattr(model, "quantize", None) is not None:
             b._block(llv, "quantize", model.quantize)
         if getattr(model, "latent_deproj", None) is not None:
