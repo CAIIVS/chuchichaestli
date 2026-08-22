@@ -52,8 +52,11 @@ sample_image = dataset[0]
 ### Models
 The [models][chuchichaestli.models] module provides various neural
 network models ready to be instantiated such as
-[UNet][chuchichaestli.models.unet.UNet] or built with the components
-implemented in [diffusion][chuchichaestli.diffusion], [models.attention][chuchichaestli.models.attention], [models.adversarial][chuchichaestli.models.adversarial], and more.
+[UNet][chuchichaestli.models.unet.UNet],
+[models.autoencoder][chuchichaestli.models.autoencoder], or built with 
+the components implemented in [diffusion][chuchichaestli.diffusion],
+[models.attention][chuchichaestli.models.attention],
+[models.adversarial][chuchichaestli.models.adversarial], and more.
 
 These models are **not pre-trained**, meaning for proper functioning
 they have to be trained using appropriate data and objectives (loss
@@ -65,71 +68,95 @@ The U-Net architecture consists of an encoder-decoder structure with
 skip connections which ensure spatial information is passed through
 the network (even for higher compression levels). The building blocks
 of the U-Net can have various forms, but generally consist of
-convolutional layers. In this example, the encoder is purely
-convolutional, whereas the decoder includes a mixture of attention and
+convolutional layers. In this example, the U-Net's higher levels are purely
+convolutional, whereas the lowest levels include a mixture of attention and
 (transposed) convolutional layers.
 
 ```python
-from chuchichaestli.models.unet import UNet
-
-model = UNet(
-	dimensions=2,        # spatial dimensions
-	in_channels=3,       # input image channels such as RGB
-	n_channels=64,       # channels of first hidden layer
-	out_channels=3,      # output image channels such as RGB
-	down_block_types=("DownBlock",)*4,     # simple residual blocks
-	up_block_types=("AttnUpBlock",)*4,     # residual blocks with attention heads in front
-	block_out_channel_mults=(1, 2, 2, 4),  # channel multipliers with each level
-	res_act_fn="prelu",  # parametric ReLU
-	res_dropout=0.4,     # dropout for residual blocks
-	attn_n_heads=2,      # number of attention heads per block,
-	skip_connection_action="concat",       # skip connections are concatenated in decoder
-)
-print(model)
+--8<-- "examples/unet_visualization.py:unet"
 ```
 
+[`summary`][chuchichaestli.utils.info.summary] provides a torchinfo-style 
+text table (no extra dependency) that allows for detailed inspection of any
+model
+
+```python
+--8<-- "examples/unet_visualization.py:summary"
+```
+
+Similarly, you can build other models such as a Variational Auto-encoder (VAE)
+using autoencoding-specific building blocks. The model is quite similar to a
+U-Net, but misses skip connections and instead includes a stochastic regularization prior 
+in the lowest layer (the latent)
+
+```python
+--8<-- "examples/vae_visualization.py:vae"
+```
 
 ### Visualization
 
 The [visualization][chuchichaestli.utils.visualization] utilities turn a model
-into a publication-ready schematic. A backend-agnostic semantic graph
-([`build_ir`][chuchichaestli.utils.visualization.build_ir]) understands the
-architecture hierarchy — components (encoder/bottleneck/decoder), spatial
-levels, blocks, and layers — including skip and residual connections. Two
-backends consume it: a matplotlib backend for vector figures (PDF/SVG/PNG) and
-the mermaid backend for quick markdown/web diagrams.
+into a schematic. A backend-agnostic semantic graph
+([`build_ir`][chuchichaestli.utils.ir.build_ir]) understands the
+architecture hierarchy, components (encoder/bottleneck/decoder), spatial levels,
+blocks, and layers, including skip and residual connections.
+Architecture-aware adapters handle U-Nets and autoencoders (VAE/VQVAE/DCAE); any
+other PyTorch model (e.g. a torchvision ResNet or ViT) falls back to a generic
+adapter that mirrors the module tree.
 
-The matplotlib backend is an optional dependency:
+Two entry points consume the graph:
+- [`matplotlib_diagram`][chuchichaestli.utils.visualization.matplotlib_diagram]
+  — vector figures (PDF/SVG/PNG); requires the optional `viz` extra.
+- [`mermaid_diagram`][chuchichaestli.utils.visualization.mermaid_diagram] —
+  quick markdown/web diagrams.
 
-```console
-pip install 'chuchichaestli[viz]'
-```
 
-#### Example
+#### Matplotlib figures
 
-`level` selects the abstraction (0=components, 1=levels, 2=blocks, 3=layers);
-`zoom` adds an "exemplary zoom" callout expanding one block into its layers.
+Matplotlib diagrams are most versatile and are recommended as starting point
+to produce publication-ready illustrations.
+`level` selects the abstraction (0=components, 1=levels, 2=blocks, 3=layers).
+`label_fields` chooses what each node shows (`name`, `channels`, `kernel`,
+`resolution`, `params`); `color_by` chooses what the fill colours and legend
+encode (`component`, `type`, or `name`); `node_size` is `small`/`medium`/`large`.
 
 ```python
-from chuchichaestli.utils.visualization import matplotlib_diagram, mermaid_diagram
-
-# abstract encoder/decoder trapezoids with labelled skip arcs
-matplotlib_diagram(model, level=0, input_shape=(1, 3, 256, 256)).save("unet.pdf")
-
-# a composite figure with one block zoomed into its layers
-matplotlib_diagram(
-    model, level=1, zoom="model/encoder/level0/block0", input_shape=(1, 3, 256, 256)
-).save("unet_zoom.pdf")
-
-# colour-code nodes and move (long) names into the legend
-matplotlib_diagram(model, level=2, color_labels=True, input_shape=(1, 3, 256, 256)).save("blocks.pdf")
-
-# a quick mermaid diagram (skip connections render as dashed edges)
-print(mermaid_diagram(model, input_shape=(1, 3, 256, 256)))
+--8<-- "examples/unet_visualization.py:matplotlib"
 ```
 
-Runnable end-to-end scripts for a U-Net, a VAE, and a PatchGAN discriminator
-live in [`examples/`](https://github.com/CAIIVS/chuchichaestli/tree/main/examples).
+An *exemplary zoom* callout expands a block into its layers: `zoom=True`
+auto-picks a representative block, or pass a node id / `ZoomSpec`. `zoom_loc`
+places the inset (right/left/top/bottom, the four corners, or center); pass a
+list of `ZoomSpec`s to draw several at once.
+
+```python
+--8<-- "examples/unet_visualization.py:zoom"
+```
+
+![U-Net block-level diagram with two exemplary-zoom insets expanding an encoder
+and a decoder block into their layers](assets/unet_zoom.svg){ .diagram }
+
+The same block-level view of a VAE has no skip arcs and swaps the U-Net's
+concatenation for a latent bottleneck (the hourglass node); here a single zoom
+inset expands an encoder block into its layers:
+
+![VAE block-level diagram with the latent rendered as an hourglass node and an
+exemplary-zoom inset expanding an encoder block into its layers](assets/vae_zoom.svg){ .diagram }
+
+
+#### Mermaid diagrams
+
+The Mermaid backend compiles a file that can be imported in a mermaid web-editor.
+Skip connections render as dashed edges; `group_by` nests per-block subgraphs
+inside the encoder/decoder subgraphs.
+
+```python
+--8<-- "examples/unet_visualization.py:mermaid"
+```
+
+Runnable end-to-end scripts for a U-Net, a VAE, a PatchGAN discriminator, and
+torchvision models (ResNet + ViT) live in
+[`examples/`](https://github.com/CAIIVS/chuchichaestli/tree/main/examples).
 
 
 ### Metrics
