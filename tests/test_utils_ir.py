@@ -200,6 +200,53 @@ def test_generic_adapter_no_duplicate_nodes():
     assert graph.root.num_params == _true_params(model)
 
 
+class _ResidualBranch(nn.Module):
+    """A branched block: a main conv path plus a parallel shortcut branch."""
+
+    def __init__(self):
+        super().__init__()
+        self.stem = nn.Conv2d(3, 8, 3, padding=1)
+        self.conv1 = nn.Conv2d(8, 8, 3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(8)
+        self.shortcut = nn.Conv2d(8, 8, 1, bias=False)  # fed from the block input
+
+    def forward(self, x):
+        x = self.stem(x)
+        return self.bn1(self.conv1(x)) + self.shortcut(x)
+
+
+def test_generic_adapter_traces_branched_dataflow():
+    """Forward edges follow real tensor dataflow, not registration order."""
+    graph = build_ir(_ResidualBranch(), input_shape=(1, 3, 8, 8))
+    fwd = {(e.source_id, e.target_id) for e in graph.edges if e.kind == EdgeKind.FORWARD}
+
+    def nid(suffix):
+        return next(
+            n.id
+            for n in graph.root.walk()
+            if n.role == NodeRole.LAYER and n.id.endswith(suffix)
+        )
+
+    stem, conv1, bn1, shortcut = nid("/stem"), nid("/conv1"), nid("/bn1"), nid("/shortcut")
+    # Both the main path and the shortcut branch off the block input (stem).
+    assert (stem, conv1) in fwd
+    assert (stem, shortcut) in fwd
+    # No fabricated serial edge from the main path into the parallel shortcut.
+    assert (bn1, shortcut) not in fwd
+    # The graph stays connected: only the entry conv has no producer.
+    leaves = [n for n in graph.root.walk() if n.role == NodeRole.LAYER]
+    targets = {t for _, t in fwd}
+    assert [n.id for n in leaves if n.id not in targets] == [stem]
+
+
+def test_generic_adapter_falls_back_to_chain_without_trace():
+    """Structure-only builds (no input) keep a best-effort sequential chain."""
+    graph = build_ir(_ResidualBranch())  # no input_shape -> no dataflow trace
+    fwd = [(e.source_id, e.target_id) for e in graph.edges if e.kind == EdgeKind.FORWARD]
+    leaves = [n for n in graph.root.walk() if n.role == NodeRole.LAYER]
+    assert len(fwd) == len(leaves) - 1  # a single serial chain over the leaves
+
+
 def test_representative_prefers_multilayer_block():
     """`representative` skips single-layer heads for a real multi-layer block."""
     rep = build_ir(_unet(), input_shape=_shape(2)).representative(NodeRole.BLOCK)

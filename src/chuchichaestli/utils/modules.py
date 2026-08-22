@@ -11,6 +11,7 @@ import torch
 from torch import nn
 from torch.utils.hooks import RemovableHandle
 from torch.jit import ScriptModule
+from torch.overrides import TorchFunctionMode
 from typing import Any, Literal
 from collections.abc import Sequence, Iterable, Callable
 from chuchichaestli.utils import nested_list_size, prod, map_nested
@@ -26,6 +27,7 @@ except ImportError:
 
 __all__ = [
     "info_forward_pass",
+    "trace_dataflow",
     "layer_info",
     "clear_info_cache",
     "get_chuchichaestli_block_type",
@@ -648,6 +650,116 @@ def info_forward_pass(
     if use_cache:
         _cached_info_forward_pass[cache_key] = info_list
     return info_list
+
+
+def _iter_tensors(obj: Any, acc: list[torch.Tensor]) -> None:
+    """Collect every tensor nested in `obj` into `acc` (in order)."""
+    if isinstance(obj, torch.Tensor):
+        acc.append(obj)
+    elif isinstance(obj, list | tuple):
+        for item in obj:
+            _iter_tensors(item, acc)
+    elif isinstance(obj, dict):
+        for item in obj.values():
+            _iter_tensors(item, acc)
+
+
+def trace_dataflow(
+    model: nn.Module,
+    input_shape: IO_SHAPE_TYPES | None = None,
+    input_dtype: torch.dtype = torch.float32,
+    device: torch.device | None = None,
+) -> dict[int, set[int]] | None:
+    """Trace true tensor dataflow between a model's leaf modules.
+
+    Runs one forward pass under a `TorchFunctionMode` that propagates a
+    per-tensor *provenance* set (the leaf modules that produced it). Functional
+    ops (`+`, `cat`, `reshape`, ...) and in-place ops become transparent: they
+    forward the provenance of their inputs, so an edge is recorded whenever a
+    module consumes a tensor that (transitively through such ops) came from
+    another module. Parallel branches and merges are captured faithfully.
+
+    Args:
+        model: Model to trace.
+        input_shape: Input shape(s) for the dummy forward pass; without one no
+            tensors flow and None is returned.
+        input_dtype: Dummy-input dtype.
+        device: Device to run on; the model's device if None.
+
+    Returns:
+        A map from producer leaf-module `id` to the set of consumer leaf-module
+        `id`s, or None when tracing is unavailable (no input) or fails.
+    """
+    if input_shape is None:
+        return None
+    device = _model_device(model) if device is None else device
+    shapes: Any = input_shape
+    if (
+        isinstance(shapes, tuple | list | torch.Size)
+        and shapes
+        and isinstance(shapes[0], int)
+    ):
+        shapes = [shapes]
+    inputs = [torch.rand(*s).to(device).type(input_dtype) for s in shapes]
+
+    provenance: dict[int, set[int]] = {}
+    edges: dict[int, set[int]] = {}
+    refs: list[torch.Tensor] = []  # keep tensors alive so ids stay unique
+
+    class _ProvenanceMode(TorchFunctionMode):
+        def __torch_function__(self, func, types, args=(), kwargs=None):
+            kwargs = kwargs or {}
+            out = func(*args, **kwargs)
+            ins: list[torch.Tensor] = []
+            _iter_tensors(args, ins)
+            _iter_tensors(kwargs, ins)
+            prov: set[int] = set()
+            for tensor in ins:
+                prov |= provenance.get(id(tensor), set())
+            if prov:
+                outs: list[torch.Tensor] = []
+                _iter_tensors(out, outs)
+                for tensor in outs:
+                    refs.append(tensor)
+                    provenance.setdefault(id(tensor), set()).update(prov)
+            return out
+
+    def pre_hook(module: nn.Module, inp: Any) -> None:
+        ins: list[torch.Tensor] = []
+        _iter_tensors(inp, ins)
+        mid = id(module)
+        for tensor in ins:
+            refs.append(tensor)
+            for src in provenance.get(id(tensor), ()):
+                if src != mid:
+                    edges.setdefault(src, set()).add(mid)
+
+    def post_hook(module: nn.Module, inp: Any, out: Any) -> None:
+        outs: list[torch.Tensor] = []
+        _iter_tensors(out, outs)
+        for tensor in outs:
+            refs.append(tensor)
+            provenance[id(tensor)] = {id(module)}
+
+    handles: list[RemovableHandle] = []
+    for module in model.modules():
+        if not any(module.children()):
+            handles.append(module.register_forward_pre_hook(pre_hook))
+            handles.append(module.register_forward_hook(post_hook))
+    original_modes = {m: m.training for m in model.modules()}
+    try:
+        model.eval()
+        with torch.no_grad(), _ProvenanceMode():
+            model_ = model if device is None else model.to(device)
+            model_(*inputs)
+    except Exception:
+        return None
+    finally:
+        for handle in handles:
+            handle.remove()
+        for module, was_training in original_modes.items():
+            module.training = was_training
+    return edges or None
 
 
 def layer_info(

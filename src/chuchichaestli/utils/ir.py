@@ -10,7 +10,11 @@ from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING
 import torch
 from torch import nn
-from chuchichaestli.utils.modules import LayerInfo, info_forward_pass
+from chuchichaestli.utils.modules import (
+    LayerInfo,
+    info_forward_pass,
+    trace_dataflow,
+)
 
 if TYPE_CHECKING:
     from chuchichaestli.utils.adapters import AdapterRegistry
@@ -335,4 +339,7 @@ def build_ir(
         info_list = info_forward_pass(model, use_cache=False)
     info_by_id = {info.layer_id: info for info in info_list}
     adapter = (registry or default_registry()).resolve(model)
-    return adapter.build(model, info_by_id).compile()
+    dataflow = None
+    if input_shape is not None and getattr(adapter, "uses_dataflow", False):
+        dataflow = trace_dataflow(model, input_shape, input_dtype)
+    return adapter.build(model, info_by_id, dataflow=dataflow).compile()

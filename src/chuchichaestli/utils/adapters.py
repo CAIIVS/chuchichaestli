@@ -113,12 +113,19 @@ class SemanticAdapter(Protocol):
         """
         ...
 
-    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+    def build(
+        self,
+        model: nn.Module,
+        info_by_id: dict[int, LayerInfo],
+        dataflow: dict[int, set[int]] | None = None,
+    ) -> IRGraph:
         """Build the IR graph for `model`.
 
         Args:
             model: Root module to decompose.
             info_by_id: Map from id(module) to LayerInfo.
+            dataflow: Optional traced leaf-module dataflow (see `trace_dataflow`);
+                only adapters with `uses_dataflow` set consume it.
         """
         ...
 
@@ -289,8 +296,36 @@ class _Builder:
         for prev, nxt in zip(self._leaves, self._leaves[1:]):
             self.edges.append(IREdge(prev.id, nxt.id, EdgeKind.FORWARD))
 
-    def _graph(self, root: IRNode) -> IRGraph:
-        self._chain_forward()
+    def _dataflow_forward(self, dataflow: dict[int, set[int]]) -> None:
+        """Emit FORWARD edges from a traced module-id dataflow map.
+
+        Maps each producer/consumer leaf module back to its IR node and adds
+        one edge per real tensor dependency, so branched models keep their
+        parallel paths and merges instead of a fabricated serial chain.
+        """
+        by_module: dict[int, str] = {}
+        for leaf in self._leaves:
+            if leaf.module is not None:
+                by_module.setdefault(id(leaf.module), leaf.id)
+        emitted: list[tuple[str, str]] = []
+        for src_mid, dst_mids in dataflow.items():
+            src = by_module.get(src_mid)
+            if src is None:
+                continue
+            for dst_mid in dst_mids:
+                dst = by_module.get(dst_mid)
+                if dst is not None and dst != src:
+                    emitted.append((src, dst))
+        for src, dst in sorted(set(emitted)):
+            self.edges.append(IREdge(src, dst, EdgeKind.FORWARD))
+
+    def _graph(
+        self, root: IRNode, dataflow: dict[int, set[int]] | None = None
+    ) -> IRGraph:
+        if dataflow:
+            self._dataflow_forward(dataflow)
+        else:
+            self._chain_forward()
         return IRGraph(root=root, edges=self.edges)
 
 
@@ -310,13 +345,20 @@ class UNetAdapter:
             and not isinstance(model, _classes().Autoencoder)
         )
 
-    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+    def build(
+        self,
+        model: nn.Module,
+        info_by_id: dict[int, LayerInfo],
+        dataflow: dict[int, set[int]] | None = None,
+    ) -> IRGraph:
         """Decompose a U-Net into the IR, replaying its skip pairing.
 
         Args:
             model: U-Net model.
             info_by_id: Map from id(module) to LayerInfo.
+            dataflow: Unused; the U-Net forward flow is built explicitly.
         """
+        del dataflow
         c = _classes()
         b = _Builder(model, info_by_id)
         root = b._root()
@@ -387,13 +429,20 @@ class AutoencoderAdapter:
         """
         return isinstance(model, _classes().Autoencoder)
 
-    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+    def build(
+        self,
+        model: nn.Module,
+        info_by_id: dict[int, LayerInfo],
+        dataflow: dict[int, set[int]] | None = None,
+    ) -> IRGraph:
         """Decompose an autoencoder into encoder/latent/decoder (no skips).
 
         Args:
             model: Autoencoder model.
             info_by_id: Map from id(module) to LayerInfo.
+            dataflow: Unused; the autoencoder forward flow is built explicitly.
         """
+        del dataflow
         c = _classes()
         b = _Builder(model, info_by_id)
         root = b._root()
@@ -491,13 +540,20 @@ class SequentialAdapter:
         """
         return isinstance(model, nn.Sequential)
 
-    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+    def build(
+        self,
+        model: nn.Module,
+        info_by_id: dict[int, LayerInfo],
+        dataflow: dict[int, set[int]] | None = None,
+    ) -> IRGraph:
         """Decompose a sequential model into a single-level block chain.
 
         Args:
             model: Sequential model.
             info_by_id: Map from id(module) to LayerInfo.
+            dataflow: Unused; a sequential model's flow is its block order.
         """
+        del dataflow
         b = _Builder(model, info_by_id)
         root = b._root()
         component = b._child(root, "network", NodeRole.COMPONENT, "Network")
@@ -510,6 +566,8 @@ class SequentialAdapter:
 class GenericAdapter:
     """Fallback adapter using LayerInfo depth banding for any model."""
 
+    uses_dataflow = True
+
     def matches(self, model: nn.Module) -> bool:
         """Match everything.
 
@@ -519,7 +577,12 @@ class GenericAdapter:
         del model
         return True
 
-    def build(self, model: nn.Module, info_by_id: dict[int, LayerInfo]) -> IRGraph:
+    def build(
+        self,
+        model: nn.Module,
+        info_by_id: dict[int, LayerInfo],
+        dataflow: dict[int, set[int]] | None = None,
+    ) -> IRGraph:
         """Decompose an arbitrary module by its `named_children` hierarchy.
 
         Roles are assigned by module-tree depth (leaves are layers); LayerInfo
@@ -527,9 +590,14 @@ class GenericAdapter:
         rather than `LayerInfo.children` (which links transitive descendants
         and would duplicate nodes).
 
+        Forward edges come from a traced tensor `dataflow` when available, so
+        branched models keep their real parallel paths and merges; without a
+        trace the builder falls back to a best-effort sequential chain.
+
         Args:
             model: Any model.
             info_by_id: Map from id(module) to LayerInfo.
+            dataflow: Traced leaf-module dataflow (see `trace_dataflow`), or None.
         """
         residual = _classes().RESIDUAL
         b = _Builder(model, info_by_id)
@@ -555,7 +623,7 @@ class GenericAdapter:
             return node
 
         root = rec(model, None, "", 0)
-        return b._graph(root)
+        return b._graph(root, dataflow=dataflow)
 
 
 class AdapterRegistry:
