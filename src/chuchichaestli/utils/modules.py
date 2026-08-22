@@ -36,7 +36,7 @@ __all__ = [
 IO_TENSORS_TYPES = Sequence[torch.Tensor] | dict[Any, torch.Tensor] | torch.Tensor
 IO_SHAPE_TYPES = Sequence[int | Sequence[Any] | torch.Size]
 MODULE_MODES = Literal["train", "eval", "same"]
-_cached_info_forward_pass: dict[str, list[LayerInfo]] = {}
+_cached_info_forward_pass: dict[Any, list[LayerInfo]] = {}
 
 
 class DEFAULT_MODULE_LABELS(Enum):
@@ -465,6 +465,64 @@ def _set_children_layerinfo(info_list: list[LayerInfo]):
         layerinfo.children = _get_children_layerinfo(info_list, i)
 
 
+def _model_device(model: nn.Module) -> torch.device:
+    """Best-effort device of a model's parameters/buffers (CPU if it has none).
+
+    Args:
+        model: Module to inspect.
+    """
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        pass
+    try:
+        return next(model.buffers()).device
+    except StopIteration:
+        return torch.device("cpu")
+
+
+def _trace_cache_key(
+    model: nn.Module,
+    input_data: IO_TENSORS_TYPES | None,
+    input_shape: IO_SHAPE_TYPES | None,
+    size: int | None,
+    input_dtype: torch.dtype,
+    batch_dim: int | None,
+    device: torch.device | None,
+    mode: MODULE_MODES,
+) -> tuple:
+    """Cache key covering model identity and every trace-affecting input.
+
+    Args:
+        model: Traced model instance.
+        input_data: Concrete input(s), if given.
+        input_shape: Input shape(s), if given.
+        size: Fallback spatial size, if given.
+        input_dtype: Synthetic input dtype.
+        batch_dim: Batch dimension.
+        device: Device the trace runs on.
+        mode: Model mode used for the trace.
+    """
+    if input_data is not None:
+        shape_sig = repr(
+            map_nested(
+                input_data, action_fn=lambda d: tuple(d.shape), aggregate_fn=type
+            )
+        )
+    else:
+        shape_sig = repr(input_shape)
+    return (
+        id(model),
+        model.__class__.__name__,
+        shape_sig,
+        size,
+        str(input_dtype),
+        batch_dim,
+        str(device),
+        mode,
+    )
+
+
 def info_forward_pass(
     model: nn.Module,
     input_data: IO_TENSORS_TYPES | None = None,
@@ -488,21 +546,29 @@ def info_forward_pass(
         input_dtype: Data type (only takes effect if `input_data == None`).
         batch_dim: Batch dimension (if specified, input is expanded at specified dimension).
         use_cache: If `True`, use global info cache.
-        device: Device for computation; if `None`, the current device(s) is/are used.
+        device: Device for computation; if `None`, the model's current device is used.
         mode: Mode of the model in which to do a forward pass; one of ["train", "eval", "same"].
         kwargs: Additional keyword arguments to be passed to the model.
     """
     global _cached_info_forward_pass
     model_name = model.__class__.__name__
-    if use_cache and model_name in _cached_info_forward_pass:
-        return _cached_info_forward_pass[model_name]
+    if device is None:
+        device = _model_device(model)
+    cache_key = _trace_cache_key(
+        model, input_data, input_shape, size, input_dtype, batch_dim, device, mode
+    )
+    if use_cache and cache_key in _cached_info_forward_pass:
+        return _cached_info_forward_pass[cache_key]
 
     # construct test input
     if input_data is not None:
         input_shape = map_nested(
             input_data, action_fn=lambda data: data.size(), aggregate_fn=type
         )
-        x = input_data if device is None else input_data.to(device)
+        # Move each nested tensor (containers/dicts have no `.to`).
+        x = map_nested(
+            input_data, action_fn=lambda data: data.to(device), aggregate_fn=type
+        )
         if isinstance(x, (torch.Tensor, np.ndarray)):
             x = [x]
     elif input_shape is not None:
@@ -542,7 +608,9 @@ def info_forward_pass(
         return info_list
 
     # forward pass
-    original_model_mode = model.training
+    # Capture every submodule's flag independently; `model.train(...)` is
+    # recursive and would clobber intentionally mixed train/eval submodules.
+    original_modes = {m: m.training for m in model.modules()}
     try:
         if mode == "train":
             model.train()
@@ -571,13 +639,15 @@ def info_forward_pass(
             for pre_hook, hook in hooks.values():
                 pre_hook.remove()
                 hook.remove()
-        model.train(original_model_mode)
+        for module, was_training in original_modes.items():
+            module.training = was_training
 
     # deal with skipped container submodules such as ModuleList, Sequential, etc.
     _add_missing_container_layers(info_list)
     _set_children_layerinfo(info_list)
 
-    _cached_info_forward_pass[model_name] = info_list
+    if use_cache:
+        _cached_info_forward_pass[cache_key] = info_list
     return info_list
 
 
@@ -598,9 +668,8 @@ def layer_info(
         kwargs: Additional keyword arguments to be passed to the model.
     """
     input_shape = [_infer_input_shape(model, init_size=input_size, dtype=input_dtype)]
-    device = next(model.parameters()).device
     return info_forward_pass(
-        model, input_shape=input_shape, use_cache=use_cache, device=device, mode="same"
+        model, input_shape=input_shape, use_cache=use_cache, mode="same"
     )
 
 
@@ -769,7 +838,7 @@ def _infer_input_shape(
         max_size: Maximal spatial size to try with the model.
         dtype: Data type for trials.
     """
-    device = next(model.parameters()).device
+    device = _model_device(model)
     first_layer = next(model.children())
 
     if isinstance(first_layer, nn.Conv2d):
@@ -810,8 +879,12 @@ def _infer_input_shape(
         else:
             x = torch.randn(16, 1, input_size, device=device).type(dtype)
         return x.shape
-    # Fallback
-    return ((1, 1), torch.float32)
+    # No shape could be inferred from the model's first layer.
+    raise RuntimeError(
+        f"Could not infer an input shape for {model.__class__.__name__} "
+        f"(first layer: {first_layer.__class__.__name__}); pass `input_shape` "
+        "or `input_data` explicitly."
+    )
 
 
 def clear_info_cache():
