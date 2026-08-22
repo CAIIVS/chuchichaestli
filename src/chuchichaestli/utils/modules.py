@@ -911,16 +911,13 @@ def get_chuchichaestli_block_type(
     if cls_name in ["SinusoidalTimeEmbedding", "DeepSinusoidalTimeEmbedding"]:
         return labels.C3LI_TIME_EMB.value
 
-    # U-Net encoder
-    if "Encoder" in cls_name:
+    # Encoder/decoder/discriminator: match by name for c3li's own modules
+    from_c3li = type(module).__module__.startswith("chuchichaestli")
+    if from_c3li and "Encoder" in cls_name:
         return labels.C3LI_UNET_ENCODER.value
-
-    # U-Net decoder
-    if "Decoder" in cls_name:
+    if from_c3li and "Decoder" in cls_name:
         return labels.C3LI_UNET_DECODER.value
-
-    # Discriminators
-    if "Discriminator" in cls_name:
+    if from_c3li and "Discriminator" in cls_name:
         return labels.C3LI_DISCRIMINATOR.value
 
     return None
@@ -1054,7 +1051,7 @@ def get_layer_type(module: nn.Module, labels: Enum = DEFAULT_MODULE_LABELS) -> s
             "Threshold",
         ]
     ):
-        # Special case: MultiheadAttention is attention, not just activation
+        # Case exception: MultiheadAttention is attention, not just "activation"
         if "Attention" in cls_name:
             return labels.ATTN.value
         return labels.ACT.value
@@ -1177,7 +1174,6 @@ def get_layer_type(module: nn.Module, labels: Enum = DEFAULT_MODULE_LABELS) -> s
 
 
 if __name__ == "__main__":
-    from pprint import pprint
     from chuchichaestli.models.unet import UNet
 
     model = UNet(
