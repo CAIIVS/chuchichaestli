@@ -82,5 +82,5 @@ def color_variant(hex_color: str, shift: int = 10) -> str:
     new_rgb_int = [int(hex_value, 16) + shift for hex_value in rgb_hex]
     # limit to interval 0 and 255
     new_rgb_int = [min([255, max([0, i])]) for i in new_rgb_int]
-    # hex() produces "0x88", we want the last two digits
-    return "#" + "".join([hex(i)[2:] if i else "00" for i in new_rgb_int])
+    # zero-pad each channel to two hex digits (e.g. 1 -> "01", not "1")
+    return "#" + "".join(f"{i:02x}" for i in new_rgb_int)
