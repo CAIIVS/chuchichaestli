@@ -129,7 +129,6 @@ def mermaid_diagram(
     model: nn.Module,
     direction: DiagramDirection = "horizontal",
     max_depth: int | None = None,
-    positions: dict | None = None,
     label_fields: Sequence[LabelField] = ("name", "params"),
     show_legend: bool = False,
     **kwargs,
@@ -140,7 +139,6 @@ def mermaid_diagram(
         model: Model instance from chuchichaestli.
         direction: Diagram direction, e.g. T(op)D(own), L(eft)R(ight), etc.
         max_depth: Maximum depth for module recursion; None uses full depth.
-        positions: Mapping of node IDs to custom positions.
         label_fields: Which fields to label nodes with, any of `"name"`,
             `"channels"`, `"resolution"`, `"params"` (`"channels"`/`"resolution"`
             both show tensor shapes; `"kernel"` is not rendered by this backend).
@@ -154,7 +152,6 @@ def mermaid_diagram(
     return MermaidDiagram(
         model,
         direction=direction,
-        positions=positions,
         max_depth=max_depth,
         label_fields=label_fields,
         show_legend=show_legend,

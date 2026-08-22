@@ -146,9 +146,11 @@ exemplary-zoom inset expanding an encoder block into its layers](assets/vae_zoom
 
 #### Mermaid diagrams
 
-The Mermaid backend compiles a file that can be imported in a mermaid web-editor.
-Skip connections render as dashed edges; `group_by` nests per-block subgraphs
-inside the encoder/decoder subgraphs.
+The Mermaid backend compiles a `.mmd` file that can be imported into a mermaid
+web-editor (e.g. [mermaid.live](https://mermaid.live)), where individual nodes
+can be dragged to fine-tune the layout. The overall flow is controlled with
+`direction`/`group_direction`, and `group_by` nests per-block subgraphs inside
+the encoder/decoder subgraphs; skip connections render as dashed edges.
 
 ```python
 --8<-- "examples/unet_visualization.py:mermaid"

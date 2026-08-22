@@ -183,7 +183,6 @@ class MermaidDiagram:
         direction: DiagramDirection = "horizontal",
         group_direction: DiagramDirection = "vertical",
         max_depth: int | None = None,
-        positions: dict | None = None,
         group_by: _GroupBy | list[_GroupBy] | None = None,
         type_map: dict[str, str] | None = None,
         class_fn: Callable[[nn.Module], str | None] | None = None,
@@ -203,7 +202,6 @@ class MermaidDiagram:
             direction: Diagram direction, e.g. T(op)D(own), L(eft)R(ight), etc.
             group_direction: Direction within grouped subgraphs.
             max_depth: Maximum depth for module recursion; for `None` full depth is used.
-            positions: Mapping of node IDs to custom positions.
             group_by: Strategy for grouping layers into subgraphs.
               Options:
                   - 'type': Group by layer type
@@ -238,7 +236,6 @@ class MermaidDiagram:
         self.direction = self.parse_direction(direction)
         self.group_direction = self.parse_direction(group_direction)
         self.max_depth = max_depth
-        self.positions = positions or {}
         self.label_fields = tuple(label_fields)
         self.show_names = "name" in self.label_fields
         self.show_params = "params" in self.label_fields
