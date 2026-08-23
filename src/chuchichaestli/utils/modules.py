@@ -780,7 +780,12 @@ def layer_info(
     """
     input_shape = [_infer_input_shape(model, init_size=input_size, dtype=input_dtype)]
     return info_forward_pass(
-        model, input_shape=input_shape, use_cache=use_cache, mode="same"
+        model,
+        input_shape=input_shape,
+        input_dtype=input_dtype,
+        use_cache=use_cache,
+        mode="same",
+        **kwargs,
     )
 
 
