@@ -1053,3 +1053,64 @@ class TestSharedCachePickle:
         attached.clear_allocation()
         assert owner[0] == {"a": 1}
         owner.clear_allocation()
+
+
+class TestSharedDictListSlotClamp:
+    """Regression tests for issue #110 (IndexError for small `attrs_cache`)."""
+
+    @pytest.mark.parametrize(
+        "n,slot_size,size",
+        [
+            (300, "128b", "64b"),
+            (1000, "256b", "64b"),
+            (1000, "256b", "256b"),
+            (1000, "650b", "64b"),
+        ],
+    )
+    def test_cache_smaller_than_state_array(self, n, slot_size, size):
+        """A cache below the state-array size allocates zero slots, not negative.
+
+        Without the clamp the slot count went negative, so `states[n_slots:]`
+        marked only the trailing entries as OOC and low indices stayed flagged
+        cacheable against an empty slot list.
+        """
+        cache = SharedDictList(n, slot_size=slot_size, size=size, use_lock=False)
+        try:
+            assert len(cache.slots) == 0
+            assert int((cache.states == SlotState.OOC.value).sum()) == n
+            cache[0] = _sample_dict()  # no-op, must not raise IndexError
+            assert cache[0] is None
+            assert 0 not in cache
+        finally:
+            cache.clear_allocation()
+
+    @pytest.mark.parametrize("size", ["64b", "650b", "2K", "32K", "1M"])
+    def test_cacheable_states_match_slot_count(self, size):
+        """Every non-OOC index must have a slot backing it."""
+        cache = SharedDictList(1000, slot_size="256b", size=size, use_lock=False)
+        try:
+            n_cacheable = int((cache.states != SlotState.OOC.value).sum())
+            assert n_cacheable == len(cache.slots)
+            for i in range(len(cache.slots)):
+                cache[i] = _sample_dict()  # must not raise
+        finally:
+            cache.clear_allocation()
+
+    def test_instances_do_not_share_a_segment(self):
+        """Independent instances get unique descriptors.
+
+        A fixed descriptor made a second instance attach to the first's slot
+        array while sizing its own state array to its own length, so indices
+        beyond the first instance's capacity raised an IndexError.
+        """
+        small = SharedDictList(100, slot_size="256b", size="4M", use_lock=False)
+        large = SharedDictList(1000, slot_size="256b", size="4M", use_lock=False)
+        try:
+            assert small.descr != large.descr
+            assert len(small.slots) == 100
+            assert len(large.slots) == 1000
+            large[500] = _sample_dict()  # past small's capacity, must not raise
+            assert large[500] == _sample_dict()
+        finally:
+            small.clear_allocation()
+            large.clear_allocation()

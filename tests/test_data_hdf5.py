@@ -10,6 +10,7 @@ import torch
 import h5py
 import warnings
 import pytest
+from chuchichaestli.data.cache import SlotState
 from chuchichaestli.data.hdf5 import HDF5Dataset, ZipHDF5Dataset
 
 
@@ -737,3 +738,77 @@ class TestZipHDF5Dataset:
         assert samples_seen == 10
         assert ds.n_cached == 40
         ds.close()
+
+
+@pytest.fixture(scope="module")
+def per_sample_attrs_file(tmp_path_factory):
+    """HDF5 file with one metadata group per sample (issue #110 scenario)."""
+    file_path = tmp_path_factory.mktemp("attrs_cache") / "per_sample.h5"
+    n = 1000
+    with h5py.File(file_path, "w") as f:
+        data = f.create_group("data")
+        data.create_dataset(
+            "images", data=np.random.randn(n, 3, 8, 8).astype(np.float32)
+        )
+        meta = f.create_group("meta")
+        for i in range(n):
+            sample = meta.create_group(f"s{i:05d}")
+            sample.attrs["idx"] = i
+            sample.attrs["label"] = f"c{i % 10}"
+    return file_path
+
+
+class TestSmallAttrsCache:
+    """Regression tests for issue #110 (IndexError for small `attrs_cache`)."""
+
+    @pytest.mark.parametrize("attrs_cache", ["64b", "256b", "650b", "2K", "8K", "1M"])
+    def test_small_attrs_cache_iterates(self, per_sample_attrs_file, attrs_cache):
+        """Iterating must not raise, whatever the attrs cache is truncated to."""
+        ds = HDF5Dataset(
+            per_sample_attrs_file,
+            groups="data/*",
+            attrs_groups="meta/*",
+            cache="8M",
+            attrs_cache=attrs_cache,
+        )
+        try:
+            n_cacheable = int((ds.attrs_cache.states != SlotState.OOC.value).sum())
+            assert n_cacheable == len(ds.attrs_cache.slots)
+            for i in range(len(ds)):
+                _, attrs = ds[i]
+                assert attrs["idx"] == i
+            for i in range(len(ds)):  # second pass reads back through the cache
+                _, attrs = ds[i]
+                assert attrs["idx"] == i
+        finally:
+            ds.close()
+
+    def test_two_datasets_have_independent_attrs_caches(self, temp_dir):
+        """Two live datasets must not share one attrs-cache segment."""
+        paths = []
+        for name, n in (("small.h5", 100), ("large.h5", 1000)):
+            fp = temp_dir / name
+            with h5py.File(fp, "w") as f:
+                data = f.create_group("data")
+                data.create_dataset(
+                    "images", data=np.random.randn(n, 3, 8, 8).astype(np.float32)
+                )
+                meta = f.create_group("meta")
+                for i in range(n):
+                    meta.create_group(f"s{i:05d}").attrs["idx"] = i
+            paths.append(fp)
+        small = HDF5Dataset(
+            paths[0], groups="data/*", attrs_groups="meta/*", attrs_cache="1M"
+        )
+        large = HDF5Dataset(
+            paths[1], groups="data/*", attrs_groups="meta/*", attrs_cache="1M"
+        )
+        try:
+            assert small.attrs_cache.descr != large.attrs_cache.descr
+            assert len(large.attrs_cache.slots) == len(large)
+            for i in range(len(large)):  # fails past index 100 on a shared segment
+                _, attrs = large[i]
+                assert attrs["idx"] == i
+        finally:
+            small.close()
+            large.close()
