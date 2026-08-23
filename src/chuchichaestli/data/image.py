@@ -7,9 +7,8 @@ from pathlib import Path
 import json
 import torch
 from torchvision.io import decode_image, ImageReadMode
-import warnings
-from collections.abc import Callable, Sequence
-from typing import Any, Literal
+from collections.abc import Sequence
+from typing import Literal
 from chuchichaestli.data.cache import nbytes
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
 from chuchichaestli.data.zip import ZipDataset
