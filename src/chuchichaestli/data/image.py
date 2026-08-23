@@ -36,7 +36,7 @@ _MODE_MAP: dict[ImageReadModeKey, ImageReadMode] = {
 class ImageTensorView:
     """Lazy, length-1 tensor-like wrapper around an image file path.
 
-    The image is read via `torchvision.io.read_image` and returned as a
+    The image is read via `torchvision.io.decode_image` and returned as a
     `uint8` tensor in `(C, H, W)` channel-first layout.  When `normalize`
     the tensor is cast to `float32` and divided by 255.
     """
