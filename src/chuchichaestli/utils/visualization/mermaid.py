@@ -99,6 +99,19 @@ def _mermaid_direction(direction: DiagramDirection) -> str | None:
     }.get(key)
 
 
+def _mermaid_text(text: str) -> str:
+    r"""Normalize text for use inside a quoted mermaid label.
+
+    IR labels may carry a raw newline (e.g. `Reparameterize\n(mu, sigma)`),
+    which splits the declaration across lines; `</br>` is mermaid's documented
+    line break and keeps one declaration per line.
+
+    Args:
+        text: Raw label text.
+    """
+    return text.replace("\r\n", "</br>").replace("\n", "</br>").replace("\r", "</br>")
+
+
 def _mermaid_shape_brackets(shape: str) -> tuple[str, str]:
     """Map shapes to the mermaid bracket standard."""
     shape = shape.lower().strip()
@@ -564,7 +577,7 @@ class MermaidDiagram:
         for key, sub in tree["children"].items():
             gid = self._sanitize_mermaid_id(f"{prefix}{key}")
             title = self._group_labels.get(key, key)
-            lines.append(f'{indent}subgraph {gid}["{title}"]')
+            lines.append(f'{indent}subgraph {gid}["{_mermaid_text(title)}"]')
             lines.append(f"{indent}    direction {self.group_direction}")
             lines.extend(self._emit_group_tree(sub, indent + "    ", f"{prefix}{key}/"))
             lines.append(f"{indent}end")
@@ -577,7 +590,7 @@ class MermaidDiagram:
         style = self.layer_styles.get(layer_type, self.layer_styles.get("Default", {}))
         shape = style.get("shape", "stadium")
         brackets = _mermaid_shape_brackets(shape)
-        return f'{brackets[0]}"{name}"{brackets[1]}'
+        return f'{brackets[0]}"{_mermaid_text(name)}"{brackets[1]}'
 
     def generate_configs(
         self,

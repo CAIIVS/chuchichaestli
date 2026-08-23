@@ -355,3 +355,10 @@ def test_build_ir_does_not_mutate_running_stats():
     assert torch.equal(running_mean, model.norm.running_mean)
     assert model.norm.num_batches_tracked.item() == 0
     assert model.training
+
+
+def test_mermaid_label_newlines_become_line_breaks():
+    """A label carrying a newline stays one mermaid declaration per line."""
+    text = mermaid_diagram(_vae(VAE), input_shape=(1, 3, 32, 32), max_depth=3).generate()
+    assert "Reparameterize</br>(" in text
+    assert all(line.count('"') % 2 == 0 for line in text.splitlines())
