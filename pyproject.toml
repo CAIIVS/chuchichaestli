@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.4.1",
+    "ruff==0.15.14",
     "pytest==8.1.1",
     "pytest-cov>=6.2.1",
 ]
@@ -54,7 +54,7 @@ viz = [
     "matplotlib>=3.7",
 ]
 all = [
-    "ruff==0.4.1",
+    "ruff==0.15.14",
     "pre-commit==3.7.0",
     "pytest==8.1.1",
     "pytest-cov>=6.2.1",
@@ -69,7 +69,7 @@ all = [
 
 [dependency-groups]
 dev = [
-    "ruff==0.4.1",
+    "ruff==0.15.14",
     "pre-commit==3.7.0",
     "pytest==8.1.1",
     "pytest-cov>=6.2.1",
