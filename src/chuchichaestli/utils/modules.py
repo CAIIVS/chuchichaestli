@@ -1159,7 +1159,7 @@ def get_layer_type(module: nn.Module, labels: Enum = DEFAULT_MODULE_LABELS) -> s
 
     if any(conv in cls_name for conv in ["Conv1d", "Conv2d", "Conv3d"]):
         if "Transpose" in cls_name:
-            return labels.UPSAMP
+            return labels.UPSAMP.value
         return labels.CONV.value
 
     if any(

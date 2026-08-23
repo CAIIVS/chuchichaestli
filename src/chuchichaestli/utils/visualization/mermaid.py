@@ -15,8 +15,9 @@ from typing import get_args, Literal, Any
 from dataclasses import dataclass
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from chuchichaestli.utils import get_layer_type, metric_suffix
-from chuchichaestli.utils.visualization import get_color, color_variant
+from chuchichaestli.utils.formatting import metric_suffix
+from chuchichaestli.utils.modules import get_layer_type
+from chuchichaestli.utils.visualization.colors import get_color, color_variant
 from chuchichaestli.utils.visualization.base import (
     LabelField,
     LABEL_FIELDS,
@@ -190,7 +191,7 @@ MermaidClasses = [
     MermaidClass("attention", "Attention Mechanism", "stadium"),
     MermaidClass("embedding", "Embedding Layer", "stadium"),
     MermaidClass("recurrent", "Recurrent Layer (LSTM/GRU)", "stadium"),
-    MermaidClass("concat", "Concatentation", "diamond", stroke_width=4, dashed=True, color="golden"),
+    MermaidClass("concat", "Concatenation", "diamond", stroke_width=4, dashed=True, color="golden"),
     MermaidClass("merge", "Merge/Add Operation", "diamond", stroke_width=4, dashed=True, color="brown"),
     MermaidClass("default", "Layer", "stadium", color="grey"),
 ]
@@ -625,11 +626,16 @@ class MermaidDiagram:
     def generate_configs(
         self,
         theme: str = "dark",
-        variables: dict[str, str] = {
-            "primaryTextColor": f"{color_variant('dark', shift=-30)}",
-        },
+        variables: dict[str, str] | None = None,
     ) -> list[str]:
-        """Generate configs defining global diagram settings."""
+        """Generate configs defining global diagram settings.
+
+        Args:
+            theme: Mermaid base theme name.
+            variables: Mermaid theme variable overrides; None uses defaults.
+        """
+        if variables is None:
+            variables = {"primaryTextColor": f"{color_variant('dark', shift=-30)}"}
         lines = []
         lines.append("---")
         lines.append("config:")

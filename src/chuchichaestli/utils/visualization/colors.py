@@ -58,8 +58,8 @@ def get_color(color_name: str) -> str:
     Args:
         color_name: Color name to be fetched.
     """
-    sanatized_color_name = color_name.replace("_", "").replace("-", "").strip().upper()
-    return Color[sanatized_color_name].value
+    sanitized_color_name = color_name.replace("_", "").replace("-", "").strip().upper()
+    return Color[sanitized_color_name].value
 
 
 def color_variant(hex_color: str, shift: int = 10) -> str:
