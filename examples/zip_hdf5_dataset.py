@@ -17,20 +17,18 @@ Run from repository root:
 ```
 """
 
-from pathlib import Path
-import torch
 from torch.utils.data import DataLoader
-from chuchichaestli.data import ZipHDF5Dataset
 import matplotlib.pyplot as plt
+# --8<-- [start:build]
+import torch
+from chuchichaestli.data import ZipHDF5Dataset
 
 # select the training data in train
-data_dir = Path("data/mnist_h5_tests/test_scenario_13/train")
-# select all HDF5 files starting with 'mnist_test_' and ending with '.h5'
-file_glob = str(data_dir / "mnist_test_*.h5")
+data_dir = "data/mnist_h5_tests/test_scenario_13/train"
 
 zip_ds = ZipHDF5Dataset.from_groups(
     # the HDF5 files (wildcards * and ** work)
-    file_glob,
+    f"{data_dir}/mnist_test_*.h5",
     # first HDF5 group
     "image/*",
     # second HDF5 group (acts as a "paired" source)
@@ -50,7 +48,7 @@ print("First zip dataset")
 zip_ds.datasets[0].info()
 print("Second zip dataset")
 zip_ds.datasets[1].info()
-
+# --8<-- [end:build]
 
 # Create a data loader with the dataset
 batch_size = 16

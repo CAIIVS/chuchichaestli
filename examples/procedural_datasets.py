@@ -17,19 +17,19 @@ memory, and are fully compatible with `torch.utils.data.DataLoader`.
 
 Run from repository root:
 ```
-[uv run] python examples/procedural_datasets.py
+[uv run --extra viz] python examples/procedural_datasets.py
 ```
 """
 
+from matplotlib.colors import TABLEAU_COLORS
+import matplotlib.pyplot as plt
 from chuchichaestli.data import (
-    HalfMoonsDataset,
     SpiralsDataset,
     ConcentricSpheresDataset,
     GaussiansDataset,
-    SwissRollDataset,
 )
-from matplotlib.colors import TABLEAU_COLORS
-import matplotlib.pyplot as plt
+# --8<-- [start:build]
+from chuchichaestli.data import HalfMoonsDataset
 
 # generate 1000 samples split into two half moons in 2D space
 # preload the dataset into shared-memory cache before use
@@ -43,6 +43,7 @@ moons = HalfMoonsDataset(
 )
 print(f"{moons}, shape={moons.shape}")
 print(f"@index=0: sample shape={moons[0][0].shape}, label={moons[0][1]}\n")
+# --8<-- [end:build]
 
 # generate 1000 samples split into two Archimedean spiral arms in 2D space
 spirals = SpiralsDataset(
@@ -69,6 +70,9 @@ gaussians = GaussiansDataset(
 print(f"{gaussians}, shape={gaussians.shape}")
 print(f"@index=0: sample shape={gaussians[0][0].shape}, label={gaussians[0][1]}\n")
 
+# --8<-- [start:swissroll]
+from chuchichaestli.data import SwissRollDataset
+
 # generate 1000 samples on a cylindrical spiral sheet embedded in 3D space
 # preload the dataset into shared-memory cache before use
 swissroll = SwissRollDataset(
@@ -81,6 +85,7 @@ swissroll = SwissRollDataset(
 )
 print(f"{swissroll}, shape={swissroll.shape}")
 print(f"@index=0: sample shape={swissroll[0][0].shape}, label={swissroll[0][1]}\n")
+# --8<-- [end:swissroll]
 
 # generate 1000 samples split into two concentric spheres in 2D space
 spheres3d = ConcentricSpheresDataset(

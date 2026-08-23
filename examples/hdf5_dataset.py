@@ -13,22 +13,20 @@ Run from repository root:
 [uv run] python examples/hdf5_dataset.py
 ```
 """
-
-from pathlib import Path
-import torch
-from torch.utils.data import DataLoader
-from chuchichaestli.data import HDF5Dataset
 import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
+# --8<-- [start:build]
+import torch
+from chuchichaestli.data import HDF5Dataset
 
 # select the training data in train
-data_dir = Path("data/mnist_h5_tests/test_scenario_13/train")
-# select all HDF5 files starting with 'mnist_test_' and ending with '.h5'
-file_glob = str(data_dir / "mnist_test_*.h5")
+data_dir = "data/mnist_h5_tests/test_scenario_13/train"
 
 # initialize the dataset
 ds = HDF5Dataset(
-    # the HDF5 files (wildcards * and ** work)
-    path=file_glob,
+    # the HDF5 files (wildcards * and ** work);
+    # select all HDF5 files starting with 'mnist_test_' and ending with '.h5'
+    path=f"{data_dir}/mnist_test_*.h5",
     # the HDF5 groups (wildcards * and ** work)
     groups="image/*",
     # data type is casted when accessed
@@ -39,6 +37,7 @@ ds = HDF5Dataset(
 
 # Print summary info about the dataset
 ds.info()
+# --8<-- [end:build]
 
 # Create a data loader with the dataset
 batch_size = 16
