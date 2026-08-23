@@ -55,11 +55,13 @@ class HDF5Dataset(CachingDataset):
             attrs_groups: HDF5 group path(s) or patterns for attributes/metadata.
                 If `None`, no attributes are loaded.
             dtype: Data tensor type; default: `torch.float32`.
-            return_as: Return type; one of `['tuple', 'dict', 'list']` or custom dict mapping.
-                - `'tuple'`: Returns tuple of samples (default)
-                - `'dict'`: Returns dict with keys `'0'`, `'1'`, etc.
-                - `dict`: Custom mapping, e.g., `{'input': 0, 'target': 1, 'mask': 3}`
-                    which maps keys to dataset indices.
+            return_as: Return type; one of `['tuple', 'dict', None]` or custom
+                dict template.
+                - `'tuple'`: Returns `(data, attrs)`, or bare `data` if no
+                    attributes are loaded (default)
+                - `'dict'`: Returns `{'data': ..., 'attrs': ...}`
+                - `dict`: Custom template, e.g., `{'image': ..., 'meta': ...}`,
+                    whose first two keys are used for data and attributes.
             cache: Cache size for data items (e.g., `"4G"`, `4.0`, or bytes).
             attrs_cache: Cache size for attributes/metadata.
             preload: Preload and cache the dataset.

@@ -35,9 +35,9 @@ class ZipDataset(Dataset):
 
         Args:
             *datasets: Various datasets to zip together.
-            zip_as: Return type; one of `['tuple', 'dict', 'list']` or custom dict mapping.
+            zip_as: Return type; one of `['tuple', 'dict']` or custom dict mapping.
                 - 'tuple': Returns tuple of samples (default)
-                - 'dict': Returns dict with keys '0', '1', etc.
+                - 'dict': Returns dict keyed by dataset index, i.e. 0, 1, etc.
                 - dict: Custom mapping, e.g., {'input': 0, 'target': 1, 'mask': 3}
                     which maps keys to dataset indices.
             strict: If `True`, all datasets must have the same length.
@@ -85,7 +85,7 @@ class ZipDataset(Dataset):
                 directory, or pattern with wildcards `*` or `**`.
             dataset_cls: CachingDataset subclass to instantiate (e.g., HDF5Dataset).
             zip_as: Return format for ZipDataset; one of
-                `['tuple', 'dict', 'list']` or custom dict mapping.
+                `['tuple', 'dict']` or custom dict mapping.
             strict: If `True`, all datasets must have the same length.
                 If `False`, length is determined by the shortest dataset.
             cache: Cache size for each dataset's samples.
