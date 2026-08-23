@@ -382,7 +382,9 @@ class ZScaleInterval:
         Args:
             nsamples: Number of pixels to sample from the input.
             contrast: Scales the fitted slope; smaller means higher contrast.
-            max_reject: Max fraction of samples that may be rejected.
+            max_reject: Minimum fraction of samples that must survive
+                rejection for the fit to be used (IRAF convention;
+                despite the name).
             min_npixels: Minimum number of surviving samples for a valid fit.
             krej: k-sigma rejection threshold on the fit residuals.
             max_iterations: Maximum number of rejection iterations.
