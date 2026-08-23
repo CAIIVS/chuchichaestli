@@ -140,5 +140,8 @@ extend-select = [
     "D",  # pydocstyle
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"examples/**" = ["E402", "F811"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
