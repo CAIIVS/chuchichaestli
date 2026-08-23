@@ -44,9 +44,16 @@ markdown_extensions:
   - attr_list
   - pymdownx.extra
   - pymdownx.highlight
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
 
 plugins:
   - search
+  - glightbox:
+      zoomable: true
+      draggable: true
+      touchNavigation: true
   - autorefs
   - mkdocstrings:
       handlers:

@@ -46,11 +46,15 @@ dev = [
 docs = [
     "mkdocs>=1.6.1",
     "mkdocs-api-autonav>=0.3.0",
+    "mkdocs-glightbox>=0.4.0",
     "mkdocs-material>=9.6.16",
     "mkdocstrings[python]>=0.30.0",
 ]
 examples = [
     "matplotlib>=3.10.8",
+]
+viz = [
+    "matplotlib>=3.7",
 ]
 all = [
     "ruff==0.4.1",
@@ -59,6 +63,7 @@ all = [
     "pytest-cov>=6.2.1",
     "mkdocs>=1.6.1",
     "mkdocs-api-autonav>=0.3.0",
+    "mkdocs-glightbox>=0.4.0",
     "mkdocs-material>=9.6.16",
     "mkdocstrings[python]>=0.30.0",
     "torch>=2.2.2",
@@ -75,8 +80,12 @@ dev = [
 docs = [
     "mkdocs>=1.6.1",
     "mkdocs-api-autonav>=0.3.0",
+    "mkdocs-glightbox>=0.4.0",
     "mkdocs-material>=9.6.16",
     "mkdocstrings[python]>=0.30.0",
+]
+viz = [
+    "matplotlib>=3.7",
 ]
 
 [project.urls]

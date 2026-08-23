@@ -43,6 +43,20 @@ body[data-md-color-scheme="slate"][data-md-color-primary="pink"] {
 }
 
 
+/* Diagrams are exported with transparent backgrounds, so their dark strokes and
+   text vanish in dark (slate) mode. Give them a light backdrop in both modes. */
+.md-typeset img.diagram {
+  background-color: #fff;
+  padding: 0.5rem;
+  border-radius: 0.2rem;
+}
+
+/* ...and the same when opened in the glightbox lightbox (dark overlay). */
+.glightbox-container .gslide-image img[src$=".svg"] {
+  background-color: #fff;
+}
+
+
 /* Style the buttons */
 .btn {
   border: none;
