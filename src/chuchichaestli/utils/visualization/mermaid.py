@@ -431,6 +431,13 @@ class MermaidDiagram:
             else:
                 self._edges.append((src, tgt, None))
 
+    def _reload_components(self) -> None:
+        """Discard the derived nodes/edges/subgraphs and rebuild them."""
+        self._nodes = []
+        self._edges = []
+        self._subgraphs = defaultdict(list)
+        self._aggregate_components()
+
     def nodes(self, _reload: bool = False) -> list[dict[str, Any]]:
         """Get nodes from the model graph.
 
@@ -438,10 +445,7 @@ class MermaidDiagram:
             _reload: If `True`, reload the nodes from the model graph.
         """
         if _reload or not self._nodes:
-            self._nodes = []
-            self._edges = []
-            self._subgraphs = defaultdict(list)
-            self._aggregate_components()
+            self._reload_components()
         return self._nodes
 
     def edges(self, _reload: bool = False) -> list[tuple[str, str, str | None]]:
@@ -451,10 +455,7 @@ class MermaidDiagram:
             _reload: If `True`, reload the nodes from the model graph.
         """
         if _reload or not self._edges:
-            self._nodes = []
-            self._edges = []
-            self._subgraphs = defaultdict(list)
-            self._aggregate_components()
+            self._reload_components()
         return self._edges
 
     def subgraphs(self, _reload: bool = False) -> dict[str, list[str]]:
@@ -464,10 +465,7 @@ class MermaidDiagram:
             _reload: If `True`, reload the nodes from the model graph.
         """
         if _reload or not self._subgraphs:
-            self._nodes = []
-            self._edges = []
-            self._subgraphs = defaultdict(list)
-            self._aggregate_components()
+            self._reload_components()
         return dict(self._subgraphs)
 
     def _ir_type(self, node: IRNode) -> str:
@@ -479,8 +477,16 @@ class MermaidDiagram:
         return self.type_map.get(label, label)
 
     def set_type_name(self, default_type: str, type_renamed: str):
-        """Change default labelling."""
+        """Change default labelling.
+
+        Args:
+            default_type: Type label to rename.
+            type_renamed: Name to use in its place.
+        """
         self.type_map[default_type] = type_renamed
+        # Node types are materialized on construction; re-derive them so the
+        # new name reaches an already-built diagram.
+        self._reload_components()
 
     def _sanitize_mermaid_id(
         self,

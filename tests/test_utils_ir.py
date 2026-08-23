@@ -362,3 +362,21 @@ def test_mermaid_label_newlines_become_line_breaks():
     text = mermaid_diagram(_vae(VAE), input_shape=(1, 3, 32, 32), max_depth=3).generate()
     assert "Reparameterize</br>(" in text
     assert all(line.count('"') % 2 == 0 for line in text.splitlines())
+
+
+def test_mermaid_set_type_name_rebuilds_nodes():
+    """Renaming a type after construction reaches the already-built nodes."""
+    diagram = mermaid_diagram(_unet(), input_shape=_shape(2), max_depth=4)
+    assert "Conv" in {node["type"] for node in diagram.nodes()}
+    diagram.set_type_name("Conv", "Faltung")
+    types = {node["type"] for node in diagram.nodes()}
+    assert "Faltung" in types and "Conv" not in types
+
+
+def test_mermaid_reload_does_not_duplicate_subgraphs():
+    """Repeated reloads rebuild the groupings instead of appending to them."""
+    diagram = mermaid_diagram(_unet(), input_shape=_shape(2), max_depth=2)
+    diagram.nodes(_reload=True)
+    diagram.nodes(_reload=True)
+    for members in diagram.subgraphs().values():
+        assert len(members) == len(set(members))
