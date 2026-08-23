@@ -609,7 +609,7 @@ class TestZipNumpyDataset:
     def test_from_keys_empty_raises(self, sample_npz_file):
         """from_keys with no keys returns an empty ZipNumpyDataset."""
         with pytest.raises(ValueError, match="At least one dataset"):
-            ds = ZipNumpyDataset.from_keys(sample_npz_file)
+            ZipNumpyDataset.from_keys(sample_npz_file)
 
     def test_from_paths_empty_raises(self):
         """from_paths with no paths raises ValueError."""
