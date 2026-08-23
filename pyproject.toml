@@ -50,9 +50,6 @@ docs = [
     "mkdocs-material>=9.6.16",
     "mkdocstrings[python]>=0.30.0",
 ]
-examples = [
-    "matplotlib>=3.10.8",
-]
 viz = [
     "matplotlib>=3.7",
 ]
@@ -67,7 +64,7 @@ all = [
     "mkdocs-material>=9.6.16",
     "mkdocstrings[python]>=0.30.0",
     "torch>=2.2.2",
-    "matplotlib>=3.10.8",
+    "matplotlib>=3.7",
 ]
 
 [dependency-groups]
