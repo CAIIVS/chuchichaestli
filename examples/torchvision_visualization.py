@@ -4,13 +4,13 @@
 """Visualize torchvision pretrained models (a ResNet and a ViT).
 
 External models have no dedicated adapter, so the generic fallback builds the
-IR purely from module nesting: the diagrams are denser and less structured
-than the chuchichaestli models, but summaries and figures still render -- a
-demonstration of graceful degradation on arbitrary PyTorch models.
+IR from data tracing: the diagrams are denser and less structured
+than the chuchichaestli models, but summaries and figures still render.
 
-torchvision is not a chuchichaestli dependency; run this example with it added:
-
-    uv run --with torchvision --extra viz python examples/torchvision_visualization.py
+Usage (requires `chuchichaestli[viz]`):
+```python
+    [uv run --extra viz] python examples/torchvision_visualization.py
+```
 """
 
 from pathlib import Path

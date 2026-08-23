@@ -6,6 +6,11 @@
 The matplotlib backend renders the high-level components, blocks, or layers,
 including the latent space rendered as an hourglass node.
 The mermaid backend generates a Mermaid file to be visualized in the browser.
+
+Usage (requires `chuchichaestli[viz]`):
+```python
+    [uv run --extra viz] python examples/vae_visualization.py
+```
 """
 
 from pathlib import Path

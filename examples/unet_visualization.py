@@ -6,6 +6,11 @@
 The matplotlib backend renders the high-level components, blocks, or layers,
 including shortcuts within the blocks and skip connections between U-Net levels.
 The mermaid backend generates a Mermaid file to be visualized in the browser.
+
+Usage (requires `chuchichaestli[viz]`):
+```python
+    [uv run --extra viz] python examples/unet_visualization.py
+```
 """
 
 # Build a simple U-Net with Attention blocks near the bottleneck

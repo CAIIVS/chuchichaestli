@@ -6,6 +6,11 @@
 The matplotlib backend renders the diagram as sequential node chain for higher
 levels, and would collapse to a single component graph for levels lower than 2.
 The mermaid backend generates a Mermaid file to be visualized in the browser.
+
+Usage (requires `chuchichaestli[viz]`):
+```python
+    [uv run --extra viz] python examples/gan_visualization.py
+```
 """
 
 from pathlib import Path
