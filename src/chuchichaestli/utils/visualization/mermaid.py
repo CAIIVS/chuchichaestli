@@ -298,6 +298,8 @@ class MermaidDiagram:
         self._subgraphs = defaultdict(list)
         self._group_labels: dict[str, str] = {}
         self._group_paths: dict[str, list[str]] = {}
+        self._ids: dict[tuple[str, int | None], str] = {}
+        self._id_names: set[str] = set()
         if auto:
             self.extract_model_graph()
             self._aggregate_components()
@@ -388,6 +390,8 @@ class MermaidDiagram:
             return
         self._group_labels = {}
         self._group_paths = {}
+        self._ids = {}
+        self._id_names = set()
         # `None` renders the full model: the deepest node depth keeps every node.
         cutoff = (
             self.max_depth
@@ -493,13 +497,33 @@ class MermaidDiagram:
         name: str,
         layer_id: int | None = None,
     ) -> str:
-        """Convert a module name to a valid mermaid ID."""
+        """Convert a module name to a unique, valid mermaid ID.
+
+        Sanitizing folds `/`, `.` and `-` onto `_`, so distinct paths such as
+        `blocks/conv-1` and `blocks/conv_1` would claim the same identifier and
+        mermaid would merge the two nodes. A counter keeps them apart, and the
+        assignment is memoized so an id stays stable across `generate` calls.
+
+        Args:
+            name: Source name (an IR node id or a subgraph key).
+            layer_id: Module id to append, disambiguating shared names.
+        """
+        key = (name, layer_id)
+        if key in self._ids:
+            return self._ids[key]
         sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", name)
         if sanitized and not sanitized[0].isalpha():
             sanitized = "node_" + sanitized
         if layer_id is not None:
             sanitized = f"{sanitized}_{layer_id}"
-        return sanitized or "node"
+        sanitized = sanitized or "node"
+        unique, suffix = sanitized, 1
+        while unique in self._id_names:
+            suffix += 1
+            unique = f"{sanitized}_{suffix}"
+        self._id_names.add(unique)
+        self._ids[key] = unique
+        return unique
 
     def _ir_label(self, node: IRNode) -> str:
         """Node label with optional parameter count and output shape."""

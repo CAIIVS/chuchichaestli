@@ -380,3 +380,37 @@ def test_mermaid_reload_does_not_duplicate_subgraphs():
     diagram.nodes(_reload=True)
     for members in diagram.subgraphs().values():
         assert len(members) == len(set(members))
+
+
+class _DashedKeys(nn.Module):
+    """Model whose module names differ only in a separator character."""
+
+    def __init__(self):
+        super().__init__()
+        self.blocks = nn.ModuleDict(
+            {
+                "conv-1": nn.Conv2d(1, 4, 3, padding=1),
+                "conv_1": nn.Conv2d(4, 8, 3, padding=1),
+            }
+        )
+
+    def forward(self, x):
+        """Run both convolutions in sequence."""
+        return self.blocks["conv_1"](self.blocks["conv-1"](x))
+
+
+def test_mermaid_ids_stay_unique_across_separators():
+    """`conv-1` and `conv_1` sanitize to the same name but keep distinct ids."""
+    diagram = mermaid_diagram(_DashedKeys(), input_shape=(1, 1, 16, 16))
+    ids = [node["id"] for node in diagram.nodes()]
+    assert len(set(ids)) == len(ids)
+    # The edge between them must not collapse into a self-loop.
+    assert all(source != target for source, target, _ in diagram.edges())
+
+
+def test_mermaid_ids_are_stable_across_reloads():
+    """A node keeps its id when the derived components are rebuilt."""
+    diagram = mermaid_diagram(_DashedKeys(), input_shape=(1, 1, 16, 16))
+    before = str(diagram)
+    diagram.nodes(_reload=True)
+    assert str(diagram) == before
