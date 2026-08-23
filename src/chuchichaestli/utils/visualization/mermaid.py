@@ -725,7 +725,7 @@ class MermaidDiagram:
             filepath.parent.mkdir(parents=True, exist_ok=True)
         _format = filepath.suffix[1:]
         if _format == "mmd":
-            with filepath.open("w") as f:
+            with filepath.open("w", encoding="utf-8") as f:
                 f.write(diagram)
         elif _format in ("svg", "png", "pdf"):
             if not self.cli_available():

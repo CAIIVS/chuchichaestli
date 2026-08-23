@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Smoke tests for the visualization renderers."""
 
+import os
 import subprocess
 import sys
 import pytest
@@ -175,3 +176,27 @@ def test_multi_zoom_draws_multiple_insets():
     ).render()
     n_insets = sum(len(ax.child_axes) for ax in fig.axes)
     assert n_insets >= 2
+
+
+def test_mermaid_mmd_export_is_utf8(tmp_path):
+    """A `.mmd` export writes UTF-8 even where the locale is ASCII-only."""
+    out = tmp_path / "vae.mmd"
+    code = (
+        "from chuchichaestli.models.autoencoder.vae import VAE;"
+        "from chuchichaestli.utils.visualization import mermaid_diagram;"
+        "m = VAE(dimensions=2, in_channels=3, n_channels=16, latent_dim=4,"
+        " out_channels=3, down_block_types=('AutoencoderDownBlock',),"
+        " up_block_types=('AutoencoderUpBlock',), block_out_channel_mults=(1,),"
+        " down_layers_per_block=1, up_layers_per_block=1,"
+        " encoder_mid_block_types=('AutoencoderMidBlock',),"
+        " decoder_mid_block_types=('AutoencoderMidBlock',));"
+        "mermaid_diagram(m, input_shape=(1, 3, 32, 32), max_depth=3)"
+        f".save(r'{out}')"
+    )
+    env = {**os.environ, "LC_ALL": "C", "LANG": "C", "PYTHONUTF8": "0"}
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env
+    )
+    assert result.returncode == 0, result.stderr
+    # The VAE's reparameterization label carries non-ASCII glyphs.
+    assert "\u03bc" in out.read_text(encoding="utf-8")
