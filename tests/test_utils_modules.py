@@ -79,3 +79,42 @@ def test_trace_keeps_training_only_branches():
     model.train()
     info = info_forward_pass(model, input_shape=(1, 1, 16, 16), use_cache=False)
     assert any(i.class_name == "Dropout" for i in info)
+
+
+class _WideningModel(nn.Module):
+    """Model whose output shape depends on a forward keyword argument."""
+
+    def __init__(self):
+        super().__init__()
+        self.narrow = nn.Linear(4, 4)
+        self.wide = nn.Linear(4, 8)
+
+    def forward(self, x, *, wide=False):
+        """Project through the wide or the narrow branch."""
+        return self.wide(x) if wide else self.narrow(x)
+
+
+def _root_output(info):
+    """Output size recorded for the traced root module."""
+    return [str(i.output_size) for i in info if i.class_name == "_WideningModel"]
+
+
+def test_cache_key_separates_shape_affecting_kwargs():
+    """A call differing only in forward kwargs is not served from the cache."""
+    model = _WideningModel()
+    narrow = info_forward_pass(model, input_shape=(1, 4), use_cache=True, wide=False)
+    wide = info_forward_pass(model, input_shape=(1, 4), use_cache=True, wide=True)
+    assert _root_output(narrow) == ["[1, 4]"]
+    assert _root_output(wide) == ["[1, 8]"]
+
+
+def test_cache_key_separates_input_dtypes():
+    """Concrete inputs of equal shape but different dtype get separate entries."""
+    model = _EmbeddingModel()
+    long_info = info_forward_pass(
+        model, input_data=torch.zeros(1, 3, dtype=torch.long), use_cache=True
+    )
+    int_info = info_forward_pass(
+        model, input_data=torch.zeros(1, 3, dtype=torch.int32), use_cache=True
+    )
+    assert long_info is not int_info

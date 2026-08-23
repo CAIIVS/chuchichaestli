@@ -482,6 +482,21 @@ def _model_device(model: nn.Module) -> torch.device:
         return torch.device("cpu")
 
 
+def _tensor_signature(value: Any) -> str:
+    """Signature of a trace-affecting argument, by tensor shape and dtype.
+
+    Args:
+        value: Tensor, container of tensors, or any other argument.
+    """
+    return repr(
+        map_nested(
+            value,
+            action_fn=lambda t: (tuple(t.shape), str(t.dtype)),
+            aggregate_fn=type,
+        )
+    )
+
+
 def _trace_cache_key(
     model: nn.Module,
     input_data: IO_TENSORS_TYPES | None,
@@ -491,6 +506,7 @@ def _trace_cache_key(
     batch_dim: int | None,
     device: torch.device | None,
     mode: MODULE_MODES,
+    kwargs: dict[str, Any],
 ) -> tuple:
     """Cache key covering model identity and every trace-affecting input.
 
@@ -503,24 +519,22 @@ def _trace_cache_key(
         batch_dim: Batch dimension.
         device: Device the trace runs on.
         mode: Model mode used for the trace.
+        kwargs: Extra keyword arguments forwarded to the model.
     """
     if input_data is not None:
-        shape_sig = repr(
-            map_nested(
-                input_data, action_fn=lambda d: tuple(d.shape), aggregate_fn=type
-            )
-        )
+        input_sig = _tensor_signature(input_data)
     else:
-        shape_sig = repr(input_shape)
+        input_sig = repr(input_shape)
     return (
         id(model),
         model.__class__.__name__,
-        shape_sig,
+        input_sig,
         size,
         str(input_dtype),
         batch_dim,
         str(device),
         mode,
+        _tensor_signature(dict(sorted(kwargs.items()))),
     )
 
 
@@ -556,7 +570,15 @@ def info_forward_pass(
     if device is None:
         device = _model_device(model)
     cache_key = _trace_cache_key(
-        model, input_data, input_shape, size, input_dtype, batch_dim, device, mode
+        model,
+        input_data,
+        input_shape,
+        size,
+        input_dtype,
+        batch_dim,
+        device,
+        mode,
+        kwargs,
     )
     if use_cache and cache_key in _cached_info_forward_pass:
         return _cached_info_forward_pass[cache_key]
