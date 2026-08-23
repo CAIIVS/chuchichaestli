@@ -612,6 +612,14 @@ def info_forward_pass(
     # Capture every submodule's flag independently; `model.train(...)` is
     # recursive and would clobber intentionally mixed train/eval submodules.
     original_modes = {m: m.training for m in model.modules()}
+    # A synthetic pass must not leave the caller's model changed;
+    # snapshot the buffers it would mutate and restore them after.
+    trains = mode == "train" or (mode == "same" and any(original_modes.values()))
+    original_buffers = (
+        {buf: buf.detach().clone() for _, buf in model.named_buffers()}
+        if trains
+        else {}
+    )
     try:
         if mode == "train":
             model.train()
@@ -642,6 +650,9 @@ def info_forward_pass(
                 hook.remove()
         for module, was_training in original_modes.items():
             module.training = was_training
+        with torch.no_grad():
+            for buf, original in original_buffers.items():
+                buf.copy_(original)
 
     # deal with skipped container submodules such as ModuleList, Sequential, etc.
     _add_missing_container_layers(info_list)

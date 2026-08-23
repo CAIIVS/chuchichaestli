@@ -327,3 +327,31 @@ def test_mermaid_nested_group_by():
     ).generate()
     assert 'subgraph Encoder["Encoder"]' in text
     assert text.count("subgraph") > 3
+
+
+class _BatchNormModel(nn.Module):
+    """Minimal model carrying BatchNorm running statistics."""
+
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(1, 4, 3, padding=1)
+        self.norm = nn.BatchNorm2d(4)
+        self.drop = nn.Dropout(0.5)
+
+    def forward(self, x):
+        """Convolve, normalize, and drop only while training."""
+        x = self.norm(self.conv(x))
+        if self.training:
+            x = self.drop(x)
+        return x
+
+
+def test_build_ir_does_not_mutate_running_stats():
+    """Building the IR of a training-mode model leaves its buffers untouched."""
+    model = _BatchNormModel()
+    model.train()
+    running_mean = model.norm.running_mean.clone()
+    build_ir(model, input_shape=(1, 1, 16, 16))
+    assert torch.equal(running_mean, model.norm.running_mean)
+    assert model.norm.num_batches_tracked.item() == 0
+    assert model.training
