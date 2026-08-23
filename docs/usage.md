@@ -236,38 +236,28 @@ lightweight and avoids package conflicts during installs.
 
 
 #### Example
-This example demonstrates how to use a whole battery of metrics.  Each
-metric has a
-[`.update`][chuchichaestli.metrics.base.EvalMetric.update] method
-which registers samples and adds them to the aggregate
-state. Typically, this method is used while iterating through the
-evaluation set to build aggregate statistics for the entire evaluation
-set. The [`.compute`][chuchichaestli.metrics.mse.MSE.compute] method
-computes the metric value for the current aggregate state. This method
-is typically used after iterating through an evaluation set to trigger
-the actual computation (reduction).
+All metrics share the same interface:
+[`.update`][chuchichaestli.metrics.base.EvalMetric.update] registers a
+batch into the aggregate state while iterating over the evaluation set,
+and [`.compute`][chuchichaestli.metrics.mse.MSE.compute] reduces that
+aggregate to a value once the loop is done.
+
+A toy stand-in for a model and its evaluation set:
 
 ```python
-from chuchichaestli.metrics import MSE, PSNR, SSIM, FID
+--8<-- "examples/metrics_evaluation.py:setup"
+```
 
-batch_size, num_channels, width, height = 4, 3, 512, 512
-sample_images = torch.rand(batch_size, num_channels, width, height)
+```python
+--8<-- "examples/metrics_evaluation.py:battery"
+```
 
-metrics = [
-	MSE(),
-	PSNR(min_value=0, max_value=1), 
-	SSIM(min_value=0, max_value=1, kernel_size=7, kernel_type="gaussian"),
-	FID()
-]
+Note the argument order: `update` takes the observed data first, the
+prediction second. [FID][chuchichaestli.metrics.FID] shares the
+interface but compares feature distributions instead of pixels, keeping
+real and fake statistics apart; its default InceptionV3 extractor is
+downloaded on first use.
 
-model.eval()
-with torch.no_grad():
-	fake_images = model(sample_images)
-	evaluations = []
-	for metric in metrics:
-		metric.update(fake_images, sample_images)
-		val = metric.compute()
-		evaluations.append(val)
-		metric.reset()
-print(evaluations)
+```python
+--8<-- "examples/metrics_evaluation.py:fid"
 ```
