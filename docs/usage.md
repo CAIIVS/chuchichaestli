@@ -17,51 +17,116 @@ loss functions, and evaluation metrics.
 
 
 ### Datasets
-The [data][chuchichaestli.data] module provides a
-[HDF5Dataset][chuchichaestli.data.HDF5Dataset] which efficiently
-caches PyTorch tensors in shared memory. With sufficient RAM,
-subsequent training epochs can be considerably accelerated.
+The [data][chuchichaestli.data] module provides dataset classes for
+common file types: [HDF5Dataset][chuchichaestli.data.HDF5Dataset],
+[ImageDataset][chuchichaestli.data.ImageDataset],
+[NumpyDataset][chuchichaestli.data.NumpyDataset], and
+[SafetensorsDataset][chuchichaestli.data.SafetensorsDataset].
+Each takes a single file or a wildcard pattern spanning an entire
+directory tree, and presents the whole collection as one indexable
+dataset. Accessed samples are cached as PyTorch tensors in shared memory
+up to a budget you set, with anything beyond it read from disk. With
+sufficient RAM, subsequent training epochs can be considerably
+accelerated.
 
+For paired data, each class has a `Zip*` counterpart
+([ZipHDF5Dataset][chuchichaestli.data.ZipHDF5Dataset],
+[ZipImageDataset][chuchichaestli.data.ZipImageDataset],
+[ZipNumpyDataset][chuchichaestli.data.ZipNumpyDataset], and
+[ZipSafetensorsDataset][chuchichaestli.data.ZipSafetensorsDataset]).
+Much like Python's built-in `zip`, these read several sources in
+lockstep and yield one sample per index as a tuple or dict, which is the
+usual setup for inputs and their labels or masks. Use
+`ZipHDF5Dataset.from_groups(path, "image/*", "mask/*")` to pair groups
+within the same file(s), or [ZipDataset][chuchichaestli.data.ZipDataset]
+directly to combine datasets you have already built.
 
 #### Example
 
 Say, you have several HDF5 files with image datasets stored as
 ```console
 data
-└── images
-    ├── dodos
-    │   └── images.h5
-    ├── dragons
-    │   └── images.h5
-    └── wolpertinger
-        └── images.h5
+└── mnist_h5_tests
+    ├── test_scenario_1
+    │   └── mnist_test_1.h5
+    ├── test_scenario_2
+    │   └── mnist_test_2.h5
+    ⋮
+    └── test_scenario_13
+        ├── test
+        │   ├── mnist_test_test_00.h5
+        │   └── mnist_test_test_01.h5
+        ├── train
+        │   ├── mnist_test_train_00.h5
+        │   └── mnist_test_train_01.h5
+        └── val
+            ├── mnist_test_val_00.h5
+            └── mnist_test_val_01.h5
 ```
 
-then the following creates a dataset with 8 GB of memory allocation to
-cache image tensors read from the dataset
+then the following creates a dataset with 16 MiB of shared memory allocation to
+cache image tensors read from the H5 MNIST dataset (test scenario 13)
 
 ```python
-from chuchichaestli.data import HDF5Dataset
-
-dataset = HDF5Dataset("data/images/**/*.h5", cache="8G")
-dataset.info()
-sample_image = dataset[0]
+--8<-- "examples/hdf5_dataset.py:build"
 ```
+
+[ZipHDF5Dataset][chuchichaestli.data.ZipHDF5Dataset] reads multiple sample
+groups in parallel
+```python
+--8<-- "examples/zip_hdf5_dataset.py:build"
+```
+
+#### Procedural toy datasets
+
+For quick experiments and sanity checks, the
+[ProceduralDataset][chuchichaestli.data.ProceduralDataset] subclasses
+synthesize their samples on the fly instead of reading them from disk:
+[HalfMoonsDataset][chuchichaestli.data.HalfMoonsDataset],
+[SpiralsDataset][chuchichaestli.data.SpiralsDataset],
+[CheckerboardDataset][chuchichaestli.data.CheckerboardDataset],
+[RingsDataset][chuchichaestli.data.RingsDataset],
+[ConcentricSpheresDataset][chuchichaestli.data.ConcentricSpheresDataset],
+[GaussiansDataset][chuchichaestli.data.GaussiansDataset], and
+[SwissRollDataset][chuchichaestli.data.SwissRollDataset]. Each takes a
+sample count, a feature dimensionality, a `noise` level, and a `seed`
+for reproducibility, generating in pure PyTorch into the same
+shared-memory cache as the file-backed datasets.
+
+```python
+--8<-- "examples/procedural_datasets.py:build"
+```
+
+The shapes are not restricted to the plane; raise `dim` to embed them in
+a volume instead.
+
+```python
+--8<-- "examples/procedural_datasets.py:swissroll"
+```
+
+Finally, you can also wrap your own generator function with
+[generate_procedural_dataset][chuchichaestli.data.generate_procedural_dataset].
+
+Running `examples/procedural_datasets.py` renders all preset generators:
+
+![Scatter plots of six procedural toy datasets: two interleaving half
+moons, two interlocking spiral arms, two concentric rings, and six
+circularly arranged Gaussian blobs in 2D, plus a Swiss roll sheet and two
+concentric spheres in 3D](assets/procedural_datasets.png)
 
 
 ### Models
 The [models][chuchichaestli.models] module provides various neural
 network models ready to be instantiated such as
 [UNet][chuchichaestli.models.unet.UNet],
-[models.autoencoder][chuchichaestli.models.autoencoder], or built with 
-the components implemented in [diffusion][chuchichaestli.diffusion],
+[VAE][chuchichaestli.models.autoencoder.VAE], or built with the
+components implemented in [diffusion][chuchichaestli.diffusion],
 [models.attention][chuchichaestli.models.attention],
 [models.adversarial][chuchichaestli.models.adversarial], and more.
 
 These models are **not pre-trained**, meaning for proper functioning
 they have to be trained using appropriate data and objectives (loss
 functions).
-
 
 #### Example
 The U-Net architecture consists of an encoder-decoder structure with
@@ -93,6 +158,7 @@ in the lowest layer (the latent)
 --8<-- "examples/vae_visualization.py:vae"
 ```
 
+
 ### Visualization
 
 The [visualization][chuchichaestli.utils.visualization] utilities turn a model
@@ -109,7 +175,6 @@ Two entry points consume the graph:
   — vector figures (PDF/SVG/PNG); requires the optional `viz` extra.
 - [`mermaid_diagram`][chuchichaestli.utils.visualization.mermaid_diagram] —
   quick markdown/web diagrams.
-
 
 #### Matplotlib figures
 
@@ -143,7 +208,6 @@ inset expands an encoder block into its layers:
 ![VAE block-level diagram with the latent rendered as an hourglass node and an
 exemplary-zoom inset expanding an encoder block into its layers](assets/vae_zoom.svg){ .diagram }
 
-
 #### Mermaid diagrams
 
 The Mermaid backend compiles a `.mmd` file that can be imported into a mermaid
@@ -172,38 +236,28 @@ lightweight and avoids package conflicts during installs.
 
 
 #### Example
-This example demonstrates how to use a whole battery of metrics.  Each
-metric has a
-[`.update`][chuchichaestli.metrics.base.EvalMetric.update] method
-which registers samples and adds them to the aggregate
-state. Typically, this method is used while iterating through the
-evaluation set to build aggregate statistics for the entire evaluation
-set. The [`.compute`][chuchichaestli.metrics.mse.MSE.compute] method
-computes the metric value for the current aggregate state. This method
-is typically used after iterating through an evaluation set to trigger
-the actual computation (reduction).
+All metrics share the same interface:
+[`.update`][chuchichaestli.metrics.base.EvalMetric.update] registers a
+batch into the aggregate state while iterating over the evaluation set,
+and [`.compute`][chuchichaestli.metrics.mse.MSE.compute] reduces that
+aggregate to a value once the loop is done.
+
+A toy stand-in for a model and its evaluation set:
 
 ```python
-from chuchichaestli.metrics import MSE, PSNR, SSIM, FID
+--8<-- "examples/metrics_evaluation.py:setup"
+```
 
-batch_size, num_channels, width, height = 4, 3, 512, 512
-sample_images = torch.rand(batch_size, num_channels, width, height)
+```python
+--8<-- "examples/metrics_evaluation.py:battery"
+```
 
-metrics = [
-	MSE(),
-	PSNR(min_value=0, max_value=1), 
-	SSIM(min_value=0, max_value=1, kernel_size=7, kernel_type="gaussian"),
-	FID()
-]
+Note the argument order: `update` takes the observed data first, the
+prediction second. [FID][chuchichaestli.metrics.FID] shares the
+interface but compares feature distributions instead of pixels, keeping
+real and fake statistics apart; its default InceptionV3 extractor is
+downloaded on first use.
 
-model.eval()
-with torch.no_grad():
-	fake_images = model(sample_images)
-	evaluations = []
-	for metric in metrics:
-		metric.update(fake_images, sample_images)
-		val = metric.compute()
-		evaluations.append(val)
-		metric.reset()
-print(evaluations)
+```python
+--8<-- "examples/metrics_evaluation.py:fid"
 ```

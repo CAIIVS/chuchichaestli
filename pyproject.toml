@@ -25,7 +25,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Image Processing",
@@ -33,12 +32,14 @@ classifiers = [
 dependencies = [
     "numpy>=1.26",
     "torch>=2.2.2",
-    "torchvision>=0.20.1",  
+    "torchvision>=0.20.1",
     "h5py>=3.12.1",
+    "safetensors[torch]>=0.7.0",
 ]
+
 [project.optional-dependencies]
 dev = [
-    "ruff==0.4.1",
+    "ruff==0.15.14",
     "pytest==8.1.1",
     "pytest-cov>=6.2.1",
 ]
@@ -52,10 +53,23 @@ docs = [
 viz = [
     "matplotlib>=3.7",
 ]
+all = [
+    "ruff==0.15.14",
+    "pre-commit==3.7.0",
+    "pytest==8.1.1",
+    "pytest-cov>=6.2.1",
+    "mkdocs>=1.6.1",
+    "mkdocs-api-autonav>=0.3.0",
+    "mkdocs-glightbox>=0.4.0",
+    "mkdocs-material>=9.6.16",
+    "mkdocstrings[python]>=0.30.0",
+    "torch>=2.2.2",
+    "matplotlib>=3.7",
+]
 
 [dependency-groups]
 dev = [
-    "ruff==0.4.1",
+    "ruff==0.15.14",
     "pre-commit==3.7.0",
     "pytest==8.1.1",
     "pytest-cov>=6.2.1",
@@ -125,6 +139,9 @@ extend-select = [
     "UP", # pyupgrade
     "D",  # pydocstyle
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/**" = ["E402", "F811"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

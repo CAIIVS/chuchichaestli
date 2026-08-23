@@ -77,13 +77,14 @@ def _require_mpl() -> SimpleNamespace:
     """Import matplotlib lazily with a helpful error if it is missing."""
     try:
         import matplotlib
-        import matplotlib.pyplot as plt
+        from matplotlib.figure import Figure
         from matplotlib.patches import (
             Polygon,
             FancyBboxPatch,
             FancyArrowPatch,
             ConnectionPatch,
             Patch,
+            Rectangle,
         )
     except ModuleNotFoundError as exc:
         raise ImportError(
@@ -92,12 +93,13 @@ def _require_mpl() -> SimpleNamespace:
         ) from exc
     return SimpleNamespace(
         matplotlib=matplotlib,
-        plt=plt,
+        Figure=Figure,
         Polygon=Polygon,
         FancyBboxPatch=FancyBboxPatch,
         FancyArrowPatch=FancyArrowPatch,
         ConnectionPatch=ConnectionPatch,
         Patch=Patch,
+        Rectangle=Rectangle,
     )
 
 
@@ -252,7 +254,8 @@ class MatplotlibRenderer(Renderer):
             lo, hi = sorted((order[e.source_id], order[e.target_id]))
             self._spanned.update(drawables[k].id for k in range(lo + 1, hi))
 
-        fig, ax = mpl.plt.subplots(figsize=(figw, figh))
+        fig = mpl.Figure(figsize=(figw, figh))
+        ax = fig.subplots()
         boxes = self._layout(mpl, ax, drawables)
         max_top = self._draw_edges(mpl, ax, view, boxes)
         for zoom in self.zooms:
@@ -693,7 +696,7 @@ class MatplotlibRenderer(Renderer):
         if anchor is not None:
             b = anchor
             ax.add_patch(
-                mpl.plt.Rectangle(
+                mpl.Rectangle(
                     (b[0], -b[3] / 2), b[1] - b[0], b[3], fill=False,
                     edgecolor=get_color("golden"), linewidth=1.4, linestyle="dotted",
                     zorder=6,
@@ -801,7 +804,6 @@ class MatplotlibRenderer(Renderer):
             dpi: Target resolution.
             aspect: Target `w/h` ratio, or None for the content size.
         """
-        mpl = _require_mpl()
         if aspect is not None:
             figw, figh = artifact.get_size_inches()
             if aspect > figw / figh:
@@ -818,4 +820,3 @@ class MatplotlibRenderer(Renderer):
             bbox_inches="tight" if aspect is None else None,
             transparent=True,
         )
-        mpl.plt.close(artifact)
