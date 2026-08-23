@@ -5,7 +5,6 @@
 
 from pathlib import Path
 import fnmatch
-import numpy as np
 import torch
 from safetensors import safe_open
 from collections.abc import Sequence

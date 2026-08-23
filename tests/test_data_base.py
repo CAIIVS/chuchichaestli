@@ -9,7 +9,6 @@ import torch
 import numpy as np
 from pathlib import Path
 import tempfile
-from unittest.mock import Mock, patch, MagicMock
 from chuchichaestli.data.base import FileDataset, CachingDataset
 from chuchichaestli.data.cache import nbytes
 

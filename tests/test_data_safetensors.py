@@ -6,7 +6,6 @@
 from pathlib import Path
 import tempfile
 import torch
-import warnings
 import pytest
 from safetensors import safe_open
 from safetensors.torch import save_file as st_save
