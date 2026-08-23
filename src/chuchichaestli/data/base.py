@@ -239,7 +239,7 @@ class FileDataset(Dataset, ABC):
             return ()
         if self.new_axis:
             return (self.n_files, *self._mmap[0].shape)
-        total_samples = sum(m.shape[0] for m in self._mmap)
+        total_samples = sum(len(m) for m in self._mmap)
         sample_shape = self._mmap[0].shape[1:]
         return (total_samples, *sample_shape)
 
@@ -284,7 +284,8 @@ class FileDataset(Dataset, ABC):
         """Build (cumulative) index for mapping global index to (file_index, local_index)."""
         self._file_offsets = [0]
         for m in self._mmap:
-            self._file_offsets.append(self._file_offsets[-1] + (1 if self.new_axis else m.shape[0]))
+            n_samples = 1 if self.new_axis else len(m)
+            self._file_offsets.append(self._file_offsets[-1] + n_samples)
 
     def _map_index(self, index: int) -> tuple[int, int]:
         """Map global index to (file_index, local_index).
