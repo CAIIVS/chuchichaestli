@@ -200,26 +200,26 @@ class SafetensorsDataset(CachingDataset):
             A :class:`_SafetensorsView` representing the concatenation of the
             selected tensors along axis 0.
         """
-        # Peek shapes and dtypes via a zero-length slice (no full materialisation)
-        slices = [handle.get_slice(k)[:] for k in keys]
-        shapes = [t.shape for t in slices]
+        # Peek shapes from the slice metadata and dtypes from a zero-length
+        # slice; neither materialises any tensor data.
+        slices = [handle.get_slice(k) for k in keys]
+        shapes = [tuple(sl.get_shape()) for sl in slices]
+        dtypes = [sl[0:0].dtype for sl in slices]
         # Validate that all selected tensors share the same sample shape and type
         ref_shape: tuple[int, ...] = shapes[0][1:]
-        ref_dtype: torch.dtype = slices[0].dtype
-        for i, (key, shape, tensor) in enumerate(
-            zip(keys[1:], shapes[1:], slices[1:]), start=1
-        ):
+        ref_dtype: torch.dtype = dtypes[0]
+        for key, shape, dtype in zip(keys[1:], shapes[1:], dtypes[1:]):
             if shape[1:] != ref_shape:
                 raise ValueError(
                     f"Tensor shapes are incompatible for concatenation in '{source}': "
                     f"key '{keys[0]}' has sample shape {ref_shape}, "
                     f"key '{key}' has sample shape {shape[1:]}"
                 )
-            if tensor.dtype != ref_dtype:
+            if dtype != ref_dtype:
                 raise ValueError(
                     f"Tensor dtypes are incompatible for concatenation in '{source}': "
                     f"key '{keys[0]}' has dtype {ref_dtype}, "
-                    f"key '{key}' has dtype {tensor.dtype}"
+                    f"key '{key}' has dtype {dtype}"
                 )
         key_lengths = [s[0] for s in shapes]
         return SafetensorsView(handle, keys, key_lengths, ref_shape, ref_dtype)
