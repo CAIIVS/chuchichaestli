@@ -417,7 +417,9 @@ class ZScaleInterval:
             good = ~badpix
             slope, intercept = _lstsq_line(idx[good], samples[good])
             resid = samples - (slope * idx + intercept)
-            threshold = self.krej * resid[good].std()
+            # population std (ddof=0), as in IRAF/`astropy`; torch would
+            # otherwise default to the sample std (correction=1)
+            threshold = self.krej * resid[good].std(correction=0)
             badpix = _grow(badpix | (resid.abs() > threshold), ngrow)
             last_ngoodpix, ngoodpix = ngoodpix, int((~badpix).sum())
 
