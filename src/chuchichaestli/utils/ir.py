@@ -6,7 +6,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
-from collections.abc import Iterator, Sequence
+from collections.abc import Container, Iterator, Sequence
 from typing import TYPE_CHECKING
 import torch
 from torch import nn
@@ -229,6 +229,39 @@ class IRGraph:
             f"Unknown zoom target {node_id!r}. Pass zoom=True to auto-pick, or "
             f"one of these node ids:\n  {hint}"
         )
+
+    def on_frontier(
+        self, node_id: str, consumed: Container[str], last: bool
+    ) -> str | None:
+        """Project a semantic endpoint onto the set of consumed nodes.
+
+        A view keeps group nodes whose children are consumed in their place, so
+        an edge between groups (e.g. a U-Net skip) would reference endpoints
+        that the consumer never sees. Such an endpoint resolves to a consumed
+        descendant: the last one for an edge source, the first one for its
+        target.
+
+        Args:
+            node_id: Endpoint id to resolve.
+            consumed: Ids the consumer actually processes.
+            last: If `True`, take the last consumed descendant (edge source);
+                otherwise the first (edge target).
+
+        Returns:
+            The id to attach the endpoint to, or `None` if none is consumed.
+        """
+        if node_id in consumed:
+            return node_id
+        node = self.index.get(node_id)
+        if node is None:
+            return None
+        found = None
+        for descendant in node.walk():
+            if descendant.id in consumed:
+                if not last:
+                    return descendant.id
+                found = descendant.id
+        return found
 
     def view(self, depth: int) -> IRGraph:
         """Return a copy collapsed to a maximum node depth.

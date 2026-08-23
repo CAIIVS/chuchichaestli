@@ -78,9 +78,29 @@ def test_unsupported_format_raises(tmp_path):
         diagram.save(tmp_path / "unet.gif")
 
 
-def test_mermaid_renders_skip_edges():
-    """The mermaid backend renders dashed skip edges for a U-Net."""
-    assert "-.->" in str(mermaid_diagram(_unet(), input_shape=(1, 1, 64, 64)))
+@pytest.mark.parametrize("max_depth", [None, 1, 2, 3, 4])
+def test_mermaid_renders_skip_edges(max_depth):
+    """The mermaid backend renders skip edges at every depth, layers included."""
+    text = str(
+        mermaid_diagram(_unet(), input_shape=(1, 1, 64, 64), max_depth=max_depth)
+    )
+    # Match the label: residual edges use the same dashed arrow.
+    assert "-.->|skip|" in text
+
+
+@pytest.mark.parametrize("level", [0, 1, 2, 3])
+def test_matplotlib_draws_skip_arcs(level, monkeypatch):
+    """Every U-Net skip gets an arc, also at layer level where blocks vanish."""
+    arcs = []
+    original = MatplotlibRenderer._arc
+
+    def spy(self, mpl, ax, src, tgt, label, height):
+        arcs.append(label)
+        return original(self, mpl, ax, src, tgt, label, height)
+
+    monkeypatch.setattr(MatplotlibRenderer, "_arc", spy)
+    matplotlib_diagram(_unet(), level=level, input_shape=(1, 1, 64, 64)).render()
+    assert arcs
 
 
 @pytest.mark.parametrize("color_by", ["auto", "component", "type", "name"])

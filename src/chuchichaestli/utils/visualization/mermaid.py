@@ -404,9 +404,13 @@ class MermaidDiagram:
             if keys:
                 self._subgraphs[keys[-1]].append(node_id)
         for edge in view.edges:
-            if edge.source_id not in idmap or edge.target_id not in idmap:
+            # Group endpoints are not drawn at layer depth;
+            # resolve them onto the drawn frontier.
+            source_id = view.on_frontier(edge.source_id, idmap, last=True)
+            target_id = view.on_frontier(edge.target_id, idmap, last=False)
+            if source_id is None or target_id is None or source_id == target_id:
                 continue
-            src, tgt = idmap[edge.source_id], idmap[edge.target_id]
+            src, tgt = idmap[source_id], idmap[target_id]
             if edge.kind == EdgeKind.SKIP:
                 self._edges.append((src, tgt, "skip"))
             elif edge.kind == EdgeKind.RESIDUAL:

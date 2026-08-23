@@ -534,9 +534,13 @@ class MatplotlibRenderer(Renderer):
     ) -> float:
         skips: list[tuple[tuple, tuple, str | None]] = []
         for edge in view.edges:
-            if edge.source_id not in boxes or edge.target_id not in boxes:
+            # Group endpoints have no box at layer level;
+            # resolve them onto the drawn frontier.
+            source_id = view.on_frontier(edge.source_id, boxes, last=True)
+            target_id = view.on_frontier(edge.target_id, boxes, last=False)
+            if source_id is None or target_id is None or source_id == target_id:
                 continue
-            src, tgt = boxes[edge.source_id], boxes[edge.target_id]
+            src, tgt = boxes[source_id], boxes[target_id]
             if edge.kind == EdgeKind.FORWARD:
                 self._arrow(mpl, ax, (src[1], 0), (tgt[0], 0), "-|>", "solid", 1.4)
             elif edge.kind == EdgeKind.SKIP:
