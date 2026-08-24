@@ -28,6 +28,11 @@ on:
         type: string
         default: "pytest-results"
         required: false
+      coverage-threshold:
+        description: "Fail the run if total coverage drops below this percentage"
+        type: number
+        default: 85
+        required: false
 
 jobs:
   test-install-python-version:
@@ -53,7 +58,8 @@ jobs:
           cache-dependency-glob: "uv.lock"
 
       - name: Install 📦 and 👽️
-        run: uv sync --locked
+        # Tests require viz for full coverage.
+        run: uv sync --locked --group viz
 
       - name: 🚨 with ruff
         if: ${{ inputs.lint }}
@@ -66,7 +72,15 @@ jobs:
       - name: 🧪 with pytest
         if: ${{ inputs.pytest }}
         run: |
-          uv run pytest --junitxml=junit/${{ inputs.artifact-name }}-${{ matrix.python-version }}.xml
+          uv run pytest \
+            --cov --cov-report=xml --cov-report=term-missing --cov-fail-under=${{ inputs.coverage-threshold }} \
+            --junitxml=junit/${{ inputs.artifact-name }}-${{ matrix.python-version }}.xml
+
+      - name: 📊 coverage summary
+        if: ${{ inputs.pytest && !cancelled() }}
+        run: |
+          echo "## Coverage (🐍 ${{ matrix.python-version }})" >> "$GITHUB_STEP_SUMMARY"
+          uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
 
       - name: 🗃️ pytest artifacts
         if: ${{ inputs.pytest }}
@@ -74,3 +88,10 @@ jobs:
         with:
           name: ${{ inputs.artifact-name }}-${{ matrix.python-version }}
           path: ./junit/${{ inputs.artifact-name }}-${{ matrix.python-version }}.xml
+
+      - name: 🗃️ coverage artifacts
+        if: ${{ inputs.pytest && !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: ./coverage.xml

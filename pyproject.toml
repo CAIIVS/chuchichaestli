@@ -118,8 +118,9 @@ addopts = ["--import-mode=importlib"]
 [tool.coverage.run]
 branch = true
 parallel = true
+source_pkgs = ["chuchichaestli"]
 omit = [
-    "chuchichaestli/__about__.py",
+    "*/chuchichaestli/__about__.py",
 ]
 
 [tool.coverage.paths]

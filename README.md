@@ -50,7 +50,7 @@ provide the basic utility for the triggered jobs:
   - test install on the supported Python endpoints, 3.10 and 3.13, by default;
     pass `full-matrix: true` to sweep every supported version (the release workflow does)
   - ruff linting checks (stop build if error occurs)
-  - run unit tests with pytest
+  - run unit tests with pytest and collect coverage (fails below the `coverage-threshold` input)
   - upload test results (for prosperity)
 * `build-package.yml`
   - build package with `uv build` (Python 3.13)
