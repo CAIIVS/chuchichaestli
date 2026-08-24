@@ -33,7 +33,8 @@ jobs:
   publish-to-testpypi:
     name: Publish 🐍📦 to PyPI
     needs: build-package
-    if: ${{ github.event.pull_request.merged == false }}
+    if: ${{ github.event.pull_request.merged == false
+         && github.event.pull_request.user.login != 'dependabot[bot]' }}
     secrets: inherit
     uses: ./.github/workflows/publish-to-pypi.yml
     with:
@@ -43,7 +44,8 @@ jobs:
   version-bump-dev:
     name: Version bump ↗️ (dev)
     needs: publish-to-testpypi
-    if: ${{ github.event.pull_request.merged == false }}
+    if: ${{ github.event.pull_request.merged == false
+         && github.event.pull_request.user.login != 'dependabot[bot]' }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
