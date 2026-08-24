@@ -13,7 +13,7 @@ jobs:
     if: ${{ startsWith(github.event.head_commit.message, 'Bump') || startsWith(github.event.head_commit.message, 'bump') }}
     uses: ./.github/workflows/test-install.yml
     with:
-      versions: '["3.10", "3.11", "3.12"]'
+      full-matrix: true  # releases sweep every supported version, not just the endpoints
       lint: true
       pytest: true
       artifact-name: "pytest-results"

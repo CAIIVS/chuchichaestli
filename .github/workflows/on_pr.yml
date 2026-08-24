@@ -13,7 +13,6 @@ jobs:
     name: Test install on 🐍
     uses: ./.github/workflows/test-install.yml
     with:
-      versions: '["3.10", "3.11", "3.12"]'
       lint: true
       pytest: true
       artifact-name: "pytest-results"

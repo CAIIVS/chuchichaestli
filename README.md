@@ -47,7 +47,8 @@ In `.github/workflows/` there are several reusable workflows which
 provide the basic utility for the triggered jobs:
 
 * `test-install.yml`
-  - test install on various Python versions (by default 3.10-3.12)
+  - test install on the supported Python endpoints, 3.10 and 3.13, by default;
+    pass `full-matrix: true` to sweep every supported version (the release workflow does)
   - ruff linting checks (stop build if error occurs)
   - run unit tests with pytest
   - upload test results (for prosperity)

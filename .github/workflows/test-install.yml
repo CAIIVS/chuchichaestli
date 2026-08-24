@@ -8,10 +8,10 @@ name : Test install on 🐍
 on:
   workflow_call:
     inputs:
-      versions:
-        description: "Test the installation on these Python versions"
-        type: string
-        default: '["3.10", "3.11", "3.12"]'
+      full-matrix:
+        description: "Test every supported version instead of just the endpoints"
+        type: boolean
+        default: false
         required: false
       lint:
         description: "Run linting using ruff"
@@ -36,7 +36,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ${{ fromJSON(inputs.versions) }}
+        # Endpoints by default: 3.10 & 3.13; full-matrix triggers all versions.
+        python-version: >-
+          ${{ fromJSON(inputs['full-matrix']
+              && '["3.10", "3.11", "3.12", "3.13"]'
+              || '["3.10", "3.13"]') }}
 
     steps:
       - uses: actions/checkout@v4
