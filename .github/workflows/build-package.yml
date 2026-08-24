@@ -21,18 +21,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up 🐍 3.x
-        uses: actions/setup-python@v5
+      - name: Set up uv and 🐍 3.13
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.x"
-
-      - name: Install 🔨
-        run: |
-          python -m pip install build --user
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Build 🐍📦
-        run: |
-          python -m build
+        run: uv build
 
       - name: 🗃️ build artifacts
         uses: actions/upload-artifact@v4

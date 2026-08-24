@@ -52,7 +52,7 @@ provide the basic utility for the triggered jobs:
   - run unit tests with pytest
   - upload test results (for prosperity)
 * `build-package.yml`
-  - build package for Python version 3.x
+  - build package with `uv build` (Python 3.13)
   - upload package dist artifacts (by name)
 * `github-release.yml`
   - download package dist artifact (by name)
