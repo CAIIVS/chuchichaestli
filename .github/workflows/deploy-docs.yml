@@ -50,7 +50,7 @@ jobs:
 
       - name: Build 📖
         run: |
-          uv run --locked --group docs mkdocs build ${{ inputs.strict && '--strict' || '' }}
+          uv run --locked --group docs --group cpu mkdocs build ${{ inputs.strict && '--strict' || '' }}
 
       - name: Configure 📄
         uses: actions/configure-pages@v6
