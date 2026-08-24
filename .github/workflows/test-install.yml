@@ -49,14 +49,15 @@ jobs:
               || '["3.10", "3.13"]') }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up uv and 🐍 ${{ matrix.python-version }}
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          prune-cache: true
 
       - name: Install 📦 and 👽️
         # Tests require viz for full coverage.
@@ -85,14 +86,14 @@ jobs:
 
       - name: 🗃️ pytest artifacts
         if: ${{ inputs.pytest }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}-${{ matrix.python-version }}
           path: ./junit/${{ inputs.artifact-name }}-${{ matrix.python-version }}.xml
 
       - name: 🗃️ coverage artifacts
         if: ${{ inputs.pytest && !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.python-version }}
           path: ./coverage.xml

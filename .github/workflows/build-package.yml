@@ -31,21 +31,22 @@ jobs:
         python-version: ${{ fromJSON(inputs.versions) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up uv and 🐍 ${{ matrix.python-version }}
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          prune-cache: true
 
       - name: Build 🐍📦
         run: uv build
 
       # One artifact per version.
       - name: 🗃️ build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}-${{ matrix.python-version }}
           path: dist/

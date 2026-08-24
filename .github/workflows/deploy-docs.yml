@@ -36,23 +36,24 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up uv and 🐍 3.13
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           # Newest supported interpreter. The rendered site does not depend on
           # it; this only needs to be a version the package imports under.
           python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          prune-cache: true
 
       - name: Build 📖
         run: |
           uv run --locked --group docs mkdocs build ${{ inputs.strict && '--strict' || '' }}
 
       - name: Configure 📄
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: 🗃️ docs artifact
         uses: actions/upload-pages-artifact@v3
@@ -61,4 +62,4 @@ jobs:
 
       - name: 🛸 Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
