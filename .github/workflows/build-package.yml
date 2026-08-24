@@ -8,9 +8,16 @@ on:
   workflow_call:
     inputs:
       artifact-name:
-        description: "Artifact name of the distribution package"
+        description: "Artifact base name of the distribution package"
         type: string
         default: "package-dist"
+        required: false
+      versions:
+        description: >-
+          Python versions to build on, as a JSON array. For ABI-specific builds,
+          list every version that needs a wheel.
+        type: string
+        default: '["3.13"]'
         required: false
 
 jobs:
@@ -18,22 +25,27 @@ jobs:
 
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(inputs.versions) }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up uv and 🐍 3.13
+      - name: Set up uv and 🐍 ${{ matrix.python-version }}
         uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
       - name: Build 🐍📦
         run: uv build
 
+      # One artifact per version.
       - name: 🗃️ build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}-${{ matrix.python-version }}
           path: dist/

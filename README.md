@@ -53,12 +53,16 @@ provide the basic utility for the triggered jobs:
   - run unit tests with pytest and collect coverage (fails below the `coverage-threshold` input)
   - upload test results (for prosperity)
 * `build-package.yml`
-  - build package with `uv build` (Python 3.13)
-  - upload package dist artifacts (by name)
+  - build package with `uv build` on Python 3.13 by default; pass `versions`
+    (a JSON array) to build on several, if wheels are ABI-specific
+  - upload one dist artifact per Python version, named `<artifact-name>-<version>`
 * `github-release.yml`
-  - download package dist artifact (by name)
+  - download all dist artifacts matching `<artifact-name>-*` and merge them
   - sign package dist with Sigstore
   - create and upload GitHub release
+* `publish-to-pypi.yml`
+  - download all dist artifacts matching `<artifact-name>-*` and merge them
+  - publish to PyPI, or to TestPyPI when called with `test: true`
 * `deploy-docs.yml`
   - build the docs with MkDocs and publish them to GitHub Pages
   - uses the Pages artifact flow (`upload-pages-artifact` + `deploy-pages`), not a `gh-pages` push
