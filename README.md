@@ -63,8 +63,8 @@ provide the basic utility for the triggered jobs:
   - build the docs with MkDocs and publish them to GitHub Pages
   - uses the Pages artifact flow (`upload-pages-artifact` + `deploy-pages`), not a `gh-pages` push
   - can be run manually via `gh workflow run deploy-docs.yml`
-* `phdenzel/hatch-bump@v*`
-  - use hatch to increment a version
+* `phdenzel/pyverto@v*`
+  - use pyverto to increment a version
   - commit and push changes
 
 

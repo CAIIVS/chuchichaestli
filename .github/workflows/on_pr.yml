@@ -53,7 +53,7 @@ jobs:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
       - name: pyverto version bump ↗️
-        uses: phdenzel/pyverto@v0.2.0
+        uses: phdenzel/pyverto@v0.2.1
         with:
           type: "dev"
           ref: ${{ github.head_ref }}
