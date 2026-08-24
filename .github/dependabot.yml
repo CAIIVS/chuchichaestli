@@ -1,0 +1,35 @@
+# Keep pinned dependencies from going stale.
+#
+# Motivated by two failures that reached CI: `insurgent-lab/is-in-pr-action`
+# went unmaintained and stuck on Node 20, and `sigstore/gh-action-sigstore-python`
+# sat on v3.0.0 until its bundled TUF root could no longer verify Sigstore's,
+# which broke a release. Both were pinned actions nothing was watching.
+#
+# Updates are grouped so each ecosystem opens one PR per interval rather than
+# one per dependency.
+
+version: 2
+updates:
+  # Action pins across .github/workflows/
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "build"
+
+  # Python dependencies via pyproject.toml + uv.lock
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "build"
