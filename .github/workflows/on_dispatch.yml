@@ -13,12 +13,17 @@ on:
         options: ['major', 'minor', 'micro']
         default: 'minor'
 
+concurrency:
+  group: version-bump-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   version-bump:
     name: Version bump ⬆️
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:

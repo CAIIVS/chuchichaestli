@@ -11,6 +11,9 @@ on:
 jobs:
   test-install-python-version:
     name: Test install on 🐍
+    concurrency:
+      group: pr-${{ github.event.pull_request.number }}-test-install
+      cancel-in-progress: true
     uses: ./.github/workflows/test-install.yml
     with:
       lint: true
@@ -20,6 +23,9 @@ jobs:
   build-package:
     name: Build distribution 📦
     needs: test-install-python-version
+    concurrency:
+      group: pr-${{ github.event.pull_request.number }}-build
+      cancel-in-progress: true
     uses: ./.github/workflows/build-package.yml
     with:
       artifact-name: "package-dist"

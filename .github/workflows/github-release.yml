@@ -22,6 +22,7 @@ jobs:
   github-release:
 
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write  # IMPORTANT: mandatory for making GitHub Releases
       id-token: write  # IMPORTANT: mandatory for sigstore
