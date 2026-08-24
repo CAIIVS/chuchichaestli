@@ -68,6 +68,19 @@ all = [
 ]
 
 [dependency-groups]
+# CI installs `cpu` so it does not pull ~700 MB of unused CUDA libraries.
+# `gpu` exists to give `cpu` something to conflict with, which is what makes uv
+# fork the resolution; without it the CPU index would leak into the default one.
+# Plain `uv sync` (no group) keeps resolving torch from PyPI, i.e. whatever
+# suits the developer's hardware.
+cpu = [
+    "torch>=2.2.2",
+    "torchvision>=0.20.1",
+]
+gpu = [
+    "torch>=2.2.2",
+    "torchvision>=0.20.1",
+]
 dev = [
     "ruff==0.16.4",
     "pre-commit>=3.7.0",
@@ -84,6 +97,18 @@ docs = [
 viz = [
     "matplotlib>=3.7",
 ]
+
+[tool.uv]
+conflicts = [[{ group = "cpu" }, { group = "gpu" }]]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", group = "cpu" }]
+torchvision = [{ index = "pytorch-cpu", group = "cpu" }]
 
 [project.urls]
 Documentation = "https://github.com/CAIIVS/chuchichaestli#readme"
