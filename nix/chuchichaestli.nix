@@ -24,7 +24,15 @@
 }:
 python313Packages.buildPythonPackage {
   pname = "chuchichaestli";
-  version = "0.2.18";
+  # Parse __version__ out of __about__.py
+  version =
+    let
+      about = builtins.readFile (src + "/src/chuchichaestli/__about__.py");
+      line = lib.findFirst (lib.hasPrefix "__version__ = ") null (lib.splitString "\n" about);
+    in
+    lib.throwIf (line == null) "chuchichaestli: no __version__ found in __about__.py" (
+      lib.removeSuffix "\"" (lib.removePrefix "__version__ = \"" line)
+    );
   pyproject = true;
   inherit src;
 

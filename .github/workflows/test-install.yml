@@ -8,10 +8,10 @@ name : Test install on 🐍
 on:
   workflow_call:
     inputs:
-      versions:
-        description: "Test the installation on these Python versions"
-        type: string
-        default: '["3.10", "3.11", "3.12"]'
+      full-matrix:
+        description: "Test every supported version instead of just the endpoints"
+        type: boolean
+        default: false
         required: false
       lint:
         description: "Run linting using ruff"
@@ -28,45 +28,72 @@ on:
         type: string
         default: "pytest-results"
         required: false
+      coverage-threshold:
+        description: "Fail the run if total coverage drops below this percentage"
+        type: number
+        default: 85
+        required: false
 
 jobs:
   test-install-python-version:
 
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        python-version: ${{ fromJSON(inputs.versions) }}
+        # Endpoints by default: 3.10 & 3.13; full-matrix triggers all versions.
+        python-version: >-
+          ${{ fromJSON(inputs['full-matrix']
+              && '["3.10", "3.11", "3.12", "3.13"]'
+              || '["3.10", "3.13"]') }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Set up 🐍 ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Set up uv and 🐍 ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          prune-cache: true
 
       - name: Install 📦 and 👽️
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install .[dev]
+        # Tests require viz for full coverage.
+        run: uv sync --locked --group viz --group cpu
 
       - name: 🚨 with ruff
         if: ${{ inputs.lint }}
         run: |
           # stop the build if there are Python syntax errors or undefined names
-          ruff check . --select=E9,F63,F7,F82 --output-format=github
+          uv run --no-sync ruff check . --select=E9,F63,F7,F82 --output-format=github
           # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-          ruff check . --extend-select=D,UP --line-length=127 --output-format=github --exit-zero
+          uv run --no-sync ruff check . --extend-select=D,UP --line-length=127 --output-format=github --exit-zero
 
       - name: 🧪 with pytest
         if: ${{ inputs.pytest }}
         run: |
-          pytest --import-mode=importlib --junitxml=junit/${{ inputs.artifact-name }}-${{ matrix.python-version }}.xml
+          uv run --no-sync pytest \
+            --cov --cov-report=xml --cov-report=term-missing --cov-fail-under=${{ inputs.coverage-threshold }} \
+            --junitxml=junit/${{ inputs.artifact-name }}-${{ matrix.python-version }}.xml
+
+      - name: 📊 coverage summary
+        if: ${{ inputs.pytest && !cancelled() }}
+        run: |
+          echo "## Coverage (🐍 ${{ matrix.python-version }})" >> "$GITHUB_STEP_SUMMARY"
+          uv run --no-sync coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
 
       - name: 🗃️ pytest artifacts
         if: ${{ inputs.pytest }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}-${{ matrix.python-version }}
           path: ./junit/${{ inputs.artifact-name }}-${{ matrix.python-version }}.xml
+
+      - name: 🗃️ coverage artifacts
+        if: ${{ inputs.pytest && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: ./coverage.xml

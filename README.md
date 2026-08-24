@@ -47,19 +47,28 @@ In `.github/workflows/` there are several reusable workflows which
 provide the basic utility for the triggered jobs:
 
 * `test-install.yml`
-  - test install on various Python versions (by default 3.10-3.12)
+  - test install on the supported Python endpoints, 3.10 and 3.13, by default;
+    pass `full-matrix: true` to sweep every supported version (the release workflow does)
   - ruff linting checks (stop build if error occurs)
-  - run unit tests with pytest
+  - run unit tests with pytest and collect coverage (fails below the `coverage-threshold` input)
   - upload test results (for prosperity)
 * `build-package.yml`
-  - build package for Python version 3.x
-  - upload package dist artifacts (by name)
+  - build package with `uv build` on Python 3.13 by default; pass `versions`
+    (a JSON array) to build on several, if wheels are ABI-specific
+  - upload one dist artifact per Python version, named `<artifact-name>-<version>`
 * `github-release.yml`
-  - download package dist artifact (by name)
+  - download all dist artifacts matching `<artifact-name>-*` and merge them
   - sign package dist with Sigstore
   - create and upload GitHub release
-* `phdenzel/hatch-bump@v*`
-  - use hatch to increment a version
+* `publish-to-pypi.yml`
+  - download all dist artifacts matching `<artifact-name>-*` and merge them
+  - publish to PyPI, or to TestPyPI when called with `test: true`
+* `deploy-docs.yml`
+  - build the docs with MkDocs and publish them to GitHub Pages
+  - uses the Pages artifact flow (`upload-pages-artifact` + `deploy-pages`), not a `gh-pages` push
+  - can be run manually via `gh workflow run deploy-docs.yml`
+* `phdenzel/pyverto@v*`
+  - use pyverto to increment a version
   - commit and push changes
 
 
@@ -76,7 +85,7 @@ provide the basic utility for the triggered jobs:
   - runs `version-bump-on-merge` (increments micro version on main)
 * `on_push.yml`
   - triggers on push to the main branch upon automatic version change
-  - runs `test-install-python-version`, `build-package`, `publish-to-pypi`, `github-release`
+  - runs `test-install-python-version`, `build-package`, `publish-to-pypi`, `github-release`, `deploy-docs`
 * `on_dispatch.yml`
   - triggers on dispatch (e.g. by running `gh workflow run on-dispatch.yml -f type=minor`)
   - runs `version-bump` (increments chosen type of version on main)

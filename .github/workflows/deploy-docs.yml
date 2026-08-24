@@ -1,6 +1,6 @@
-# Build the 📖 package documentation
+# Build and publish the 📖 package documentation to GitHub Pages
 # For more information see:
-# https://www.mkdocs.org/user-guide/deploying-your-docs/
+# https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site
 
 name: Deploy docs 📖
 
@@ -12,36 +12,54 @@ on:
         type: boolean
         default: false
         required: false
-      force:
-        description: "Force the push to the repository"
+  workflow_dispatch:
+    inputs:
+      strict:
+        description: "Strict mode. This will cause MkDocs to abort the build on any warnings."
         type: boolean
         default: false
-        required: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+
+      - name: Set up uv and 🐍 3.13
+        uses: astral-sh/setup-uv@v10.0.1
         with:
-          python-version: 3.12
-          enable-cache: false
-      - name: Force deploy docs strictly
-        if: ${{ inputs.force && inputs.strict }}
+          # Newest supported interpreter. The rendered site does not depend on
+          # it; this only needs to be a version the package imports under.
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          prune-cache: true
+
+      - name: Build 📖
         run: |
-          uv run --group docs mkdocs gh-deploy --strict --force
-      - name: 🛸 Force deploy docs
-        if: ${{ inputs.force }}
-        run: |
-          uv run --group docs mkdocs gh-deploy --force
-      - name: 🛸 Deploy docs strictly
-        if: ${{ inputs.force }}
-        run: |
-          uv run --group docs mkdocs gh-deploy --strict
-      - name: 🛸 Deploy docs
-        if: ${{ inputs.force }}
-        run: |
-          uv run --group docs mkdocs gh-deploy
-      
+          uv run --locked --group docs --group cpu mkdocs build ${{ inputs.strict && '--strict' || '' }}
+
+      - name: Configure 📄
+        uses: actions/configure-pages@v6
+
+      - name: 🗃️ docs artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+      - name: 🛸 Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

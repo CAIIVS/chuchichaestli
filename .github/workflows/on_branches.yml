@@ -7,14 +7,31 @@ on:
     branches-ignore: [main]
     paths-ignore: ["**/__about__.py"]
 
+concurrency:
+  group: branch-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   in-pr-check:
     runs-on: ubuntu-latest
-    steps:
-      - uses: insurgent-lab/is-in-pr-action@v0.2.0
-        id: isInPR
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       result: ${{ steps.isInPR.outputs.result }}
+    steps:
+      # Skip this workflow when the commit is already covered by on_pr.yml.
+      - name: Check if commit is in an open PR
+        id: isInPR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+                --jq '[.[] | select(.state == "open")] | length')
+          [ "$n" -gt 0 ] && r=true || r=false
+          echo "result=$r" >> "$GITHUB_OUTPUT"
+          echo "open PRs containing this commit: $n (result=$r)"
 
   test-install-python-version:
     name: Test install on 🐍
@@ -22,7 +39,6 @@ jobs:
     if: ${{ needs.in-pr-check.outputs.result == 'false' }}
     uses: ./.github/workflows/test-install.yml
     with:
-      versions: '["3.10", "3.11", "3.12"]'
       lint: true
       pytest: true
       artifact-name: "pytest-results"

@@ -7,6 +7,10 @@ on:
     types: [closed]
     branches: [main]
 
+concurrency:
+  group: version-bump-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   version-bump-on-merge:
     name: Version bump ⬆️ (micro)
@@ -14,14 +18,15 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.base_ref }}
           fetch-depth: 0
           token: ${{ secrets.READ_WRITE_PAT }}
       - name: pyverto version bump ⬆️
-        uses: phdenzel/pyverto@v0.2.0
+        uses: phdenzel/pyverto@v0.2.1
         with:
           type: "micro"
           ref: ${{ github.base_ref }}

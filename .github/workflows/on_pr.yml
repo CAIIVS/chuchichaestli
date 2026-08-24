@@ -11,9 +11,11 @@ on:
 jobs:
   test-install-python-version:
     name: Test install on 🐍
+    concurrency:
+      group: pr-${{ github.event.pull_request.number }}-test-install
+      cancel-in-progress: true
     uses: ./.github/workflows/test-install.yml
     with:
-      versions: '["3.10", "3.11", "3.12"]'
       lint: true
       pytest: true
       artifact-name: "pytest-results"
@@ -21,6 +23,9 @@ jobs:
   build-package:
     name: Build distribution 📦
     needs: test-install-python-version
+    concurrency:
+      group: pr-${{ github.event.pull_request.number }}-build
+      cancel-in-progress: true
     uses: ./.github/workflows/build-package.yml
     with:
       artifact-name: "package-dist"
@@ -43,12 +48,12 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
       - name: pyverto version bump ↗️
-        uses: phdenzel/pyverto@v0.2.0
+        uses: phdenzel/pyverto@v0.2.1
         with:
           type: "dev"
           ref: ${{ github.head_ref }}

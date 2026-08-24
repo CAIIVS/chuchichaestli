@@ -29,6 +29,7 @@ jobs:
   publish-to-pypi:
 
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     environment:
       name: ${{ inputs.test && 'testpypi' || 'pypi' }}
@@ -39,9 +40,12 @@ jobs:
 
     steps:
       - name: Download 🗃️
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
-          name: ${{ inputs.artifact-name }}
+          # build-package uploads one artifact per Python version; 
+          # collect them all into a single dist/
+          pattern: ${{ inputs.artifact-name }}-*
+          merge-multiple: true
           path: dist/
 
       - name: Publish 🐍📦 to ${{ inputs.test && 'TestPyPI' || 'PyPI' }}
