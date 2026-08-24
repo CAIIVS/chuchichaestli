@@ -58,6 +58,10 @@ provide the basic utility for the triggered jobs:
   - download package dist artifact (by name)
   - sign package dist with Sigstore
   - create and upload GitHub release
+* `deploy-docs.yml`
+  - build the docs with MkDocs and publish them to GitHub Pages
+  - uses the Pages artifact flow (`upload-pages-artifact` + `deploy-pages`), not a `gh-pages` push
+  - can be run manually via `gh workflow run deploy-docs.yml`
 * `phdenzel/hatch-bump@v*`
   - use hatch to increment a version
   - commit and push changes
@@ -76,7 +80,7 @@ provide the basic utility for the triggered jobs:
   - runs `version-bump-on-merge` (increments micro version on main)
 * `on_push.yml`
   - triggers on push to the main branch upon automatic version change
-  - runs `test-install-python-version`, `build-package`, `publish-to-pypi`, `github-release`
+  - runs `test-install-python-version`, `build-package`, `publish-to-pypi`, `github-release`, `deploy-docs`
 * `on_dispatch.yml`
   - triggers on dispatch (e.g. by running `gh workflow run on-dispatch.yml -f type=minor`)
   - runs `version-bump` (increments chosen type of version on main)
