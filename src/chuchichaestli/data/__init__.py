@@ -34,6 +34,8 @@ from chuchichaestli.data.batching import (
 from chuchichaestli.data.collate import (
     SequenceCollate,
     sequence_collate,
+    SlidingWindowCollate,
+    sliding_window_collate,
 )
 from chuchichaestli.data.transforms import (
     RandomCropND,
@@ -91,6 +93,8 @@ __all__ = [
     "with_indices",
     "SequenceCollate",
     "sequence_collate",
+    "SlidingWindowCollate",
+    "sliding_window_collate",
     "RandomCropND",
     "CenterCropND",
     "RandomFlipND",
