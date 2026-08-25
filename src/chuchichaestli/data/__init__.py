@@ -29,6 +29,7 @@ from chuchichaestli.data.procedural import (
 from chuchichaestli.data.batching import (
     HierarchicalBatchSampler,
     HierarchicalFileBatchSampler,
+    SlidingWindowBatchSampler,
 )
 from chuchichaestli.data.collate import (
     SequenceCollate,
@@ -84,6 +85,7 @@ __all__ = [
     "generate_procedural_dataset",
     "HierarchicalBatchSampler",
     "HierarchicalFileBatchSampler",
+    "SlidingWindowBatchSampler",
     "IndexedSample",
     "WithIndices",
     "with_indices",

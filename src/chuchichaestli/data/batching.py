@@ -7,7 +7,7 @@ import re
 import warnings
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable
+from collections.abc import Callable, Sequence, Sized
 import torch
 from torch.utils.data import Sampler
 from chuchichaestli.data.base import FileDataset
@@ -286,3 +286,108 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
             drop_last=drop_last,
             order_fn=order_fn,
         )
+
+
+class SlidingWindowBatchSampler(HierarchicalBatchSampler):
+    """Batches sliding windows of consecutive samples over ordered sequences.
+
+    Each emitted batch is `batch_size` windows of size `window_size` (optionally
+    trailed by `horizon`), **flattened** into one index list of length
+    `batch_size * (window_size + horizon)`.
+    """
+
+    def __init__(
+        self,
+        dataset: Sized,
+        window_size: int,
+        horizon: int = 0,
+        stride: int = 1,
+        batch_size: int = 1,
+        shuffle: bool = False,
+        drop_last: bool = False,
+        boundaries: Sequence[int] | None = None,
+    ):
+        """Constructor.
+
+        Args:
+            dataset: Any sized dataset. If it exposes `_file_offsets` (any
+                `FileDataset`), those are used as sequence boundaries by default.
+            window_size: Number of consecutive samples forming the input window.
+            horizon: Number of further consecutive samples appended to each
+                window as the prediction target. `0` yields windows only.
+            stride: Step between successive window starts. `stride < window_size`
+                produces overlapping windows.
+            batch_size: Windows per batch (not samples per batch).
+            shuffle: Shuffle batch order each epoch; batch contents are preserved.
+            drop_last: Drop a trailing batch holding fewer than `batch_size`
+                windows. Windows themselves are always full by construction.
+            boundaries: Cumulative offsets delimiting independent sequences, e.g.
+                `[0, n0, n0+n1, ...]`. Defaults to the dataset's `_file_offsets`,
+                falling back to a single sequence spanning the whole dataset.
+        """
+        if window_size < 1:
+            raise ValueError(f"window_size must be >= 1, got {window_size}")
+        if horizon < 0:
+            raise ValueError(f"horizon must be >= 0, got {horizon}")
+        if stride < 1:
+            raise ValueError(f"stride must be >= 1, got {stride}")
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+
+        self.dataset = dataset
+        self.window_size = window_size
+        self.horizon = horizon
+        self.stride = stride
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.drop_last = drop_last
+        self.boundaries = self._resolve_boundaries(dataset, boundaries)
+        self._batches = self._build_batches()
+
+    @property
+    def span(self) -> int:
+        """Number of samples in one window, including the horizon."""
+        return self.window_size + self.horizon
+
+    @property
+    def n_windows(self) -> int:
+        """Total number of windows across all sequences."""
+        return sum(len(b) // self.span for b in self._batches)
+
+    @staticmethod
+    def _resolve_boundaries(
+        dataset: Sized, boundaries: Sequence[int] | None
+    ) -> list[int]:
+        """Pick the sequence boundaries, validating whatever is supplied."""
+        n = len(dataset)
+        if boundaries is None:
+            offsets = getattr(dataset, "_file_offsets", None)
+            # `_file_offsets` can be empty or stale
+            if offsets and offsets[0] == 0 and offsets[-1] == n:
+                return list(offsets)
+            return [0, n]
+        boundaries = list(boundaries)
+        if len(boundaries) < 2:
+            raise ValueError(
+                f"boundaries needs at least a start and an end, got {boundaries}"
+            )
+        if any(a > b for a, b in zip(boundaries[:-1], boundaries[1:], strict=False)):
+            raise ValueError(f"boundaries must be non-decreasing, got {boundaries}")
+        return boundaries
+
+    def _build_batches(self) -> list[list[int]]:
+        """Group sliding windows into flattened fixed-size batches."""
+        span = self.span
+        windows: list[list[int]] = []
+        for lo, hi in zip(self.boundaries[:-1], self.boundaries[1:], strict=False):
+            # Last start for which a full window+horizon still fits the sequence.
+            for start in range(lo, hi - span + 1, self.stride):
+                windows.append(list(range(start, start + span)))
+
+        batches = [
+            [idx for w in windows[i : i + self.batch_size] for idx in w]
+            for i in range(0, len(windows), self.batch_size)
+        ]
+        if self.drop_last and batches and len(batches[-1]) < self.batch_size * span:
+            batches = batches[:-1]
+        return batches

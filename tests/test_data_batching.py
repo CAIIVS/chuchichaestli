@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from chuchichaestli.data.batching import (
     HierarchicalBatchSampler,
     HierarchicalFileBatchSampler,
+    SlidingWindowBatchSampler,
 )
 
 
@@ -463,3 +464,155 @@ class TestHierarchicalFileBatchSamplerFromSequences:
             ds, pattern=r"_z([0-9.]+)_(\d+)"
         )
         assert isinstance(sampler, HierarchicalFileBatchSampler)
+
+
+class SizedSeq:
+    """Minimal sized dataset, optionally exposing sequence boundaries."""
+
+    def __init__(self, n, offsets=None):
+        """Build a sequence of `n` samples with optional boundary offsets."""
+        self.n = n
+        if offsets is not None:
+            self._file_offsets = offsets
+
+    def __len__(self):
+        """Number of samples."""
+        return self.n
+
+    def __getitem__(self, index):
+        """Return the sample index as a 1-element tensor."""
+        return torch.tensor([float(index)])
+
+
+def windows_of(sampler):
+    """Split a sampler's flattened batches back into individual windows."""
+    span = sampler.span
+    return [b[i : i + span] for b in sampler._batches for i in range(0, len(b), span)]
+
+
+class TestSlidingWindowBatchSampler:
+    """Tests for SlidingWindowBatchSampler."""
+
+    def test_window_count_and_contents(self):
+        """Unit stride over one sequence yields every full window."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(10), window_size=3, horizon=1)
+        assert sampler.span == 4
+        assert sampler.n_windows == 7  # starts 0..6
+        assert windows_of(sampler)[0] == [0, 1, 2, 3]
+        assert windows_of(sampler)[-1] == [6, 7, 8, 9]
+
+    def test_windows_overlap_when_stride_below_window(self):
+        """Stride below window_size produces overlapping windows."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(8), window_size=4, stride=1)
+        wins = windows_of(sampler)
+        assert wins[0] == [0, 1, 2, 3]
+        assert wins[1] == [1, 2, 3, 4]
+
+    def test_stride_equal_span_is_non_overlapping(self):
+        """Stride equal to span reproduces contiguous chunking."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(8), window_size=2, horizon=2, stride=4
+        )
+        assert windows_of(sampler) == [[0, 1, 2, 3], [4, 5, 6, 7]]
+
+    def test_batch_flattens_several_windows(self):
+        """A batch holds batch_size windows, flattened."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, horizon=1, batch_size=2
+        )
+        assert sampler._batches[0] == [0, 1, 2, 3, 1, 2, 3, 4]
+
+    def test_windows_never_straddle_boundaries(self):
+        """No window crosses a sequence boundary."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(20, [0, 7, 20]), window_size=4, horizon=1
+        )
+        spans = [(0, 7), (7, 20)]
+        for w in windows_of(sampler):
+            assert any(lo <= min(w) and max(w) < hi for lo, hi in spans)
+
+    def test_boundaries_taken_from_file_offsets(self):
+        """_file_offsets is used as the default boundary list."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(12, [0, 6, 12]), window_size=2)
+        assert sampler.boundaries == [0, 6, 12]
+
+    def test_boundaries_default_to_whole_dataset(self):
+        """Without _file_offsets the dataset is one sequence."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(12), window_size=2)
+        assert sampler.boundaries == [0, 12]
+
+    def test_stale_file_offsets_are_ignored(self):
+        """Offsets not spanning the dataset fall back to a single sequence."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(12, [0, 5]), window_size=2)
+        assert sampler.boundaries == [0, 12]
+
+    def test_explicit_boundaries_override(self):
+        """Explicit boundaries take precedence."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(12, [0, 6, 12]), window_size=2, boundaries=[0, 4, 12]
+        )
+        assert sampler.boundaries == [0, 4, 12]
+
+    def test_sequence_shorter_than_span_yields_nothing(self):
+        """A sequence too short for one window contributes no windows."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10, [0, 2, 10]), window_size=4, horizon=1
+        )
+        assert all(min(w) >= 2 for w in windows_of(sampler))
+
+    def test_drop_last_drops_partial_batch(self):
+        """drop_last removes a trailing batch with too few windows."""
+        # 10 samples, span 3 -> 8 windows -> batches of 3, 3, 2
+        full = SlidingWindowBatchSampler(SizedSeq(10), window_size=3, batch_size=3)
+        dropped = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, batch_size=3, drop_last=True
+        )
+        assert full.n_windows == 8
+        assert len(full) == 3
+        assert len(dropped) == 2
+
+    def test_drop_last_keeps_exact_batches(self):
+        """drop_last is a no-op when windows divide evenly into batches."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, batch_size=4, drop_last=True
+        )
+        assert sampler.n_windows == 8
+        assert len(sampler) == 2
+
+    def test_shuffle_preserves_contents(self):
+        """Shuffling reorders batches without changing their contents."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, batch_size=2, shuffle=True
+        )
+        torch.manual_seed(0)
+        assert sorted(list(sampler)) == sorted(sampler._batches)
+
+    def test_horizon_zero_gives_bare_windows(self):
+        """horizon=0 yields windows with no trailing target."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(6), window_size=3)
+        assert sampler.span == 3
+        assert windows_of(sampler)[0] == [0, 1, 2]
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"window_size": 0},
+            {"window_size": 2, "horizon": -1},
+            {"window_size": 2, "stride": 0},
+            {"window_size": 2, "batch_size": 0},
+        ],
+    )
+    def test_invalid_arguments_raise(self, kwargs):
+        """Out-of-range geometry arguments raise ValueError."""
+        with pytest.raises(ValueError):
+            SlidingWindowBatchSampler(SizedSeq(10), **kwargs)
+
+    def test_non_monotonic_boundaries_raise(self):
+        """Decreasing boundaries are rejected."""
+        with pytest.raises(ValueError, match="non-decreasing"):
+            SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[0, 8, 4])
+
+    def test_too_few_boundaries_raise(self):
+        """A boundary list needs at least a start and an end."""
+        with pytest.raises(ValueError, match="start and an end"):
+            SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[0])
