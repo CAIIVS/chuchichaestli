@@ -12,7 +12,10 @@ from torchvision.transforms.v2 import Transform
 from chuchichaestli.data.base import IndexedSample
 
 
-__all__ = ["SequenceCollate", "sequence_collate"]
+__all__ = [
+    "SequenceCollate",
+    "sequence_collate",
+]
 
 
 def _flatten_leaves(sample: Any) -> list[Any]:
@@ -24,7 +27,70 @@ def _flatten_leaves(sample: Any) -> list[Any]:
     return [sample]
 
 
-class SequenceCollate:
+class _SourceProvenance:
+    """Mixin resolving sample indices back to their source files.
+
+    Snapshots only picklable primitives from the source dataset(s) — never the
+    live mmap-holding dataset — so a collate stays lightweight and picklable
+    across `num_workers > 0`.
+    """
+
+    def _init_sources(self, source: Any | None) -> None:
+        """Snapshot `files`/`_file_offsets`/`new_axis` of 0, 1, or many sources."""
+        if source is None:
+            sources: list[Any] = []
+        elif isinstance(source, list | tuple):
+            sources = list(source)
+        else:
+            sources = [source]
+        self._snaps: list[tuple[list[Path], list[int], bool]] = [
+            (list(s.files), list(s._file_offsets), bool(getattr(s, "new_axis", False)))
+            for s in sources
+        ]
+
+    @property
+    def files(self) -> list[Path] | None:
+        """Snapshotted file list of the first source (back-compat accessor)."""
+        return self._snaps[0][0] if self._snaps else None
+
+    @property
+    def file_offsets(self) -> list[int] | None:
+        """Snapshotted file offsets of the first source (back-compat accessor)."""
+        return self._snaps[0][1] if self._snaps else None
+
+    @property
+    def new_axis(self) -> bool:
+        """`new_axis` flag of the first source (back-compat accessor)."""
+        return self._snaps[0][2] if self._snaps else False
+
+    def _file_of(self, index: int, source: int = 0) -> Path:
+        """Resolve a global sample index to the `Path` of the given source."""
+        assert self._snaps, "no source snapshot available"
+        files, offsets, new_axis = self._snaps[source]
+        if new_axis:
+            return files[index]
+        for file_idx, (lo, hi) in enumerate(zip(offsets[:-1], offsets[1:])):
+            if lo <= index < hi:
+                return files[file_idx]
+        raise IndexError(f"Index {index} out of range for source files")
+
+    def _provenance(self, anchors: list[int]) -> dict[str, Any]:
+        """Build the `key`/`files`/`indices` dict for one index per batch entry.
+
+        Args:
+            anchors: One representative sample index per batch entry.
+        """
+        per_source = [
+            [self._file_of(i, s) for i in anchors] for s in range(len(self._snaps))
+        ]
+        # Single source -> flat list (back-compat); many -> list per source.
+        files = per_source[0] if len(per_source) == 1 else per_source
+        first = per_source[0][0] if per_source[0] else None
+        key = self.key_fn(first) if (self.key_fn and first is not None) else None
+        return {"key": key, "files": files}
+
+
+class SequenceCollate(_SourceProvenance):
     """Pickleable `collate_fn` that applies one shared v2 transform per batch.
 
     A `torchvision.transforms.v2.Transform` has its params sampled once per batch
@@ -56,34 +122,7 @@ class SequenceCollate:
         """
         self.transform = transform
         self.key_fn = key_fn
-        # Normalize to a list of sources (0, 1, or many). Snapshot only
-        # picklable primitives, never the live mmap-holding dataset, so
-        # workers stay lightweight and picklable.
-        if source is None:
-            sources: list[Any] = []
-        elif isinstance(source, list | tuple):
-            sources = list(source)
-        else:
-            sources = [source]
-        self._snaps: list[tuple[list[Path], list[int], bool]] = [
-            (list(s.files), list(s._file_offsets), bool(getattr(s, "new_axis", False)))
-            for s in sources
-        ]
-
-    @property
-    def files(self) -> list[Path] | None:
-        """Snapshotted file list of the first source (back-compat accessor)."""
-        return self._snaps[0][0] if self._snaps else None
-
-    @property
-    def file_offsets(self) -> list[int] | None:
-        """Snapshotted file offsets of the first source (back-compat accessor)."""
-        return self._snaps[0][1] if self._snaps else None
-
-    @property
-    def new_axis(self) -> bool:
-        """`new_axis` flag of the first source (back-compat accessor)."""
-        return self._snaps[0][2] if self._snaps else False
+        self._init_sources(source)
 
     def _apply(self, sample: Any, params: Any) -> Any:
         """Apply `transform(leaf, params)` to every tensor leaf of `sample`."""
@@ -94,17 +133,6 @@ class SequenceCollate:
         if isinstance(sample, torch.Tensor):
             return self.transform.transform(sample, params)
         return sample
-
-    def _file_of(self, index: int, source: int = 0) -> Path:
-        """Resolve a global sample index to the `Path` of the given source."""
-        assert self._snaps, "no source snapshot available"
-        files, offsets, new_axis = self._snaps[source]
-        if new_axis:
-            return files[index]
-        for file_idx, (lo, hi) in enumerate(zip(offsets[:-1], offsets[1:])):
-            if lo <= index < hi:
-                return files[file_idx]
-        raise IndexError(f"Index {index} out of range for source files")
 
     def __call__(self, samples: Sequence[Any]) -> Any:
         """Collate one batch, unwrapping `IndexedSample` pairs if present."""
@@ -120,15 +148,7 @@ class SequenceCollate:
         batch = default_collate(list(samples))
 
         if indices is not None and self._snaps:
-            per_source = [
-                [self._file_of(i, s) for i in indices]
-                for s in range(len(self._snaps))
-            ]
-            # Single source -> flat list (back-compat); many -> list per source.
-            files = per_source[0] if len(per_source) == 1 else per_source
-            first = per_source[0][0] if per_source[0] else None
-            key = self.key_fn(first) if (self.key_fn and first is not None) else None
-            provenance = {"key": key, "files": files, "indices": list(indices)}
+            provenance = {**self._provenance(indices), "indices": list(indices)}
             if isinstance(batch, dict):
                 batch = {**batch, **provenance}
             else:
