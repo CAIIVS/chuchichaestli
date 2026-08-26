@@ -157,7 +157,7 @@ class TestSequenceCollateProvenance:
 
     def _source(self):
         files = [Path(f"xfrac_z9.940_{n}.npy") for n in (2, 3, 10)]
-        return SimpleNamespace(files=files, _file_offsets=[0, 1, 2, 3], new_axis=True)
+        return SimpleNamespace(files=files, _file_offsets=[0, 1, 2, 3], sample_axis=None)
 
     def test_attaches_key_files_indices(self):
         """A provenance batch carries key/files/indices matching the indices."""
@@ -184,12 +184,12 @@ class TestSequenceCollateProvenance:
         xfrac = SimpleNamespace(
             files=[Path(f"xfrac_z9.940_{n}.npy") for n in (2, 3, 10)],
             _file_offsets=[0, 1, 2, 3],
-            new_axis=True,
+            sample_axis=None,
         )
         ionrates = SimpleNamespace(
             files=[Path(f"IonRates_z9.940_{n}.npy") for n in (2, 3, 10)],
             _file_offsets=[0, 1, 2, 3],
-            new_axis=True,
+            sample_axis=None,
         )
         coll = SequenceCollate(source=[xfrac, ionrates], key_fn=_z_key)
         samples = [
@@ -229,10 +229,10 @@ class TestSequenceCollateProvenance:
         assert "indices" not in out and "files" not in out
         assert out["x"].shape == (2, 2)
 
-    def test_map_index_round_trip_non_new_axis(self):
-        """Index -> file resolves correctly when new_axis is False."""
+    def test_map_index_round_trip_along_axis_0(self):
+        """Index -> file resolves correctly when samples run along axis 0."""
         files = [Path("a.npy"), Path("b.npy")]
-        source = SimpleNamespace(files=files, _file_offsets=[0, 3, 5], new_axis=False)
+        source = SimpleNamespace(files=files, _file_offsets=[0, 3, 5], sample_axis=0)
         coll = SequenceCollate(source=source)
         # indices 0,1,2 -> a.npy ; 3,4 -> b.npy
         assert coll._file_of(0).name == "a.npy"
@@ -254,11 +254,11 @@ class TestSequenceCollatePicklable:
     def test_provenance_snapshot_picklable(self):
         """Provenance snapshot (files/offsets) is picklable without the dataset."""
         files = [Path("xfrac_z9.940_2.npy")]
-        source = SimpleNamespace(files=files, _file_offsets=[0, 1], new_axis=True)
+        source = SimpleNamespace(files=files, _file_offsets=[0, 1], sample_axis=None)
         coll = SequenceCollate(source=source)
         restored = pickle.loads(pickle.dumps(coll))
         assert restored.files == files
-        assert restored.new_axis is True
+        assert restored.sample_axis is None
 
     def test_sequence_collate_convenience_returns_instance(self):
         """sequence_collate(...) returns a SequenceCollate."""
@@ -372,7 +372,7 @@ class TestSlidingWindowCollateProvenance:
         return SimpleNamespace(
             files=files,
             _file_offsets=[0, per_file, 2 * per_file],
-            new_axis=False,
+            sample_axis=0,
         )
 
     def _indexed(self, indices):

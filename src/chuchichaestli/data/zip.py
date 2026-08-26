@@ -92,9 +92,12 @@ class ZipDataset(Dataset):
         return None
 
     @property
-    def new_axis(self) -> bool:
-        """Whether the constituents treat one file as one sample."""
-        return any(getattr(d, "new_axis", False) for d in self.datasets)
+    def sample_axis(self) -> int | None:
+        """Sample axis of the first constituent that reports one."""
+        for dataset in self.datasets:
+            if hasattr(dataset, "sample_axis"):
+                return dataset.sample_axis
+        return 0
 
     @classmethod
     def from_paths(
@@ -108,7 +111,7 @@ class ZipDataset(Dataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ) -> "ZipDataset":
         """Create ZipDatasets from multiple file paths with caching.
@@ -126,8 +129,8 @@ class ZipDataset(Dataset):
             preload: Whether to preload and cache all datasets.
             dtype: Data tensor type for all datasets.
             return_as: Return format for individual datasets.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             **kwargs: Additional keyword arguments passed to `dataset_cls`.
         """
         if not paths:
@@ -141,7 +144,7 @@ class ZipDataset(Dataset):
                 cache=cache,
                 attrs_cache=attrs_cache,
                 preload=preload,
-                new_axis=new_axis,
+                sample_axis=sample_axis,
                 **kwargs,
             )
             datasets.append(dataset)
@@ -158,7 +161,7 @@ class ZipDataset(Dataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ) -> "ZipDataset":
         """Create ZipDataset from named paths with automatic dict return format.
@@ -174,8 +177,8 @@ class ZipDataset(Dataset):
             preload: Whether to preload and cache all datasets.
             dtype: Data tensor type for all datasets.
             return_as: Return format for individual datasets.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             **kwargs: Additional keyword arguments passed to `dataset_cls`.
         """
         if not paths:
@@ -193,7 +196,7 @@ class ZipDataset(Dataset):
                 cache=cache,
                 attrs_cache=attrs_cache,
                 preload=preload,
-                new_axis=new_axis,
+                sample_axis=sample_axis,
                 **kwargs,
             )
             datasets.append(dataset)

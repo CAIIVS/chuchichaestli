@@ -406,9 +406,9 @@ class TestFileDataset:
         with pytest.raises(IndexError, match="out of range"):
             dataset._map_index(100)
 
-    def test_map_index_out_of_range_new_axis(self, temp_dir, create_test_files):
+    def test_map_index_out_of_range_sample_axis(self, temp_dir, create_test_files):
         """Test _map_index raises IndexError for out of range index."""
-        dataset = DummyFileDataset(path=create_test_files, new_axis=True)
+        dataset = DummyFileDataset(path=create_test_files, sample_axis=None)
         with pytest.raises(IndexError, match="out of range"):
             dataset._map_index(100)
 

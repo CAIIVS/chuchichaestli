@@ -39,15 +39,15 @@ class _SourceProvenance:
     """
 
     def _init_sources(self, source: Any | None) -> None:
-        """Snapshot `files`/`_file_offsets`/`new_axis` of 0, 1, or many sources."""
+        """Snapshot `files`/`_file_offsets`/`sample_axis` of 0, 1, or many sources."""
         if source is None:
             sources: list[Any] = []
         elif isinstance(source, list | tuple):
             sources = list(source)
         else:
             sources = [source]
-        self._snaps: list[tuple[list[Path], list[int], bool]] = [
-            (list(s.files), list(s._file_offsets), bool(getattr(s, "new_axis", False)))
+        self._snaps: list[tuple[list[Path], list[int], int | None]] = [
+            (list(s.files), list(s._file_offsets), getattr(s, "sample_axis", 0))
             for s in sources
         ]
 
@@ -62,15 +62,16 @@ class _SourceProvenance:
         return self._snaps[0][1] if self._snaps else None
 
     @property
-    def new_axis(self) -> bool:
-        """`new_axis` flag of the first source (back-compat accessor)."""
-        return self._snaps[0][2] if self._snaps else False
+    def sample_axis(self) -> int | None:
+        """`sample_axis` of the first source (back-compat accessor)."""
+        return self._snaps[0][2] if self._snaps else 0
 
     def _file_of(self, index: int, source: int = 0) -> Path:
         """Resolve a global sample index to the `Path` of the given source."""
         assert self._snaps, "no source snapshot available"
-        files, offsets, new_axis = self._snaps[source]
-        if new_axis:
+        files, offsets, sample_axis = self._snaps[source]
+        if sample_axis is None:
+            # One sample per file, so the index *is* the file index.
             return files[index]
         for file_idx, (lo, hi) in enumerate(zip(offsets[:-1], offsets[1:])):
             if lo <= index < hi:

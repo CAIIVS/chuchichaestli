@@ -54,7 +54,7 @@ class FileDataset(Dataset, ABC):
         return_as: DataReturnTypes | None = "tuple",
         has_attrs: bool = False,
         copy_on_write: bool = False,
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ):
         """Constructor.
@@ -69,18 +69,26 @@ class FileDataset(Dataset, ABC):
             has_attrs: Whether to fetch attribute/metadata.
             copy_on_write: Whether to use Copy-on-Write behaviour, i.e.
                 whether to copy data from memory maps/files.
-            new_axis: If `True`, each file is treated as a single sample (e.g.
-                for image files) rather than a collection of samples along axis 0.
-                - `new_axis=False` (default): files with shape (N, H, W) contribute
-                  N samples of shape (H, W); ds.shape == (sum(N_i), H, W).
-                - `new_axis=True`: each file contributes 1 sample whose shape is
-                  the full file shape; ds.shape == (n_files, N, H, W).
+            sample_axis: Which axis of a file enumerates its samples, or
+                `None` if the whole file is one sample.
+                - `0` (default): files of shape (N, H, W) contribute N samples
+                  of shape (H, W); `ds.shape == (sum(N_i), H, W)`.
+                - `None`: each file contributes 1 sample of the full file
+                  shape; `ds.shape == (n_files, N, H, W)`. Use for image files.
+                - `k`: samples run along axis `k`; files of shape (H, N, W)
+                  with `sample_axis=1` give N samples of shape (H, W).
+                  Negative values index from the end of each file's shape.
             kwargs: Additional keyword arguments for subclasses.
         """
         self.dtype = dtype
         self.return_as = return_as
         self.has_attrs = has_attrs
-        self.new_axis = new_axis
+        if isinstance(sample_axis, bool):
+            raise TypeError(
+                "sample_axis must be an int or None, not a bool; pass `None` "
+                "for one sample per file, or an axis index such as `0`"
+            )
+        self.sample_axis = sample_axis
         self.files = self.glob_path(path, self.FILE_EXTENSIONS)
         self._file_offsets: list[int] = []
         self._mmap: list[Sequence] = []
@@ -232,15 +240,43 @@ class FileDataset(Dataset, ABC):
         """Whether the dataset has associated files or data buffers."""
         return bool(self.files) or bool(self._mmap)
 
+    def _axis_of(self, mmap: Any) -> int:
+        """Resolve `sample_axis` against one file's rank."""
+        axis = self.sample_axis
+        if axis is None:
+            raise ValueError("the whole file is one sample; there is no sample axis")
+        ndim = len(getattr(mmap, "shape", ()))
+        if axis < 0:
+            if not ndim:
+                raise ValueError(
+                    f"cannot resolve negative sample_axis={axis} without a shape"
+                )
+            axis += ndim
+        if ndim and not (0 <= axis < ndim):
+            raise ValueError(
+                f"sample_axis={self.sample_axis} is out of range for a file of "
+                f"shape {tuple(mmap.shape)}"
+            )
+        return axis
+
+    def _axis_len(self, mmap: Any) -> int:
+        """Number of samples one file contributes."""
+        axis = self._axis_of(mmap)
+        shape = getattr(mmap, "shape", None)
+        return len(mmap) if shape is None else shape[axis]
+
     @property
     def shape(self) -> tuple[int, ...]:
         """Shape of the contiguous dataset."""
         if not self._mmap:
             return ()
-        if self.new_axis:
+        if self.sample_axis is None:
             return (self.n_files, *self._mmap[0].shape)
-        total_samples = sum(len(m) for m in self._mmap)
-        sample_shape = self._mmap[0].shape[1:]
+        total_samples = sum(self._axis_len(m) for m in self._mmap)
+        first = self._mmap[0]
+        axis = self._axis_of(first)
+        file_shape = tuple(getattr(first, "shape", ()))
+        sample_shape = file_shape[:axis] + file_shape[axis + 1 :]
         return (total_samples, *sample_shape)
 
     @property
@@ -284,7 +320,7 @@ class FileDataset(Dataset, ABC):
         """Build (cumulative) index for mapping global index to (file_index, local_index)."""
         self._file_offsets = [0]
         for m in self._mmap:
-            n_samples = 1 if self.new_axis else len(m)
+            n_samples = 1 if self.sample_axis is None else self._axis_len(m)
             self._file_offsets.append(self._file_offsets[-1] + n_samples)
 
     def _map_index(self, index: int) -> tuple[int, int]:
@@ -295,7 +331,7 @@ class FileDataset(Dataset, ABC):
         """
         if not self._file_offsets or self.n_files != (len(self._file_offsets) - 1):
             self._build_index()
-        if self.new_axis:
+        if self.sample_axis is None:
             if not (0 <= index < self.n_files):
                 raise IndexError(f"Index {index} out of range")
             return index, None
@@ -379,12 +415,22 @@ class FileDataset(Dataset, ABC):
         Args:
             file_idx: Index of the file in self._mmap.
             local_idx: Local sample index within that file, or `None` to read
-                the entire file as one sample (`new_axis=True` mode).
+                the entire file as one sample (`sample_axis=None` mode).
             copy: Whether to manually copy from mmap.
         """
         # Fetch item
         mmap = self._mmap[file_idx]
-        sample = mmap[:] if local_idx is None else mmap[local_idx]
+        if local_idx is None:
+            sample = mmap[:]
+        else:
+            axis = self._axis_of(mmap)
+            # Scalar indexing on axis 0; a non-zero axis needs a mmap that takes 
+            # a tuple index (numpy memmap, h5py, torch tensor).
+            sample = (
+                mmap[local_idx]
+                if axis == 0
+                else mmap[(slice(None),) * axis + (local_idx,)]
+            )
         if isinstance(sample, torch.Tensor):
             return sample.clone() if copy else sample
         # Copy sample from memory map
@@ -429,11 +475,11 @@ class FileDataset(Dataset, ABC):
         Args:
             file_idx: Index of the file in self._mmap.
             local_idx: Local sample index within that file, or `None` when
-                the whole file is one sample (`new_axis=True` mode).
+                the whole file is one sample (`sample_axis=None` mode).
             copy: Whether to manually copy from mmap.
         """
         attrs_obj = self._mmap_attrs[file_idx]
-        # new_axis mode: attrs belong to the whole file, not a row within it.
+        # Whole-file mode: attrs belong to the file, not a row within it.
         if local_idx is None:
             if hasattr(attrs_obj, "items"):
                 return dict(attrs_obj)
@@ -539,7 +585,7 @@ class CachingDataset(FileDataset, ABC):
         cache: int | float | str | bool | nbytes | None = "4G",
         attrs_cache: int | float | str | bool | nbytes | None = None,
         preload: bool = False,
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ):
         """Constructor.
@@ -552,11 +598,17 @@ class CachingDataset(FileDataset, ABC):
             cache: Cache size for data items (e.g., "4G", 4.0, or bytes).
             attrs_cache: Cache size for attributes/metadata.
             preload: Preload and cache the dataset.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             kwargs: Additional keyword arguments for subclasses.
         """
-        super().__init__(path=path, dtype=dtype, return_as=return_as, new_axis=new_axis, **kwargs)
+        super().__init__(
+            path=path,
+            dtype=dtype,
+            return_as=return_as,
+            sample_axis=sample_axis,
+            **kwargs,
+        )
 
         self._req_cache_size = nbytes(cache)
         self._req_attrs_cache_size = nbytes(attrs_cache)

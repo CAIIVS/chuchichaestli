@@ -91,6 +91,9 @@ class NpyArrayView:
 
     def __getitem__(self, idx) -> np.ndarray:
         """Open the file, copy the requested slice, close immediately."""
+        if isinstance(idx, tuple):
+            # Off-axis-0 sampling: hand the striding to numpy
+            return np.asarray(np.load(self._path, mmap_mode="r")[idx]).copy()
         if isinstance(idx, slice):
             start, stop, step = idx.indices(self.shape[0])
             indices = range(start, stop, step)
@@ -142,7 +145,7 @@ class NumpyDataset(CachingDataset):
         cache: int | float | str | bool | nbytes | None = "4G",
         attrs_cache: int | float | str | bool | nbytes | None = None,
         preload: bool = False,
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ):
         """Constructor.
@@ -170,8 +173,8 @@ class NumpyDataset(CachingDataset):
             cache: Cache size for data items (e.g. `"4G"`, `4.0`, or bytes).
             attrs_cache: Cache size for attributes/metadata.
             preload: Preload and cache the dataset.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             kwargs: Reserved for forward-compatibility.
         """
         # Key patterns
@@ -194,7 +197,7 @@ class NumpyDataset(CachingDataset):
             preload=preload,
             copy_on_write=False,
             has_attrs=attrs_keys is not None,
-            new_axis=new_axis,
+            sample_axis=sample_axis,
         )
 
     def load(self, **kwargs):
@@ -428,7 +431,7 @@ class ZipNumpyDataset(ZipDataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ) -> "ZipNumpyDataset":
         """Create a `ZipNumpyDataset` from multiple file paths.
@@ -446,8 +449,8 @@ class ZipNumpyDataset(ZipDataset):
             preload: Whether to preload all datasets.
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             **kwargs: Additional arguments forwarded to `NumpyDataset`.
         """
         if not paths:
@@ -461,7 +464,7 @@ class ZipNumpyDataset(ZipDataset):
                 preload=preload,
                 dtype=dtype,
                 return_as=return_as,
-                new_axis=new_axis,
+                sample_axis=sample_axis,
                 **kwargs,
             )
             for path in paths
@@ -525,7 +528,7 @@ class ZipNumpyDataset(ZipDataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ) -> "ZipNumpyDataset":
         """Create a `ZipNumpyDataset` with named paths returning a dict.
@@ -539,8 +542,8 @@ class ZipNumpyDataset(ZipDataset):
             preload: Whether to preload all datasets.
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             **kwargs: Additional arguments forwarded to `NumpyDataset`.
         """
         if not paths:
@@ -554,7 +557,7 @@ class ZipNumpyDataset(ZipDataset):
                 preload=preload,
                 dtype=dtype,
                 return_as=return_as,
-                new_axis=new_axis,
+                sample_axis=sample_axis,
                 **kwargs,
             )
             for path in paths.values()
