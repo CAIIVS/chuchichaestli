@@ -157,9 +157,7 @@ class TestSequenceCollateProvenance:
 
     def _source(self):
         files = [Path(f"xfrac_z9.940_{n}.npy") for n in (2, 3, 10)]
-        return SimpleNamespace(
-            files=files, _file_offsets=[0, 1, 2, 3], new_axis=True
-        )
+        return SimpleNamespace(files=files, _file_offsets=[0, 1, 2, 3], new_axis=True)
 
     def test_attaches_key_files_indices(self):
         """A provenance batch carries key/files/indices matching the indices."""
@@ -185,11 +183,13 @@ class TestSequenceCollateProvenance:
         """A sequence of sources yields one path list per source."""
         xfrac = SimpleNamespace(
             files=[Path(f"xfrac_z9.940_{n}.npy") for n in (2, 3, 10)],
-            _file_offsets=[0, 1, 2, 3], new_axis=True,
+            _file_offsets=[0, 1, 2, 3],
+            new_axis=True,
         )
         ionrates = SimpleNamespace(
             files=[Path(f"IonRates_z9.940_{n}.npy") for n in (2, 3, 10)],
-            _file_offsets=[0, 1, 2, 3], new_axis=True,
+            _file_offsets=[0, 1, 2, 3],
+            new_axis=True,
         )
         coll = SequenceCollate(source=[xfrac, ionrates], key_fn=_z_key)
         samples = [
@@ -199,10 +199,14 @@ class TestSequenceCollateProvenance:
         out = coll(samples)
         xfrac_files, ionrates_files = out["files"]
         assert [p.name for p in xfrac_files] == [
-            "xfrac_z9.940_2.npy", "xfrac_z9.940_10.npy", "xfrac_z9.940_3.npy",
+            "xfrac_z9.940_2.npy",
+            "xfrac_z9.940_10.npy",
+            "xfrac_z9.940_3.npy",
         ]
         assert [p.name for p in ionrates_files] == [
-            "IonRates_z9.940_2.npy", "IonRates_z9.940_10.npy", "IonRates_z9.940_3.npy",
+            "IonRates_z9.940_2.npy",
+            "IonRates_z9.940_10.npy",
+            "IonRates_z9.940_3.npy",
         ]
         # key is still derived from the first source's first file
         assert out["key"] == "9.940"
@@ -213,7 +217,8 @@ class TestSequenceCollateProvenance:
         samples = [IndexedSample(i, {"x": torch.zeros(2)}) for i in (0, 1)]
         out = coll(samples)
         assert [p.name for p in out["files"]] == [
-            "xfrac_z9.940_2.npy", "xfrac_z9.940_3.npy",
+            "xfrac_z9.940_2.npy",
+            "xfrac_z9.940_3.npy",
         ]
 
     def test_no_source_skips_provenance(self):
@@ -227,9 +232,7 @@ class TestSequenceCollateProvenance:
     def test_map_index_round_trip_non_new_axis(self):
         """Index -> file resolves correctly when new_axis is False."""
         files = [Path("a.npy"), Path("b.npy")]
-        source = SimpleNamespace(
-            files=files, _file_offsets=[0, 3, 5], new_axis=False
-        )
+        source = SimpleNamespace(files=files, _file_offsets=[0, 3, 5], new_axis=False)
         coll = SequenceCollate(source=source)
         # indices 0,1,2 -> a.npy ; 3,4 -> b.npy
         assert coll._file_of(0).name == "a.npy"
@@ -307,9 +310,7 @@ class TestSlidingWindowCollate:
 
     def test_rename_overrides_suffix(self):
         """Rename replaces the suffix for the named keys only."""
-        coll = SlidingWindowCollate(
-            window_size=2, horizon=1, rename={"vis": "target"}
-        )
+        coll = SlidingWindowCollate(window_size=2, horizon=1, rename={"vis": "target"})
         samples = [
             {"vis": torch.tensor([float(i)]), "uvw": torch.tensor([float(i)])}
             for i in range(3)
@@ -435,3 +436,48 @@ class TestSlidingWindowCollateProvenance:
         restored = pickle.loads(pickle.dumps(coll))
         assert restored.files == coll.files
         assert restored.file_offsets == coll.file_offsets
+
+
+class TestSlidingWindowCollatePerKeyTransform:
+    """Transforms targeted at individual entries of a heterogeneous sample."""
+
+    @staticmethod
+    def _samples(n=4):
+        """`n` dict samples with two differently shaped entries."""
+        return [{"a": torch.ones(3), "b": torch.ones(5)} for _ in range(n)]
+
+    def test_single_callable_still_hits_every_leaf(self):
+        """The original behaviour is unchanged."""
+        collate = SlidingWindowCollate(window_size=4, transform=lambda t: t * 2)
+        out = collate(self._samples())
+        assert out["a"].unique().tolist() == [2.0]
+        assert out["b"].unique().tolist() == [2.0]
+
+    def test_mapping_applies_only_to_the_named_entry(self):
+        """One projection rarely suits every entry of a zipped sample."""
+        collate = SlidingWindowCollate(window_size=4, transform={"a": lambda t: t * 2})
+        out = collate(self._samples())
+        assert out["a"].unique().tolist() == [2.0]
+        assert out["b"].unique().tolist() == [1.0]
+
+    def test_mapping_covers_the_targets_too(self):
+        """A key's transform applies to its input and its forecast target."""
+        collate = SlidingWindowCollate(
+            window_size=3, horizon=1, transform={"a": lambda t: t * 2}
+        )
+        out = collate(self._samples())
+        assert out["a"].unique().tolist() == [2.0]
+        assert out["a_target"].unique().tolist() == [2.0]
+        assert out["b_target"].unique().tolist() == [1.0]
+
+    def test_unknown_key_raises(self):
+        """A typo must not silently transform nothing."""
+        collate = SlidingWindowCollate(window_size=4, transform={"c": lambda t: t * 2})
+        with pytest.raises(KeyError, match="does not"):
+            collate(self._samples())
+
+    def test_mapping_on_non_dict_samples_raises(self):
+        """Bare tensor samples have no keys to address."""
+        collate = SlidingWindowCollate(window_size=4, transform={"a": lambda t: t})
+        with pytest.raises(TypeError, match="needs dict samples"):
+            collate([torch.ones(3) for _ in range(4)])

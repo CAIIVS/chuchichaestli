@@ -5,7 +5,7 @@
 
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 import torch
 from torch.utils.data import default_collate
 from torchvision.transforms.v2 import Transform
@@ -175,7 +175,9 @@ class SlidingWindowCollate(_SourceProvenance):
         horizon: int = 0,
         target_suffix: str = "_target",
         rename: dict[str, str] | None = None,
-        transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        transform: Callable[[torch.Tensor], torch.Tensor]
+        | Mapping[str, Callable[[torch.Tensor], torch.Tensor]]
+        | None = None,
         source: Any | None = None,
         key_fn: Callable[[Path], str] | None = None,
     ):
@@ -188,11 +190,11 @@ class SlidingWindowCollate(_SourceProvenance):
             target_suffix: Suffix appended to a dict key to name its target.
             rename: Explicit `input key -> target key` overrides, taking
                 precedence over `target_suffix`.
-            transform: Optional callable applied to every tensor leaf of the
-                output, after reshaping and splitting. Use it to compress or
-                normalize whole windows (e.g. a basis projection). This is a
-                plain per-tensor callable, unlike `SequenceCollate.transform`,
-                which samples shared v2 params once per batch.
+            transform: Optional transform applied after reshaping and
+                splitting. Use it to compress or normalize whole windows (e.g.
+                a basis projection). Either a single callable, applied to every
+                tensor leaf, or a `key -> callable` mapping applied only to
+                those entries (of a `ZipDataset`).
             source: Optional `FileDataset`, or a sequence of them, whose
                 `.files`/`_file_offsets` are snapshotted so batches from
                 `with_indices` carry `key`/`files`/`indices`. `files` holds one
@@ -234,10 +236,28 @@ class SlidingWindowCollate(_SourceProvenance):
         return f"{key}{self.target_suffix}" if isinstance(key, str) else key
 
     def _finish(self, batch: Any) -> Any:
-        """Apply the optional per-tensor transform."""
+        """Apply the optional transform, per leaf or per key."""
         if self.transform is None:
             return batch
-        return map_nested(batch, self.transform)
+        if callable(self.transform):
+            return map_nested(batch, self.transform)
+        if not isinstance(batch, dict):
+            raise TypeError(
+                "a per-key `transform` needs dict samples, but this batch is a "
+                f"{type(batch).__name__}; pass a single callable instead"
+            )
+        unknown = set(self.transform) - set(batch)
+        if unknown:
+            raise KeyError(
+                f"`transform` names {sorted(unknown)}, which the batch does not "
+                f"hold; available keys are {sorted(batch)}"
+            )
+        return {
+            key: map_nested(value, self.transform[key])
+            if key in self.transform
+            else value
+            for key, value in batch.items()
+        }
 
     def __call__(self, samples: Sequence[Any]) -> Any:
         """Collate one flattened multi-window batch."""
@@ -308,7 +328,9 @@ def sliding_window_collate(
     horizon: int = 0,
     target_suffix: str = "_target",
     rename: dict[str, str] | None = None,
-    transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+    transform: Callable[[torch.Tensor], torch.Tensor]
+    | Mapping[str, Callable[[torch.Tensor], torch.Tensor]]
+    | None = None,
     source: Any | None = None,
     key_fn: Callable[[Path], str] | None = None,
 ) -> SlidingWindowCollate:
