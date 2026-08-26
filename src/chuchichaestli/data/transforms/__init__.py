@@ -24,6 +24,11 @@ from chuchichaestli.data.transforms.intensity import (
     ZScale,
 )
 from chuchichaestli.data.transforms.channel import ChannelExpand, ChannelCollapse
+from chuchichaestli.data.transforms.basis import (
+    BasisProjection,
+    InvBasisProjection,
+    BASIS_REGISTRY,
+)
 from chuchichaestli.data.transforms.compose import SequentialTransform
 
 __all__ = [
@@ -50,5 +55,8 @@ __all__ = [
     "ZScale",
     "ChannelExpand",
     "ChannelCollapse",
+    "BasisProjection",
+    "InvBasisProjection",
+    "BASIS_REGISTRY",
     "SequentialTransform",
 ]
