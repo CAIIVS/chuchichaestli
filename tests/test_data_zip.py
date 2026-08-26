@@ -590,3 +590,78 @@ class TestZipDataset:
                 assert "image" in sample
                 assert "label" in sample
                 assert "attention" in sample
+
+
+class _Offsets(DummyDataset):
+    """A dataset advertising file structure, like any `FileDataset`."""
+
+    def __init__(self, data, offsets, files=None):
+        """Constructor."""
+        super().__init__(data)
+        self._file_offsets = list(offsets)
+        self.files = [Path(f) for f in (files or [])]
+
+
+class TestZipDatasetIndexStructure:
+    """Forwarding of sequence boundaries to samplers and collates."""
+
+    def test_offsets_are_forwarded_when_constituents_agree(self):
+        """A window sampler must still see where each source sequence ends."""
+        a = _Offsets(np.zeros((10, 2)), [0, 6, 10])
+        b = _Offsets(np.zeros((10, 3)), [0, 6, 10])
+        assert ZipDataset(a, b)._file_offsets == [0, 6, 10]
+
+    def test_disagreeing_offsets_are_unioned(self):
+        """A window must not straddle a discontinuity in *any* zipped stream."""
+        a = _Offsets(np.zeros((10, 2)), [0, 6, 10])
+        b = _Offsets(np.zeros((10, 3)), [0, 4, 10])
+        assert ZipDataset(a, b)._file_offsets == [0, 4, 6, 10]
+
+    def test_a_structureless_dataset_contributes_nothing(self):
+        """Datasets without file structure are continuous."""
+        a = _Offsets(np.zeros((10, 2)), [0, 6, 10])
+        zipped = ZipDataset(a, DummyDataset(np.zeros((10, 3))))
+        assert zipped._file_offsets == [0, 6, 10]
+
+    def test_absent_offsets_give_none(self):
+        """Plain datasets carry no structure to forward."""
+        zipped = ZipDataset(
+            DummyDataset(np.zeros((8, 2))), DummyDataset(np.zeros((8, 3)))
+        )
+        assert zipped._file_offsets is None
+
+    def test_offsets_are_clipped_to_the_shortest_dataset(self):
+        """`strict=False` truncates the zip, so the boundaries must follow."""
+        a = _Offsets(np.zeros((10, 2)), [0, 6, 10])
+        b = DummyDataset(np.zeros((7, 3)))
+        zipped = ZipDataset(a, b)
+        assert len(zipped) == 7
+        assert zipped._file_offsets == [0, 6, 7]
+
+    def test_differing_lengths_do_not_warn(self):
+        """`strict=False` with different sizes is ordinary use, not a problem."""
+        import warnings
+
+        a = _Offsets(np.zeros((10, 2)), [0, 10])
+        b = _Offsets(np.zeros((7, 3)), [0, 7])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            zipped = ZipDataset(a, b)
+        assert not caught
+        assert zipped._file_offsets == [0, 7]
+
+    def test_truncation_past_the_first_boundary(self):
+        """Clipping must not leave a boundary beyond the end."""
+        a = _Offsets(np.zeros((10, 2)), [0, 6, 10])
+        zipped = ZipDataset(a, DummyDataset(np.zeros((4, 3))))
+        assert zipped._file_offsets == [0, 4]
+
+    def test_files_come_from_the_first_reporting_dataset(self):
+        """Provenance needs one set of paths to label a batch."""
+        a = _Offsets(np.zeros((10, 2)), [0, 10], files=["a0.npy"])
+        b = _Offsets(np.zeros((10, 3)), [0, 10], files=["b0.npy"])
+        assert ZipDataset(a, b).files == [Path("a0.npy")]
+
+    def test_files_is_none_without_any(self):
+        """No constituent reports paths."""
+        assert ZipDataset(DummyDataset(np.zeros((4, 2)))).files is None
