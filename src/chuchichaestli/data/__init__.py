@@ -62,6 +62,7 @@ from chuchichaestli.data.transforms import (
     ComplexCollapse,
     BasisProjection,
     InvBasisProjection,
+    BASIS_REGISTRY,
     SequentialTransform,
 )
 
@@ -120,5 +121,6 @@ __all__ = [
     "ComplexCollapse",
     "BasisProjection",
     "InvBasisProjection",
+    "BASIS_REGISTRY",
     "SequentialTransform",
 ]
