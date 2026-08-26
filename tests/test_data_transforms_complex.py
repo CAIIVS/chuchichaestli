@@ -169,3 +169,22 @@ class TestState:
         assert isinstance(restored, cls)
         assert restored.dim == 1
         assert restored.strict is False
+
+
+class TestDeviceAndDimValidation:
+    """Regressions for out-of-range `dim` handling."""
+
+    @pytest.mark.parametrize("dim", [9, -9])
+    @pytest.mark.parametrize("strict", [True, False])
+    def test_expand_rejects_out_of_range_dim(self, dim, strict):
+        """An invalid `dim` is a config error, so `strict` must not mask it."""
+        with pytest.raises(ValueError, match="out of range"):
+            ComplexExpand(dim=dim, strict=strict).transform(
+                torch.randn(4, dtype=torch.complex64)
+            )
+
+    def test_expand_accepts_the_edge_of_the_range(self):
+        """`dim` may address the axis that expansion itself adds."""
+        z = torch.randn(4, 3, dtype=torch.complex64)
+        assert ComplexExpand(dim=2).transform(z).shape == (4, 3, 2)
+        assert ComplexExpand(dim=-3).transform(z).shape == (2, 4, 3)

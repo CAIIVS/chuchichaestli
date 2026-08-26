@@ -52,6 +52,12 @@ class ComplexExpand(Transform):
                     "`strict=False` to let real tensors through unchanged"
                 )
             return x
+        rank = x.ndim + 1  # view_as_real appends the real/imaginary axis
+        if not -rank <= self.dim < rank:
+            raise ValueError(
+                f"dim {self.dim} is out of range for the expanded tensor, "
+                f"which has {rank} axes"
+            )
         return torch.view_as_real(x).movedim(-1, self.dim)
 
     def _collapse(self, x: Any) -> Any:
