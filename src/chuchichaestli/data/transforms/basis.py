@@ -222,7 +222,7 @@ class BasisProjection(Transform):
             self._check_conditioning(axis, basis)
             pinv = torch.linalg.pinv(basis, **kw)
         else:
-            w = weight.to(torch.float64).reshape(-1)
+            w = weight.to(device=basis.device, dtype=torch.float64).reshape(-1)
             if w.numel() != n:
                 raise ValueError(
                     f"weights for axis {axis} have length {w.numel()}, expected {n}"
@@ -254,11 +254,13 @@ class BasisProjection(Transform):
         resolved = []
         seen: dict[int, int] = {}
         for key in sorted(self.bases):
-            axis = key % ndim if key < 0 else key
-            if axis >= ndim:
+            # Mirror tensor indexing: only [-ndim, ndim) is addressable, so a
+            # further-negative axis is an error rather than a wrap-around.
+            if not -ndim <= key < ndim:
                 raise ValueError(
                     f"axis {key} is out of range for a {ndim}-dimensional input"
                 )
+            axis = key % ndim if key < 0 else key
             if axis in seen:
                 raise ValueError(
                     f"axes {seen[axis]} and {key} both refer to axis {axis}"

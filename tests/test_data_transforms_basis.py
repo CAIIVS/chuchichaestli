@@ -280,6 +280,17 @@ class TestValidationAndState:
         with pytest.raises(ValueError, match="out of range"):
             BasisProjection({5: 2}).transform(torch.randn(3, 8, dtype=torch.float64))
 
+    def test_negative_axis_out_of_range_raises(self):
+        """A too-negative axis must not wrap onto an unrelated axis."""
+        # -5 % 3 == 1, so wrapping would silently project the wrong dimension
+        with pytest.raises(ValueError, match="out of range"):
+            BasisProjection({-5: 2}).transform(torch.randn(2, 3, 4))
+
+    def test_negative_axis_in_range_still_works(self):
+        """The valid negative range keeps addressing from the end."""
+        proj = BasisProjection({-2: 4})
+        assert proj.transform(torch.randn(2, 16, 5)).shape == (2, 4, 5)
+
     def test_revert_without_length_raises(self):
         """Reverting needs the original axis length."""
         with pytest.raises(RuntimeError, match="original length"):
@@ -360,3 +371,29 @@ class TestValidationAndState:
         assert len(proj._cache) == 1
         proj.transform(torch.randn(16, dtype=torch.float64))
         assert len(proj._cache) == 1
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+class TestDevicePlacement:
+    """The solve runs on the design matrix's device, not the caller's."""
+
+    def test_weighted_fit_with_non_cpu_weights(self):
+        """Built-in bases are built on CPU, so GPU weights must be moved."""
+        proj = BasisProjection(
+            {0: ("legendre", 4)},
+            weights={0: torch.rand(20, device="cuda") + 0.1},
+            cond_warn=None,
+        )
+        out = proj.transform(torch.randn(20, device="cuda"))
+        assert out.shape == (4,)
+        assert out.device.type == "cuda"
+
+    def test_weighted_result_matches_cpu(self):
+        """Moving the weights must not change the fit."""
+        w = torch.rand(20, dtype=torch.float64) + 0.1
+        y = torch.randn(20, dtype=torch.float64)
+        cpu = BasisProjection({0: ("legendre", 4)}, weights={0: w}, cond_warn=None)
+        gpu = BasisProjection(
+            {0: ("legendre", 4)}, weights={0: w.cuda()}, cond_warn=None
+        )
+        assert torch.allclose(cpu.transform(y), gpu.transform(y.cuda()).cpu())
