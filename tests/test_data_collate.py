@@ -481,3 +481,58 @@ class TestSlidingWindowCollatePerKeyTransform:
         collate = SlidingWindowCollate(window_size=4, transform={"a": lambda t: t})
         with pytest.raises(TypeError, match="needs dict samples"):
             collate([torch.ones(3) for _ in range(4)])
+
+
+class TestSourceWithoutFiles:
+    """Tests for sources that report no file structure at all."""
+
+    def _fileless(self):
+        """A `ZipDataset`-like source over in-memory datasets."""
+        return SimpleNamespace(files=None, _file_offsets=None)
+
+    def _source(self):
+        """A source that does report files."""
+        return SimpleNamespace(
+            files=[Path("a0.npy"), Path("a1.npy")],
+            _file_offsets=[0, 2, 4],
+            sample_axis=0,
+        )
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda src: SequenceCollate(source=src),
+            lambda src: SlidingWindowCollate(window_size=2, source=src),
+        ],
+        ids=["sequence", "sliding_window"],
+    )
+    def test_construction_does_not_raise(self, make):
+        """A file-less source must degrade, not blow up on `list(None)`."""
+        collate = make(self._fileless())
+        assert collate._snaps == []
+        assert collate.files is None
+        assert collate.file_offsets is None
+
+    def test_batches_come_back_without_provenance(self):
+        """Indexed samples still collate; there is just nothing to attach."""
+        collate = SlidingWindowCollate(window_size=2, source=self._fileless())
+        out = collate([IndexedSample(i, torch.tensor([float(i)])) for i in range(4)])
+        assert isinstance(out, torch.Tensor)
+        assert out.shape == (2, 2, 1)
+
+    def test_mixed_sources_raise(self):
+        """Provenance is positional, so a partial set would misalign silently."""
+        with pytest.raises(ValueError, match="report no files"):
+            SlidingWindowCollate(2, source=[self._source(), self._fileless()])
+
+    def test_all_file_less_sources_are_dropped_together(self):
+        """No source reporting files is the same as passing no source."""
+        collate = SequenceCollate(source=[self._fileless(), self._fileless()])
+        assert collate._snaps == []
+
+    def test_empty_offsets_still_snapshot(self):
+        """A dataset globbed but not yet loaded keeps its files."""
+        src = SimpleNamespace(files=[Path("a0.npy")], _file_offsets=[], sample_axis=0)
+        collate = SequenceCollate(source=src)
+        assert collate.files == [Path("a0.npy")]
+        assert collate.file_offsets == []

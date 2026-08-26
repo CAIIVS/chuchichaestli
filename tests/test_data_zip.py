@@ -8,8 +8,11 @@ import torch
 import numpy as np
 from pathlib import Path
 import tempfile
+from torch.utils.data import DataLoader
 from chuchichaestli.data.zip import ZipDataset
-from chuchichaestli.data.base import CachingDataset
+from chuchichaestli.data.base import CachingDataset, with_indices
+from chuchichaestli.data.batching import SlidingWindowBatchSampler
+from chuchichaestli.data.collate import SlidingWindowCollate
 from chuchichaestli.data.cache import nbytes
 
 
@@ -665,3 +668,41 @@ class TestZipDatasetIndexStructure:
     def test_files_is_none_without_any(self):
         """No constituent reports paths."""
         assert ZipDataset(DummyDataset(np.zeros((4, 2)))).files is None
+
+
+class TestZipDatasetAsCollateSource:
+    """A `ZipDataset` handed to a collate as its provenance source."""
+
+    def test_file_less_zip_is_accepted(self):
+        """Zipping in-memory datasets yields no files; that must not crash."""
+        zipped = ZipDataset(
+            DummyDataset(np.zeros((10, 2))), DummyDataset(np.zeros((10, 3)))
+        )
+        assert zipped.files is None and zipped._file_offsets is None
+        assert SlidingWindowCollate(window_size=2, source=zipped)._snaps == []
+
+    def test_windowing_a_file_less_zip_end_to_end(self):
+        """The whole stack runs, just without provenance keys on the batch."""
+        zipped = ZipDataset(
+            DummyDataset(np.arange(10 * 2).reshape(10, 2).astype(np.float32)),
+            DummyDataset(np.arange(10 * 3).reshape(10, 3).astype(np.float32)),
+        )
+        sampler = SlidingWindowBatchSampler(zipped, window_size=2, batch_size=2)
+        collate = SlidingWindowCollate.from_sampler(sampler, source=zipped)
+        batch = next(
+            iter(
+                DataLoader(
+                    with_indices(zipped), batch_sampler=sampler, collate_fn=collate
+                )
+            )
+        )
+        assert not isinstance(batch, dict)
+        assert [t.shape for t in batch] == [(2, 2, 2), (2, 2, 3)]
+
+    def test_zip_with_files_still_resolves_provenance(self):
+        """The tolerant path must not disable provenance where it exists."""
+        a = _Offsets(np.zeros((10, 2)), [0, 5, 10], files=["a0.npy", "a1.npy"])
+        b = _Offsets(np.zeros((10, 3)), [0, 5, 10], files=["b0.npy", "b1.npy"])
+        collate = SlidingWindowCollate(window_size=2, source=ZipDataset(a, b))
+        assert collate.files == [Path("a0.npy"), Path("a1.npy")]
+        assert collate.file_offsets == [0, 5, 10]

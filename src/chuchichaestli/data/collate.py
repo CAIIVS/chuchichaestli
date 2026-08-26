@@ -46,10 +46,25 @@ class _SourceProvenance:
             sources = list(source)
         else:
             sources = [source]
-        self._snaps: list[tuple[list[Path], list[int], int | None]] = [
-            (list(s.files), list(s._file_offsets), getattr(s, "sample_axis", 0))
-            for s in sources
-        ]
+        snaps: list[tuple[list[Path], list[int], int | None]] = []
+        for s in sources:
+            files = getattr(s, "files", None)
+            if not files:
+                # No file structure to resolve against (e.g. a `ZipDataset`
+                # over in-memory datasets); such a source carries no
+                # provenance, so batches simply come back without it.
+                continue
+            offsets = getattr(s, "_file_offsets", None)
+            snaps.append(
+                (list(files), list(offsets or []), getattr(s, "sample_axis", 0))
+            )
+        if snaps and len(snaps) != len(sources):
+            raise ValueError(
+                f"{len(sources) - len(snaps)} of {len(sources)} sources report "
+                "no files; provenance is resolved per source position, so pass "
+                "either all sources with files or none"
+            )
+        self._snaps = snaps
 
     @property
     def files(self) -> list[Path] | None:
