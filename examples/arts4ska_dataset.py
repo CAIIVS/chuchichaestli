@@ -47,14 +47,14 @@ rx = re.compile(SEQ_PATTERN)
 
 # `ZipNumpyDataset` pairs xfrac & ionrates into dict samples. Wildcard paths
 # are globbed and sorted internally (for str):
-# - new_axis=True -> each file is one 3D sample.
+# - sample_axis=None -> each file is one 3D sample.
 # - strict=True   -> pairing is 1:1, a count mismatch should raise.
 zipds = ZipNumpyDataset.from_named_paths(
     {
         "xfrac": f"{data_dir}/xfrac_z*_[0-9]*.npy",
         "ion_rates": f"{data_dir}/IonRates_z*_[0-9]*.npy"
     },
-    new_axis=True,
+    sample_axis=None,
     cache="512M",
     strict=True,
 )
