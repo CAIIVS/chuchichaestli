@@ -50,9 +50,6 @@ class _SourceProvenance:
         for s in sources:
             files = getattr(s, "files", None)
             if not files:
-                # No file structure to resolve against (e.g. a `ZipDataset`
-                # over in-memory datasets); such a source carries no
-                # provenance, so batches simply come back without it.
                 continue
             offsets = getattr(s, "_file_offsets", None)
             snaps.append(
