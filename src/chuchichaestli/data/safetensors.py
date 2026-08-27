@@ -127,7 +127,7 @@ class SafetensorsDataset(CachingDataset):
             preload: Preload and cache the dataset.
             kwargs: Reserved for forward-compatibility.
 
-        Note: `new_axis=True` (from inherited class) is not supported; each file may
+        Note: `sample_axis=None` (from inherited class) is not supported; each file may
             contain multiple keys with heterogeneous shapes and has no single tensor.
         """
         # Key patterns
@@ -151,7 +151,7 @@ class SafetensorsDataset(CachingDataset):
             attrs_cache=attrs_cache,
             preload=preload,
             copy_on_write=False,
-            new_axis=False,
+            sample_axis=0,
             has_attrs=attrs_keys is not None,
         )
 

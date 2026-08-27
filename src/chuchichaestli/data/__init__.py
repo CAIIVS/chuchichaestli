@@ -29,10 +29,13 @@ from chuchichaestli.data.procedural import (
 from chuchichaestli.data.batching import (
     HierarchicalBatchSampler,
     HierarchicalFileBatchSampler,
+    SlidingWindowBatchSampler,
 )
 from chuchichaestli.data.collate import (
     SequenceCollate,
     sequence_collate,
+    SlidingWindowCollate,
+    sliding_window_collate,
 )
 from chuchichaestli.data.transforms import (
     RandomCropND,
@@ -89,11 +92,14 @@ __all__ = [
     "generate_procedural_dataset",
     "HierarchicalBatchSampler",
     "HierarchicalFileBatchSampler",
+    "SlidingWindowBatchSampler",
     "IndexedSample",
     "WithIndices",
     "with_indices",
     "SequenceCollate",
     "sequence_collate",
+    "SlidingWindowCollate",
+    "sliding_window_collate",
     "RandomCropND",
     "CenterCropND",
     "RandomFlipND",

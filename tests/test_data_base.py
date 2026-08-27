@@ -61,16 +61,18 @@ class DummyCachingDataset(CachingDataset):
         self._mmap_attrs = []
         self._file_offsets = []
 
+
 def filter_attrs_files(files):
     """Filter out .attrs.npy files from a list of paths.
-    
+
     Args:
         files: List of file paths (strings or Path objects).
-        
+
     Returns:
         List of paths excluding .attrs.npy files.
     """
-    return [f for f in files if '.attrs' not in str(f)]
+    return [f for f in files if ".attrs" not in str(f)]
+
 
 @pytest.fixture
 def temp_dir():
@@ -78,39 +80,43 @@ def temp_dir():
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
 
+
 @pytest.fixture
 def sample_data():
     """Generate sample data for testing."""
     return {
-        'data1': np.random.randn(10, 5, 5).astype(np.float32),
-        'data2': np.random.randn(15, 5, 5).astype(np.float32),
-        'data3': np.random.randn(8, 5, 5).astype(np.float32),
+        "data1": np.random.randn(10, 5, 5).astype(np.float32),
+        "data2": np.random.randn(15, 5, 5).astype(np.float32),
+        "data3": np.random.randn(8, 5, 5).astype(np.float32),
     }
+
 
 @pytest.fixture
 def sample_attrs():
     """Generate sample attributes for testing."""
     return {
-        'data1': np.array([{'id': i, 'label': f'sample_{i}'} for i in range(10)]),
-        'data2': np.array([{'id': i, 'label': f'sample_{i}'} for i in range(15)]),
-        'data3': np.array([{'id': i, 'label': f'sample_{i}'} for i in range(8)]),
+        "data1": np.array([{"id": i, "label": f"sample_{i}"} for i in range(10)]),
+        "data2": np.array([{"id": i, "label": f"sample_{i}"} for i in range(15)]),
+        "data3": np.array([{"id": i, "label": f"sample_{i}"} for i in range(8)]),
     }
+
 
 @pytest.fixture
 def create_test_files(temp_dir, sample_data, sample_attrs):
     """Create test .npy files in the temporary directory."""
-    files = []    
+    files = []
     for name, data in sample_data.items():
         file_path = temp_dir / f"{name}.npy"
         np.save(file_path, data)
         files.append(file_path)
-        
+
         # Save corresponding attributes
         if name in sample_attrs:
             attrs_path = temp_dir / f"{name}.attrs.npy"
             np.save(attrs_path, sample_attrs[name])
-    
+
     return filter_attrs_files(files)
+
 
 @pytest.fixture
 def create_nested_files(temp_dir):
@@ -119,21 +125,22 @@ def create_nested_files(temp_dir):
     (temp_dir / "subdir1").mkdir()
     (temp_dir / "subdir2").mkdir()
     (temp_dir / "subdir1" / "nested").mkdir()
-    
+
     files = []
-    
+
     # Create files in different locations
-    for i, path in enumerate([
-        temp_dir / "file1.npy",
-        temp_dir / "subdir1" / "file2.npy",
-        temp_dir / "subdir1" / "nested" / "file3.npy",
-        temp_dir / "subdir2" / "file4.npy",
-    ]):
+    for i, path in enumerate(
+        [
+            temp_dir / "file1.npy",
+            temp_dir / "subdir1" / "file2.npy",
+            temp_dir / "subdir1" / "nested" / "file3.npy",
+            temp_dir / "subdir2" / "file4.npy",
+        ]
+    ):
         data = np.random.randn(5, 3, 3).astype(np.float32)
         np.save(path, data)
         files.append(path)
     return filter_attrs_files(files)
-
 
 
 class TestFileDataset:
@@ -211,7 +218,7 @@ class TestFileDataset:
     def test_glob_path_nonexistent_warns(self, temp_dir):
         """Test that glob_path warns about missing files."""
         pattern = str(temp_dir / "nonexistent" / "*.npy")
-      
+
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
             result = FileDataset.glob_path(pattern)
@@ -221,10 +228,10 @@ class TestFileDataset:
         """Test check_files_exist method."""
         existing_file = create_test_files[0]
         missing_file = temp_dir / "missing.npy"
-      
+
         files = [existing_file, missing_file]
         existing, missing = FileDataset.check_files_exist(files)
-      
+
         assert len(existing) == 1
         assert existing[0] == existing_file
         assert len(missing) == 1
@@ -236,7 +243,7 @@ class TestFileDataset:
             create_test_files,
             extensions=[".npy"],
             check_exists=True,
-            raise_on_error=True
+            raise_on_error=True,
         )
         assert len(result) == 3
 
@@ -248,7 +255,7 @@ class TestFileDataset:
                 [missing_file],
                 extensions=[".npy"],
                 check_exists=True,
-                raise_on_error=True
+                raise_on_error=True,
             )
 
     def test_validate_files_missing_warns(self, temp_dir):
@@ -260,7 +267,7 @@ class TestFileDataset:
                 [missing_file],
                 extensions=[".npy"],
                 check_exists=True,
-                raise_on_error=False
+                raise_on_error=False,
             )
             assert len(result) == 0
             assert len(w) == 1
@@ -272,10 +279,7 @@ class TestFileDataset:
         txt_file.write_text("test")
         with pytest.raises(ValueError, match="Invalid file extension"):
             FileDataset.validate_files(
-                [txt_file],
-                extensions=[".npy"],
-                check_exists=False,
-                raise_on_error=True
+                [txt_file], extensions=[".npy"], check_exists=False, raise_on_error=True
             )
 
     def test_validate_files_invalid_extension_warns(self, temp_dir):
@@ -288,7 +292,7 @@ class TestFileDataset:
                 [txt_file],
                 extensions=[".npy"],
                 check_exists=False,
-                raise_on_error=False
+                raise_on_error=False,
             )
             assert len(result) == 0
             assert len(w) == 1
@@ -320,27 +324,18 @@ class TestFileDataset:
 
     def test_dtype_setting(self, create_test_files):
         """Test that dtype is correctly set."""
-        dataset = DummyFileDataset(
-            path=str(create_test_files[0]),
-            dtype=torch.float64
-        )
+        dataset = DummyFileDataset(path=str(create_test_files[0]), dtype=torch.float64)
         assert dataset.dtype == torch.float64
 
     def test_return_as_tuple(self, create_test_files):
         """Test return_as='tuple' setting."""
-        dataset = DummyFileDataset(
-            path=str(create_test_files[0]),
-            return_as='tuple'
-        )
-        assert dataset.return_as == 'tuple'
+        dataset = DummyFileDataset(path=str(create_test_files[0]), return_as="tuple")
+        assert dataset.return_as == "tuple"
 
     def test_return_as_dict(self, create_test_files):
         """Test return_as='dict' setting."""
-        dataset = DummyFileDataset(
-            path=str(create_test_files[0]),
-            return_as='dict'
-        )
-        assert dataset.return_as == 'dict'
+        dataset = DummyFileDataset(path=str(create_test_files[0]), return_as="dict")
+        assert dataset.return_as == "dict"
 
     def test_shape_property(self, temp_dir, create_test_files):
         """Test shape property."""
@@ -406,9 +401,9 @@ class TestFileDataset:
         with pytest.raises(IndexError, match="out of range"):
             dataset._map_index(100)
 
-    def test_map_index_out_of_range_new_axis(self, temp_dir, create_test_files):
+    def test_map_index_out_of_range_sample_axis(self, temp_dir, create_test_files):
         """Test _map_index raises IndexError for out of range index."""
-        dataset = DummyFileDataset(path=create_test_files, new_axis=True)
+        dataset = DummyFileDataset(path=create_test_files, sample_axis=None)
         with pytest.raises(IndexError, match="out of range"):
             dataset._map_index(100)
 
@@ -448,12 +443,9 @@ class TestFileDataset:
 
     def test_format_output_tuple(self, create_test_files):
         """Test _format_output with return_as='tuple'."""
-        dataset = DummyFileDataset(
-            path=str(create_test_files[0]),
-            return_as='tuple'
-        )
+        dataset = DummyFileDataset(path=str(create_test_files[0]), return_as="tuple")
         item = torch.randn(5, 5)
-        attrs = {'id': 0}
+        attrs = {"id": 0}
         result = dataset._format_output(item, attrs)
         assert isinstance(result, tuple)
         assert len(result) == 2
@@ -462,33 +454,29 @@ class TestFileDataset:
 
     def test_format_output_dict(self, create_test_files):
         """Test _format_output with return_as='dict'."""
-        dataset = DummyFileDataset(
-            path=str(create_test_files[0]),
-            return_as='dict'
-        )
+        dataset = DummyFileDataset(path=str(create_test_files[0]), return_as="dict")
         item = torch.randn(5, 5)
-        attrs = {'id': 0}
+        attrs = {"id": 0}
         result = dataset._format_output(item, attrs)
         assert isinstance(result, dict)
-        assert 'data' in result
-        assert 'attrs' in result
-        assert torch.equal(result['data'], item)
-        assert result['attrs'] == attrs
+        assert "data" in result
+        assert "attrs" in result
+        assert torch.equal(result["data"], item)
+        assert result["attrs"] == attrs
 
     def test_format_output_dict_template(self, create_test_files):
         """Test _format_output with custom dict template."""
         dataset = DummyFileDataset(
-            path=str(create_test_files[0]),
-            return_as={'image': None, 'metadata': None}
+            path=str(create_test_files[0]), return_as={"image": None, "metadata": None}
         )
         item = torch.randn(5, 5)
-        attrs = {'id': 0}
+        attrs = {"id": 0}
         result = dataset._format_output(item, attrs)
         assert isinstance(result, dict)
-        assert 'image' in result
-        assert 'metadata' in result
-        assert torch.equal(result['image'], item)
-        assert result['metadata'] == attrs
+        assert "image" in result
+        assert "metadata" in result
+        assert torch.equal(result["image"], item)
+        assert result["metadata"] == attrs
 
     def test_context_manager(self, create_test_files):
         """Test context manager functionality."""
@@ -531,7 +519,7 @@ class TestFileDataset:
         """Test handling of mixed file types."""
         # Create files with different extensions
         np.save(temp_dir / "file1.npy", np.random.randn(5, 3))
-        (temp_dir / "file2.txt").write_text("test")    
+        (temp_dir / "file2.txt").write_text("test")
         pattern = str(temp_dir / "*")
         dataset = DummyFileDataset(path=pattern)
         # Should only load .npy files
@@ -551,10 +539,7 @@ class TestFileDataset:
         data = np.random.randn(10, 5, 5).astype(np.float64)
         file_path = temp_dir / "float64.npy"
         np.save(file_path, data)
-        dataset = DummyFileDataset(
-            path=str(file_path),
-            dtype=torch.float64
-        )
+        dataset = DummyFileDataset(path=str(file_path), dtype=torch.float64)
         item = dataset[0]
         assert item.dtype == torch.float64
 
@@ -648,48 +633,34 @@ class TestCachingDataset:
 
     def test_init_custom_cache_size(self, create_test_files):
         """Test initialization with custom cache size."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="1M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="1M")
         assert dataset.cache_size == nbytes("1M")
         dataset.close()
 
     def test_init_no_cache(self, create_test_files):
         """Test initialization with cache disabled."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache=None
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache=None)
         # Cache should still exist but with size 0
         assert dataset.cache is not None
         dataset.close()
 
     def test_init_with_attrs_cache(self, create_test_files):
         """Test initialization with attributes cache."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            attrs_cache="1M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), attrs_cache="1M")
         assert dataset.attrs_cache is not None
         dataset.close()
 
     def test_init_with_preload(self, create_test_files):
         """Test initialization with preload option."""
         dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M",
-            preload=True
+            path=str(create_test_files[0]), cache="10M", preload=True
         )
         assert dataset.n_cached > 0
         dataset.close()
 
     def test_n_cached_property(self, create_test_files):
         """Test n_cached property."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="10M")
         # Initially should be 0
         initial_cached = dataset.n_cached
         # Access an item to cache it
@@ -700,19 +671,13 @@ class TestCachingDataset:
 
     def test_n_cacheable_property(self, create_test_files):
         """Test n_cacheable property."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="10M")
         assert dataset.n_cacheable >= 0
         dataset.close()
 
     def test_cached_bytes_property(self, create_test_files):
         """Test cached_bytes property."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="10M")
         assert isinstance(dataset.cached_bytes, nbytes)
         _ = dataset[0]
         assert dataset.cached_bytes > 0
@@ -721,9 +686,7 @@ class TestCachingDataset:
     def test_cached_bytes_total_property(self, create_test_files):
         """Test cached_bytes_total property."""
         dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M",
-            attrs_cache="1M"
+            path=str(create_test_files[0]), cache="10M", attrs_cache="1M"
         )
         assert isinstance(dataset.cached_bytes_total, nbytes)
         _ = dataset[0]
@@ -732,19 +695,14 @@ class TestCachingDataset:
 
     def test_cache_size_property(self, create_test_files):
         """Test cache_size property."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="5M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="5M")
         assert dataset.cache_size == nbytes("5M")
         dataset.close()
 
     def test_cache_size_total_property(self, create_test_files):
         """Test cache_size_total property."""
         dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="5M",
-            attrs_cache="1M"
+            path=str(create_test_files[0]), cache="5M", attrs_cache="1M"
         )
         expected = nbytes("5M") + nbytes("1M")
         assert dataset.cache_size_total == expected
@@ -768,10 +726,7 @@ class TestCachingDataset:
 
     def test_cache_item(self, create_test_files):
         """Test caching an item."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="10M")
         item = torch.randn(5, 5)
         dataset.cache_item(0, item)
         cached = dataset.get_cached(0)
@@ -781,20 +736,14 @@ class TestCachingDataset:
 
     def test_get_cached_miss(self, create_test_files):
         """Test getting uncached item returns None."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="10M")
         cached = dataset.get_cached(5)
         assert cached is None
         dataset.close()
 
     def test_cache_item_overwrite(self, create_test_files):
         """Test overwriting cached item."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="10M")
         item1 = torch.randn(5, 5)
         item2 = torch.randn(5, 5)
         dataset.cache_item(0, item1)
@@ -812,7 +761,7 @@ class TestCachingDataset:
             attrs_cache="1M",
             has_attrs=True,
         )
-        attrs = {'id': 0, 'label': 'test'}
+        attrs = {"id": 0, "label": "test"}
         dataset.cache_attrs(0, attrs)
         cached_attrs = dataset.get_cached_attrs(0)
         assert cached_attrs == attrs
@@ -821,19 +770,14 @@ class TestCachingDataset:
     def test_get_cached_attrs_miss(self, create_test_files):
         """Test getting uncached attrs returns None."""
         dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M",
-            attrs_cache="1M"
+            path=str(create_test_files[0]), cache="10M", attrs_cache="1M"
         )
         cached = dataset.get_cached_attrs(5)
         assert cached is None
 
     def test_clear_cache(self, create_test_files):
         """Test clearing the cache."""
-        dataset = DummyCachingDataset(
-            path=create_test_files,
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=create_test_files, cache="10M")
         dataset.cache_item(0, torch.randn(5, 5))
         dataset.cache_item(1, torch.randn(5, 5))
         dataset.purge_cache()
@@ -842,29 +786,20 @@ class TestCachingDataset:
 
     def test_purge_cache(self, create_test_files):
         """Test purging the cache."""
-        dataset = DummyCachingDataset(
-            path=create_test_files,
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=create_test_files, cache="10M")
         original_cache_size = dataset.cache_size
         dataset.purge_cache(reset=True)
         assert dataset.cache_size == original_cache_size
 
     def test_purge_cache_no_reset(self, create_test_files):
         """Test purging cache without reset."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="10M")
         dataset.purge_cache(reset=False)
         assert dataset.cache_size == nbytes(0)
 
     def test_getitem_with_cache(self, create_test_files):
         """Test __getitem__ uses cache."""
-        dataset = DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M"
-        )
+        dataset = DummyCachingDataset(path=str(create_test_files[0]), cache="10M")
         item1 = dataset[0]
         item2 = dataset[0]
         assert torch.equal(item1, item2)
@@ -872,8 +807,7 @@ class TestCachingDataset:
     def test_context_manager_purges_cache(self, create_test_files):
         """Test that context manager purges cache on exit."""
         with DummyCachingDataset(
-            path=str(create_test_files[0]),
-            cache="10M"
+            path=str(create_test_files[0]), cache="10M"
         ) as dataset:
             _ = dataset[0]
             initial_cache_size = dataset.cache_size
@@ -884,7 +818,7 @@ class TestCachingDataset:
         """Test with cache size larger than dataset."""
         dataset = DummyCachingDataset(
             path=str(create_test_files[0]),
-            cache="1G"  # much larger than needed
+            cache="1G",  # much larger than needed
         )
         assert dataset.cache is not None
 
@@ -892,7 +826,7 @@ class TestCachingDataset:
         """Test with very small cache size."""
         dataset = DummyCachingDataset(
             path=str(create_test_files[0]),
-            cache="1K"  # very small
+            cache="1K",  # very small
         )
         assert dataset.cache is not None
 

@@ -94,7 +94,7 @@ class HDF5Dataset(CachingDataset):
             preload=preload,
             copy_on_write=True,
             has_attrs=attrs_groups is not None,
-            new_axis=False,
+            sample_axis=0,
         )
 
     def load(self, **kwargs):

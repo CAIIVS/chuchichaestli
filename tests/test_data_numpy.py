@@ -165,63 +165,63 @@ class TestNumpyDataset:
         with pytest.raises(ValueError, match="incompatible"):
             NumpyDataset(file_path, keys="*")
 
-    def test_single_npy_new_axis_len_is_one(self, sample_npy_file):
-        """A single .npy file with new_axis=True has len==1."""
-        ds = NumpyDataset(sample_npy_file, new_axis=True)
+    def test_single_npy_sample_axis_len_is_one(self, sample_npy_file):
+        """A single .npy file with sample_axis=None has len==1."""
+        ds = NumpyDataset(sample_npy_file, sample_axis=None)
         assert len(ds) == 1
         ds.close()
 
-    def test_single_npy_new_axis_shape(self, sample_npy_file):
-        """Dataset shape is (n_files, *file_shape) when new_axis=True."""
-        ds = NumpyDataset(sample_npy_file, new_axis=True)
+    def test_single_npy_sample_axis_shape(self, sample_npy_file):
+        """Dataset shape is (n_files, *file_shape) when sample_axis=None."""
+        ds = NumpyDataset(sample_npy_file, sample_axis=None)
         # sample_npy_file contains (100, 3, 64, 64)
         assert ds.shape == (1, 100, 3, 64, 64)
         ds.close()
 
-    def test_multi_npy_new_axis_len_equals_n_files(self, multiple_npy_files):
+    def test_multi_npy_sample_axis_len_equals_n_files(self, multiple_npy_files):
         """Multiple .npy files → len equals the number of files, not total rows."""
-        ds = NumpyDataset(multiple_npy_files, new_axis=True)
+        ds = NumpyDataset(multiple_npy_files, sample_axis=None)
         assert len(ds) == 3
         ds.close()
 
-    def test_multi_npy_new_axis_dataset_shape(self, multiple_npy_files):
+    def test_multi_npy_sample_axis_dataset_shape(self, multiple_npy_files):
         """Dataset shape is (n_files, *file_shape) for multiple files."""
-        ds = NumpyDataset(multiple_npy_files, new_axis=True)
+        ds = NumpyDataset(multiple_npy_files, sample_axis=None)
         # each file is (50, 3, 32, 32)
         assert ds.shape == (3, 50, 3, 32, 32)
         ds.close()
 
     def test_sample_shape_is_full_file(self, multiple_npy_files):
         """Each sample has the full file shape, not a single-row shape."""
-        ds = NumpyDataset(multiple_npy_files, new_axis=True)
+        ds = NumpyDataset(multiple_npy_files, sample_axis=None)
         sample = ds[0]
         assert sample.shape == (50, 3, 32, 32)
         ds.close()
 
-    def test_new_axis_values_match_source_array(self, temp_dir):
+    def test_sample_axis_values_match_source_array(self, temp_dir):
         """Values returned by ds[i] match the original full array."""
         data = np.arange(24, dtype=np.float32).reshape(4, 2, 3)
         path = temp_dir / "known.npy"
         np.save(path, data)
-        ds = NumpyDataset(path, new_axis=True, dtype=torch.float32)
+        ds = NumpyDataset(path, sample_axis=None, dtype=torch.float32)
         result = ds[0]
         expected = torch.from_numpy(data)
         assert torch.allclose(result, expected)
         ds.close()
 
-    def test_new_axis_negative_index(self, multiple_npy_files):
-        """Negative indices wrap around correctly with new_axis=True."""
-        ds = NumpyDataset(multiple_npy_files, new_axis=True)
+    def test_sample_axis_negative_index(self, multiple_npy_files):
+        """Negative indices wrap around correctly with sample_axis=None."""
+        ds = NumpyDataset(multiple_npy_files, sample_axis=None)
         assert torch.allclose(ds[-1], ds[2])
         assert torch.allclose(ds[-3], ds[0])
         ds.close()
 
-    def test_caching_works_with_new_axis(self, temp_dir):
+    def test_caching_works_with_sample_axis(self, temp_dir):
         """Cache stores and retrieves the full-file sample correctly."""
         data = np.random.randn(10, 4, 4).astype(np.float32)
         path = temp_dir / "cache_test.npy"
         np.save(path, data)
-        ds = NumpyDataset(path, new_axis=True, cache="100M")
+        ds = NumpyDataset(path, sample_axis=None, cache="100M")
         assert ds.n_cached == 0
         first = ds[0]
         assert ds.n_cached == 1
@@ -545,14 +545,12 @@ class TestZipNumpyDataset:
         assert isinstance(sample, tuple)
         ds.close()
 
-    def test_zip_from_paths_new_axis(self, multiple_npy_files):
-        """ZipNumpyDataset.from_paths forwards new_axis=True to each sub-dataset."""
+    def test_zip_from_paths_sample_axis(self, multiple_npy_files):
+        """ZipNumpyDataset.from_paths forwards sample_axis=None to each sub-dataset."""
         ds = ZipNumpyDataset.from_paths(
-            multiple_npy_files[0],
-            multiple_npy_files[1],
-            new_axis=True
+            multiple_npy_files[0], multiple_npy_files[1], sample_axis=None
         )
-        # two datasets, treated as one sample each due to new_axis -> ziped as one
+        # two datasets, treated as one sample each due to sample_axis -> zipped as one
         assert len(ds) == 1
         sample = ds[0]
         assert isinstance(sample, tuple)
@@ -678,3 +676,138 @@ class TestZipNumpyDataset:
             samples_seen += 1
         assert samples_seen == 10
         ds.close()
+
+
+class TestSampleAxis:
+    """Samples enumerated along an axis other than 0, and the old flag."""
+
+    @staticmethod
+    def _file(tmp, shape):
+        """Write one .npy file of `shape` holding its own flat index values."""
+        path = tmp / "cube.npy"
+        data = np.arange(int(np.prod(shape)), dtype=np.float32).reshape(shape)
+        np.save(path, data)
+        return path, data
+
+    def test_len_counts_along_the_chosen_axis(self, temp_dir):
+        """A (4, 7, 3) file with sample_axis=1 holds 7 samples."""
+        path, _ = self._file(temp_dir, (4, 7, 3))
+        assert len(NumpyDataset(path, sample_axis=1)) == 7
+
+    def test_shape_drops_the_sample_axis(self, temp_dir):
+        """The sample axis is removed from the per-sample shape."""
+        path, _ = self._file(temp_dir, (4, 7, 3))
+        assert NumpyDataset(path, sample_axis=1).shape == (7, 4, 3)
+
+    def test_values_match_a_manual_take(self, temp_dir):
+        """Indexing matches slicing the source array along that axis."""
+        path, data = self._file(temp_dir, (4, 7, 3))
+        ds = NumpyDataset(path, sample_axis=1)
+        for i in (0, 3, 6):
+            assert torch.equal(ds[i], torch.from_numpy(data[:, i]))
+
+    def test_last_axis(self, temp_dir):
+        """The trailing axis works like any other."""
+        path, data = self._file(temp_dir, (4, 7, 3))
+        ds = NumpyDataset(path, sample_axis=2)
+        assert ds.shape == (3, 4, 7)
+        assert torch.equal(ds[1], torch.from_numpy(data[:, :, 1]))
+
+    def test_negative_axis_counts_from_the_end(self, temp_dir):
+        """`-1` is the last axis."""
+        path, _ = self._file(temp_dir, (4, 7, 3))
+        assert NumpyDataset(path, sample_axis=-1).shape == (3, 4, 7)
+
+    def test_out_of_range_axis_raises(self, temp_dir):
+        """An axis beyond the file's rank is rejected."""
+        path, _ = self._file(temp_dir, (4, 7, 3))
+        with pytest.raises(ValueError, match="out of range"):
+            len(NumpyDataset(path, sample_axis=5))
+
+    def test_axis_zero_is_the_default(self, temp_dir):
+        """The default must not change behaviour."""
+        path, data = self._file(temp_dir, (4, 7, 3))
+        ds = NumpyDataset(path)
+        assert ds.sample_axis == 0
+        assert ds.shape == (4, 7, 3)
+        assert torch.equal(ds[2], torch.from_numpy(data[2]))
+
+    def test_passing_a_bad_type_is_not_silently_accepted(self, temp_dir):
+        """`sample_axis` is an axis or None, never a bool."""
+        path, _ = self._file(temp_dir, (4, 7, 3))
+        # `True` would silently mean axis 1, so guard the old flag's spelling.
+        with pytest.raises(TypeError, match="sample_axis"):
+            NumpyDataset(path, sample_axis=True)
+
+    def test_caching_works_off_axis(self, temp_dir):
+        """Off-axis samples survive the shared-memory cache."""
+        path, data = self._file(temp_dir, (4, 7, 3))
+        ds = NumpyDataset(path, sample_axis=1, cache="10M")
+        first = ds[5].clone()
+        assert torch.equal(ds[5], first)
+        assert torch.equal(first, torch.from_numpy(data[:, 5]))
+
+
+class TestNpyArrayViewTupleIndexing:
+    """Off-axis reads served from the view's own memory map."""
+
+    @staticmethod
+    def _view(tmp, data, name="cube.npy"):
+        """Write `data` and return its view alongside a np.load reference."""
+        path = tmp / name
+        np.save(path, data)
+        return NpyArrayView(path), np.load(path, mmap_mode="r")
+
+    @pytest.mark.parametrize(
+        "idx",
+        [
+            (slice(None), 3, slice(None)),
+            (slice(0, 2), slice(None), 1),
+            (1, 2, 0),
+            (slice(None), slice(1, 4), 2),
+        ],
+    )
+    def test_matches_numpy_indexing(self, temp_dir, idx):
+        """Tuple reads return what indexing the array directly returns."""
+        data = np.arange(4 * 7 * 3, dtype=np.float32).reshape(4, 7, 3)
+        view, ref = self._view(temp_dir, data)
+        assert np.array_equal(view[idx], np.asarray(ref[idx]))
+
+    def test_matches_numpy_indexing_for_fortran_order(self, temp_dir):
+        """Fortran-order files are mapped in their own memory order."""
+        data = np.asfortranarray(np.arange(24, dtype=np.float32).reshape(4, 3, 2))
+        view, ref = self._view(temp_dir, data, "fortran.npy")
+        idx = (slice(None), 1, slice(None))
+        assert np.array_equal(view[idx], np.asarray(ref[idx]))
+
+    def test_result_is_a_copy_not_a_view(self, temp_dir):
+        """The returned array owns its data, so it survives `close`."""
+        data = np.arange(12, dtype=np.float32).reshape(3, 4)
+        view, _ = self._view(temp_dir, data)
+        out = view[(slice(None), 1)]
+        view.close()
+        assert np.array_equal(out, data[:, 1])
+
+    def test_map_is_reused_across_flush(self, temp_dir):
+        """`flush` releases the file descriptor but keeps the mapping."""
+        data = np.arange(12, dtype=np.float32).reshape(3, 4)
+        view, _ = self._view(temp_dir, data)
+        view[(slice(None), 1)]
+        mapped = view._local.mmap
+        view.flush()
+        view[(slice(None), 1)]
+        assert view._local.mmap is mapped
+
+    def test_close_releases_the_map(self, temp_dir):
+        """`close` drops the mapping, which the next read rebuilds."""
+        data = np.arange(12, dtype=np.float32).reshape(3, 4)
+        view, _ = self._view(temp_dir, data)
+        view[(slice(None), 1)]
+        view.close()
+        assert view._local.mmap is None
+        assert np.array_equal(view[(slice(None), 1)], data[:, 1])
+
+    def test_empty_array_is_indexable(self, temp_dir):
+        """A zero-length file cannot be mapped, but still indexes cleanly."""
+        view, _ = self._view(temp_dir, np.zeros((0, 4), dtype=np.float32), "empty.npy")
+        assert view[(slice(None), 1)].shape == (0,)

@@ -64,6 +64,28 @@ class NpyArrayView:
             self._local.fd = open(self._path, "rb")
         return self._local.fd
 
+    def _get_mmap(self) -> np.ndarray:
+        """Return the thread-local memory map over the whole array.
+
+        Built from the header metadata read at construction, so no header is
+        re-parsed. Kept across `flush` and released in `close`.
+        """
+        mm = getattr(self._local, "mmap", None)
+        if mm is None:
+            if not self.shape[0] or not self._sample_elems:
+                mm = np.empty(self.shape, dtype=self.dtype)
+            else:
+                mm = np.memmap(
+                    self._path,
+                    dtype=self.dtype,
+                    mode="r",
+                    offset=self._data_offset,
+                    shape=self.shape,
+                    order="F" if self._fortran_order else "C",
+                )
+            self._local.mmap = mm
+        return mm
+
     def flush(self) -> None:
         """Close the thread-local file descriptor.
 
@@ -75,8 +97,9 @@ class NpyArrayView:
             fd.close()
 
     def close(self) -> None:
-        """Alias for `flush`; called explicitly during dataset teardown."""
+        """Release the file descriptor and the memory map."""
         self.flush()
+        self._local.mmap = None
 
     def _read_fortran_sample(self, f, idx: int) -> np.ndarray:
         """Read a single Fortran-order sample without extra file handles."""
@@ -91,6 +114,9 @@ class NpyArrayView:
 
     def __getitem__(self, idx) -> np.ndarray:
         """Open the file, copy the requested slice, close immediately."""
+        if isinstance(idx, tuple):
+            # Off-axis-0 sampling: hand the striding to numpy
+            return np.asarray(self._get_mmap()[idx]).copy()
         if isinstance(idx, slice):
             start, stop, step = idx.indices(self.shape[0])
             indices = range(start, stop, step)
@@ -105,7 +131,11 @@ class NpyArrayView:
             if step == 1:
                 f.seek(self._data_offset + start * self._item_bytes)
                 buf = f.read(n * self._item_bytes)
-                return np.frombuffer(buf, dtype=self.dtype).reshape((n, *self._sample_shape)).copy()
+                return (
+                    np.frombuffer(buf, dtype=self.dtype)
+                    .reshape((n, *self._sample_shape))
+                    .copy()
+                )
             # Non-contiguous slice: read sample by sample
             return np.stack([self[i] for i in indices])
         f = self._get_fd()
@@ -142,7 +172,7 @@ class NumpyDataset(CachingDataset):
         cache: int | float | str | bool | nbytes | None = "4G",
         attrs_cache: int | float | str | bool | nbytes | None = None,
         preload: bool = False,
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ):
         """Constructor.
@@ -170,8 +200,8 @@ class NumpyDataset(CachingDataset):
             cache: Cache size for data items (e.g. `"4G"`, `4.0`, or bytes).
             attrs_cache: Cache size for attributes/metadata.
             preload: Preload and cache the dataset.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             kwargs: Reserved for forward-compatibility.
         """
         # Key patterns
@@ -194,7 +224,7 @@ class NumpyDataset(CachingDataset):
             preload=preload,
             copy_on_write=False,
             has_attrs=attrs_keys is not None,
-            new_axis=new_axis,
+            sample_axis=sample_axis,
         )
 
     def load(self, **kwargs):
@@ -207,7 +237,7 @@ class NumpyDataset(CachingDataset):
         # Issue warning if keys have been passed, but files only include .npy
         npy_files = [f for f in self.files if f.suffix == ".npy"]
         npz_files = [f for f in self.files if f.suffix == ".npz"]
-        
+
         if npy_files and not npz_files and self.key_patterns != ("*",):
             warnings.warn(
                 f"key_patterns {self.key_patterns!r} are ignored for .npy files, "
@@ -428,7 +458,7 @@ class ZipNumpyDataset(ZipDataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ) -> "ZipNumpyDataset":
         """Create a `ZipNumpyDataset` from multiple file paths.
@@ -446,8 +476,8 @@ class ZipNumpyDataset(ZipDataset):
             preload: Whether to preload all datasets.
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             **kwargs: Additional arguments forwarded to `NumpyDataset`.
         """
         if not paths:
@@ -461,7 +491,7 @@ class ZipNumpyDataset(ZipDataset):
                 preload=preload,
                 dtype=dtype,
                 return_as=return_as,
-                new_axis=new_axis,
+                sample_axis=sample_axis,
                 **kwargs,
             )
             for path in paths
@@ -525,7 +555,7 @@ class ZipNumpyDataset(ZipDataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ) -> "ZipNumpyDataset":
         """Create a `ZipNumpyDataset` with named paths returning a dict.
@@ -539,8 +569,8 @@ class ZipNumpyDataset(ZipDataset):
             preload: Whether to preload all datasets.
             dtype: PyTorch data type.
             return_as: Return format for individual datasets.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             **kwargs: Additional arguments forwarded to `NumpyDataset`.
         """
         if not paths:
@@ -554,7 +584,7 @@ class ZipNumpyDataset(ZipDataset):
                 preload=preload,
                 dtype=dtype,
                 return_as=return_as,
-                new_axis=new_axis,
+                sample_axis=sample_axis,
                 **kwargs,
             )
             for path in paths.values()

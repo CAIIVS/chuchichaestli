@@ -63,6 +63,42 @@ class ZipDataset(Dataset):
         if self._min_len == 0:
             warnings.warn("ZipDataset has length 0 (one or more datasets are empty)")
 
+        # Unify index structure, so samplers/collates can still read offsets
+        self._file_offsets = self._union_offsets()
+
+    def _union_offsets(self) -> list[int] | None:
+        """Sequence boundaries honouring every constituent's file structure."""
+        cuts: set[int] = set()
+        for dataset in self.datasets:
+            cuts.update(getattr(dataset, "_file_offsets", None) or ())
+        if not cuts:
+            return None
+        # `strict=False` truncates to the shortest dataset, so clip to match.
+        n = len(self)
+        bounds = sorted({0, n} | {c for c in cuts if 0 < c < n})
+        return bounds if len(bounds) > 1 else None
+
+    @property
+    def files(self) -> list[Path] | None:
+        """Source files of the first constituent that reports any.
+
+        The datasets are zipped sample-for-sample, so one set of paths labels
+        the batch; the remaining datasets hold their own paths.
+        """
+        for dataset in self.datasets:
+            files = getattr(dataset, "files", None)
+            if files:
+                return list(files)
+        return None
+
+    @property
+    def sample_axis(self) -> int | None:
+        """Sample axis of the first constituent that reports one."""
+        for dataset in self.datasets:
+            if hasattr(dataset, "sample_axis"):
+                return dataset.sample_axis
+        return 0
+
     @classmethod
     def from_paths(
         cls,
@@ -75,7 +111,7 @@ class ZipDataset(Dataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ) -> "ZipDataset":
         """Create ZipDatasets from multiple file paths with caching.
@@ -93,8 +129,8 @@ class ZipDataset(Dataset):
             preload: Whether to preload and cache all datasets.
             dtype: Data tensor type for all datasets.
             return_as: Return format for individual datasets.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             **kwargs: Additional keyword arguments passed to `dataset_cls`.
         """
         if not paths:
@@ -108,7 +144,7 @@ class ZipDataset(Dataset):
                 cache=cache,
                 attrs_cache=attrs_cache,
                 preload=preload,
-                new_axis=new_axis,
+                sample_axis=sample_axis,
                 **kwargs,
             )
             datasets.append(dataset)
@@ -125,7 +161,7 @@ class ZipDataset(Dataset):
         preload: bool = False,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
-        new_axis: bool = False,
+        sample_axis: int | None = 0,
         **kwargs,
     ) -> "ZipDataset":
         """Create ZipDataset from named paths with automatic dict return format.
@@ -141,8 +177,8 @@ class ZipDataset(Dataset):
             preload: Whether to preload and cache all datasets.
             dtype: Data tensor type for all datasets.
             return_as: Return format for individual datasets.
-            new_axis: If `True`, each file is one sample; see `FileDataset`
-                for full documentation.
+            sample_axis: Which axis enumerates samples, or `None` for one
+                sample per file; see `FileDataset` for full documentation.
             **kwargs: Additional keyword arguments passed to `dataset_cls`.
         """
         if not paths:
@@ -160,7 +196,7 @@ class ZipDataset(Dataset):
                 cache=cache,
                 attrs_cache=attrs_cache,
                 preload=preload,
-                new_axis=new_axis,
+                sample_axis=sample_axis,
                 **kwargs,
             )
             datasets.append(dataset)

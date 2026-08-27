@@ -47,14 +47,14 @@ rx = re.compile(SEQ_PATTERN)
 
 # `ZipNumpyDataset` pairs xfrac & ionrates into dict samples. Wildcard paths
 # are globbed and sorted internally (for str):
-# - new_axis=True -> each file is one 3D sample.
+# - sample_axis=None -> each file is one 3D sample.
 # - strict=True   -> pairing is 1:1, a count mismatch should raise.
 zipds = ZipNumpyDataset.from_named_paths(
     {
         "xfrac": f"{data_dir}/xfrac_z*_[0-9]*.npy",
-        "ion_rates": f"{data_dir}/IonRates_z*_[0-9]*.npy"
+        "ion_rates": f"{data_dir}/IonRates_z*_[0-9]*.npy",
     },
-    new_axis=True,
+    sample_axis=None,
     cache="512M",
     strict=True,
 )
@@ -82,7 +82,7 @@ print(f"Number of convergence loops (batches): {len(sampler)}")
 crop_collate = sequence_collate(
     transform=RandomCropND((128, 128, 128)),
     source=zipds.datasets,
-    key_fn=lambda p: (m.group(1) if (m := rx.search(p.name)) else "__ungrouped__"),
+    key_fn=lambda p: m.group(1) if (m := rx.search(p.name)) else "__ungrouped__",
 )
 
 # `with_indices` makes each sample carry its dataset index so the collate can
@@ -127,7 +127,10 @@ im_xf = axs[0].imshow(xf[mid, :, :], cmap="seismic", origin="lower")
 plt.colorbar(im_xf, ax=axs[0])
 axs[0].set_title("xfrac (batch 0, step -1)")
 im_ionr = axs[1].imshow(
-    ionr[mid, :, :], cmap="PuOr", vmax=0.1 * float(ionr[mid, :, :].max()), origin="lower"
+    ionr[mid, :, :],
+    cmap="PuOr",
+    vmax=0.1 * float(ionr[mid, :, :].max()),
+    origin="lower",
 )
 plt.colorbar(im_ionr, ax=axs[1])
 axs[1].set_title("IonRates (batch 0, step -1)")

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from chuchichaestli.data.batching import (
     HierarchicalBatchSampler,
     HierarchicalFileBatchSampler,
+    SlidingWindowBatchSampler,
 )
 
 
@@ -127,14 +128,18 @@ class TestHierarchicalFileBatchSampler:
     def test_len_matches_batch_count(self):
         """__len__ equals the total number of built batches."""
         ds = make_file_dataset([("a.npy", 6), ("b.npy", 4)])
-        sampler = HierarchicalFileBatchSampler(ds, key_fn=lambda p: p.stem, batch_size=2)
+        sampler = HierarchicalFileBatchSampler(
+            ds, key_fn=lambda p: p.stem, batch_size=2
+        )
         # file a → 3 batches, file b → 2 batches
         assert len(sampler) == 5
 
     def test_iter_covers_all_indices(self):
         """All sample indices appear exactly once across batches."""
         ds = make_file_dataset([("a.npy", 6), ("b.npy", 4)])
-        sampler = HierarchicalFileBatchSampler(ds, key_fn=lambda p: p.stem, batch_size=2)
+        sampler = HierarchicalFileBatchSampler(
+            ds, key_fn=lambda p: p.stem, batch_size=2
+        )
         indices = sorted(i for batch in sampler for i in batch)
         assert indices == list(range(10))
 
@@ -156,11 +161,13 @@ class TestHierarchicalFileBatchSampler:
 
     def test_grouping_keeps_file_indices_separate(self):
         """Samples from files sharing a key are batched together."""
-        ds = make_file_dataset([
-            ("group_a_0.npy", 4),
-            ("group_a_1.npy", 4),
-            ("group_b_0.npy", 4),
-        ])
+        ds = make_file_dataset(
+            [
+                ("group_a_0.npy", 4),
+                ("group_a_1.npy", 4),
+                ("group_b_0.npy", 4),
+            ]
+        )
 
         def key_fn(p):
             return "_".join(p.stem.split("_")[:2])  # "group_a" / "group_b"
@@ -202,11 +209,13 @@ class TestHierarchicalFileBatchSamplerFromFilename:
 
     def test_groups_by_captured_pattern(self):
         """Files matched by the same capture group are batched together."""
-        ds = make_file_dataset([
-            ("run_001_frame_0.npy", 4),
-            ("run_001_frame_1.npy", 4),
-            ("run_002_frame_0.npy", 4),
-        ])
+        ds = make_file_dataset(
+            [
+                ("run_001_frame_0.npy", 4),
+                ("run_001_frame_1.npy", 4),
+                ("run_002_frame_0.npy", 4),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_filename(
             ds, pattern=r"(run_\d+)", batch_size=4
         )
@@ -261,32 +270,38 @@ class TestHierarchicalFileBatchSamplerFromDirectory:
 
     def test_groups_by_immediate_parent(self):
         """depth=1 groups files by their immediate parent directory."""
-        ds = make_file_dataset([
-            ("/data/classA/img0.npy", 4),
-            ("/data/classA/img1.npy", 4),
-            ("/data/classB/img0.npy", 4),
-        ])
+        ds = make_file_dataset(
+            [
+                ("/data/classA/img0.npy", 4),
+                ("/data/classA/img1.npy", 4),
+                ("/data/classB/img0.npy", 4),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_directory(ds, depth=1, batch_size=4)
         # classA: 8 samples → 2 batches; classB: 4 → 1
         assert len(sampler) == 3
 
     def test_depth_two_groups_by_grandparent(self):
         """depth=2 groups by the grandparent directory."""
-        ds = make_file_dataset([
-            ("/root/split/classA/img0.npy", 4),
-            ("/root/split/classA/img1.npy", 4),
-            ("/root/other/classA/img0.npy", 4),
-        ])
+        ds = make_file_dataset(
+            [
+                ("/root/split/classA/img0.npy", 4),
+                ("/root/split/classA/img1.npy", 4),
+                ("/root/other/classA/img0.npy", 4),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_directory(ds, depth=2, batch_size=4)
         # "split" vs "other" → 2 distinct keys → 3 batches
         assert len(sampler) == 3
 
     def test_all_indices_covered(self):
         """All sample indices appear across all batches."""
-        ds = make_file_dataset([
-            ("/data/A/f0.npy", 5),
-            ("/data/B/f0.npy", 5),
-        ])
+        ds = make_file_dataset(
+            [
+                ("/data/A/f0.npy", 5),
+                ("/data/B/f0.npy", 5),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_directory(ds, depth=1, batch_size=2)
         indices = sorted(i for batch in sampler for i in batch)
         assert indices == list(range(10))
@@ -321,11 +336,13 @@ class TestOrderFn:
     def test_order_fn_sorts_group_numerically(self):
         """order_fn reorders a group's samples by the numeric key (2,3,10)."""
         # Files listed in lexical glob order: _10 precedes _2, _3.
-        ds = make_file_dataset([
-            ("xfrac_z9.940_10.npy", 1),
-            ("xfrac_z9.940_2.npy", 1),
-            ("xfrac_z9.940_3.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("xfrac_z9.940_10.npy", 1),
+                ("xfrac_z9.940_2.npy", 1),
+                ("xfrac_z9.940_3.npy", 1),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler(
             ds, key_fn=lambda p: "z9.940", batch_size=None, order_fn=_order_n
         )
@@ -348,13 +365,15 @@ class TestWholeGroupBatching:
 
     def test_merges_group_into_single_batch(self):
         """batch_size=None yields one batch per group, merging all indices."""
-        ds = make_file_dataset([
-            ("run_a_1.npy", 1),
-            ("run_a_2.npy", 1),
-            ("run_a_3.npy", 1),
-            ("run_b_1.npy", 1),
-            ("run_b_2.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("run_a_1.npy", 1),
+                ("run_a_2.npy", 1),
+                ("run_a_3.npy", 1),
+                ("run_b_1.npy", 1),
+                ("run_b_2.npy", 1),
+            ]
+        )
         key_fn = lambda p: p.name.split("_")[1]  # "a" / "b"  # noqa: E731
         sampler = HierarchicalFileBatchSampler(ds, key_fn=key_fn, batch_size=None)
         batches = list(sampler)
@@ -374,24 +393,32 @@ class TestWholeGroupBatching:
         """drop_last has no effect when batch_size is None."""
         specs = [("g_1.npy", 1), ("g_2.npy", 1), ("g_3.npy", 1)]
         keep = HierarchicalFileBatchSampler(
-            make_file_dataset(specs), key_fn=lambda p: "g",
-            batch_size=None, order_fn=_order_n, drop_last=False,
+            make_file_dataset(specs),
+            key_fn=lambda p: "g",
+            batch_size=None,
+            order_fn=_order_n,
+            drop_last=False,
         )
         drop = HierarchicalFileBatchSampler(
-            make_file_dataset(specs), key_fn=lambda p: "g",
-            batch_size=None, order_fn=_order_n, drop_last=True,
+            make_file_dataset(specs),
+            key_fn=lambda p: "g",
+            batch_size=None,
+            order_fn=_order_n,
+            drop_last=True,
         )
         assert list(keep) == list(drop) == [[0, 1, 2]]
 
     def test_shuffle_preserves_intra_batch_order(self):
         """Shuffle reorders batches but each batch stays order_fn-monotonic."""
-        ds = make_file_dataset([
-            ("s1_10.npy", 1),
-            ("s1_2.npy", 1),
-            ("s1_3.npy", 1),
-            ("s2_2.npy", 1),
-            ("s2_1.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("s1_10.npy", 1),
+                ("s1_2.npy", 1),
+                ("s1_3.npy", 1),
+                ("s2_2.npy", 1),
+                ("s2_1.npy", 1),
+            ]
+        )
         key_fn = lambda p: p.name.split("_")[0]  # "s1" / "s2"  # noqa: E731
         sampler = HierarchicalFileBatchSampler(
             ds, key_fn=key_fn, batch_size=None, order_fn=_order_n, shuffle=True
@@ -405,9 +432,11 @@ class TestWholeGroupBatching:
         """shuffle=True yields a batch order that differs from insertion order."""
         specs = [(f"g{i}_1.npy", 1) for i in range(8)]
         key_fn = lambda p: p.name.split("_")[0]  # one group per file  # noqa: E731
-        ref = list(HierarchicalFileBatchSampler(
-            make_file_dataset(specs), key_fn=key_fn, batch_size=None, shuffle=False
-        ))
+        ref = list(
+            HierarchicalFileBatchSampler(
+                make_file_dataset(specs), key_fn=key_fn, batch_size=None, shuffle=False
+            )
+        )
         sampler = HierarchicalFileBatchSampler(
             make_file_dataset(specs), key_fn=key_fn, batch_size=None, shuffle=True
         )
@@ -424,13 +453,15 @@ class TestHierarchicalFileBatchSamplerFromSequences:
 
     def test_one_batch_per_sequence_key(self):
         """Each z-label group becomes one N-ascending batch."""
-        ds = make_file_dataset([
-            ("xfrac_z9.940_2.npy", 1),
-            ("xfrac_z9.940_10.npy", 1),
-            ("xfrac_z9.940_3.npy", 1),
-            ("xfrac_z8.100_2.npy", 1),
-            ("xfrac_z8.100_4.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("xfrac_z9.940_2.npy", 1),
+                ("xfrac_z9.940_10.npy", 1),
+                ("xfrac_z9.940_3.npy", 1),
+                ("xfrac_z8.100_2.npy", 1),
+                ("xfrac_z8.100_4.npy", 1),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_sequences(
             ds, pattern=r"_z([0-9.]+)_(\d+)", group=1, order_group=2, order_cast=int
         )
@@ -443,10 +474,12 @@ class TestHierarchicalFileBatchSamplerFromSequences:
 
     def test_warns_on_unmatched_files(self):
         """Unmatched files trigger a warning and form one fallback batch."""
-        ds = make_file_dataset([
-            ("xfrac_z9.940_2.npy", 1),
-            ("README.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("xfrac_z9.940_2.npy", 1),
+                ("README.npy", 1),
+            ]
+        )
         with pytest.warns(UserWarning, match="did not match"):
             sampler = HierarchicalFileBatchSampler.from_sequences(
                 ds, pattern=r"_z([0-9.]+)_(\d+)"
@@ -463,3 +496,213 @@ class TestHierarchicalFileBatchSamplerFromSequences:
             ds, pattern=r"_z([0-9.]+)_(\d+)"
         )
         assert isinstance(sampler, HierarchicalFileBatchSampler)
+
+
+class SizedSeq:
+    """Minimal sized dataset, optionally exposing sequence boundaries."""
+
+    def __init__(self, n, offsets=None):
+        """Build a sequence of `n` samples with optional boundary offsets."""
+        self.n = n
+        if offsets is not None:
+            self._file_offsets = offsets
+
+    def __len__(self):
+        """Number of samples."""
+        return self.n
+
+    def __getitem__(self, index):
+        """Return the sample index as a 1-element tensor."""
+        return torch.tensor([float(index)])
+
+
+def windows_of(sampler):
+    """Split a sampler's flattened batches back into individual windows."""
+    span = sampler.span
+    return [b[i : i + span] for b in sampler for i in range(0, len(b), span)]
+
+
+class TestSlidingWindowBatchSampler:
+    """Tests for SlidingWindowBatchSampler."""
+
+    def test_window_count_and_contents(self):
+        """Unit stride over one sequence yields every full window."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(10), window_size=3, horizon=1)
+        assert sampler.span == 4
+        assert sampler.n_windows == 7  # starts 0..6
+        assert windows_of(sampler)[0] == [0, 1, 2, 3]
+        assert windows_of(sampler)[-1] == [6, 7, 8, 9]
+
+    def test_windows_overlap_when_stride_below_window(self):
+        """Stride below window_size produces overlapping windows."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(8), window_size=4, stride=1)
+        wins = windows_of(sampler)
+        assert wins[0] == [0, 1, 2, 3]
+        assert wins[1] == [1, 2, 3, 4]
+
+    def test_stride_equal_span_is_non_overlapping(self):
+        """Stride equal to span reproduces contiguous chunking."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(8), window_size=2, horizon=2, stride=4
+        )
+        assert windows_of(sampler) == [[0, 1, 2, 3], [4, 5, 6, 7]]
+
+    def test_batch_flattens_several_windows(self):
+        """A batch holds batch_size windows, flattened."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, horizon=1, batch_size=2
+        )
+        assert next(iter(sampler)) == [0, 1, 2, 3, 1, 2, 3, 4]
+
+    def test_windows_never_straddle_boundaries(self):
+        """No window crosses a sequence boundary."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(20, [0, 7, 20]), window_size=4, horizon=1
+        )
+        spans = [(0, 7), (7, 20)]
+        for w in windows_of(sampler):
+            assert any(lo <= min(w) and max(w) < hi for lo, hi in spans)
+
+    def test_boundaries_taken_from_file_offsets(self):
+        """_file_offsets is used as the default boundary list."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(12, [0, 6, 12]), window_size=2)
+        assert sampler.boundaries == [0, 6, 12]
+
+    def test_boundaries_default_to_whole_dataset(self):
+        """Without _file_offsets the dataset is one sequence."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(12), window_size=2)
+        assert sampler.boundaries == [0, 12]
+
+    def test_stale_file_offsets_are_ignored(self):
+        """Offsets not spanning the dataset fall back to a single sequence."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(12, [0, 5]), window_size=2)
+        assert sampler.boundaries == [0, 12]
+
+    def test_explicit_boundaries_override(self):
+        """Explicit boundaries take precedence."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(12, [0, 6, 12]), window_size=2, boundaries=[0, 4, 12]
+        )
+        assert sampler.boundaries == [0, 4, 12]
+
+    def test_sequence_shorter_than_span_yields_nothing(self):
+        """A sequence too short for one window contributes no windows."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10, [0, 2, 10]), window_size=4, horizon=1
+        )
+        assert all(min(w) >= 2 for w in windows_of(sampler))
+
+    def test_drop_last_drops_partial_batch(self):
+        """drop_last removes a trailing batch with too few windows."""
+        # 10 samples, span 3 -> 8 windows -> batches of 3, 3, 2
+        full = SlidingWindowBatchSampler(SizedSeq(10), window_size=3, batch_size=3)
+        dropped = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, batch_size=3, drop_last=True
+        )
+        assert full.n_windows == 8
+        assert len(full) == 3
+        assert len(dropped) == 2
+
+    def test_drop_last_keeps_exact_batches(self):
+        """drop_last is a no-op when windows divide evenly into batches."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, batch_size=4, drop_last=True
+        )
+        assert sampler.n_windows == 8
+        assert len(sampler) == 2
+
+    def test_shuffle_preserves_contents(self):
+        """Shuffling reorders batches without changing their contents."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, batch_size=2, shuffle=True
+        )
+        ordered = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, batch_size=2, shuffle=False
+        )
+        torch.manual_seed(0)
+        assert sorted(list(sampler)) == sorted(ordered)
+
+    def test_horizon_zero_gives_bare_windows(self):
+        """horizon=0 yields windows with no trailing target."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(6), window_size=3)
+        assert sampler.span == 3
+        assert windows_of(sampler)[0] == [0, 1, 2]
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"window_size": 0},
+            {"window_size": 2, "horizon": -1},
+            {"window_size": 2, "stride": 0},
+            {"window_size": 2, "batch_size": 0},
+        ],
+    )
+    def test_invalid_arguments_raise(self, kwargs):
+        """Out-of-range geometry arguments raise ValueError."""
+        with pytest.raises(ValueError):
+            SlidingWindowBatchSampler(SizedSeq(10), **kwargs)
+
+    def test_non_monotonic_boundaries_raise(self):
+        """Decreasing boundaries are rejected."""
+        with pytest.raises(ValueError, match="non-decreasing"):
+            SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[0, 8, 4])
+
+    def test_too_few_boundaries_raise(self):
+        """A boundary list needs at least a start and an end."""
+        with pytest.raises(ValueError, match="start and an end"):
+            SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[0])
+
+    def test_boundaries_past_the_end_raise(self):
+        """An end beyond the dataset would emit out-of-bounds indices."""
+        with pytest.raises(ValueError, match=r"within \[0, 10\]"):
+            SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[0, 20])
+
+    def test_negative_boundaries_raise(self):
+        """A negative start would wrap around the dataset unnoticed."""
+        with pytest.raises(ValueError, match=r"within \[0, 10\]"):
+            SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[-4, 10])
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"window_size": 2},
+            {"window_size": 3, "horizon": 1},
+            {"window_size": 2, "stride": 2, "batch_size": 3},
+            {"window_size": 2, "batch_size": 4, "drop_last": True},
+            {"window_size": 2, "horizon": 2, "batch_size": 3, "boundaries": [0, 5, 11]},
+        ],
+    )
+    def test_lazy_iteration_matches_eager_expansion(self, kwargs):
+        """Expanding batches on demand yields what materializing them did."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(11), **kwargs)
+        span = sampler.span
+        windows = [
+            list(range(start, start + span))
+            for lo, hi in zip(
+                sampler.boundaries[:-1], sampler.boundaries[1:], strict=False
+            )
+            for start in range(lo, hi - span + 1, sampler.stride)
+        ]
+        eager = [
+            [idx for w in windows[i : i + sampler.batch_size] for idx in w]
+            for i in range(0, len(windows), sampler.batch_size)
+        ]
+        if sampler.drop_last and eager and len(eager[-1]) < sampler.batch_size * span:
+            eager = eager[:-1]
+        assert list(sampler) == eager
+        assert len(sampler) == len(eager)
+        assert sampler.n_windows == sum(len(b) // span for b in eager)
+
+    def test_only_window_starts_are_stored(self):
+        """The sampler holds one int per window, not one per sample."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(20), window_size=4, horizon=1)
+        assert sampler._starts == list(range(0, 16))
+        assert len(sampler._starts) == sampler.n_windows
+
+    def test_boundaries_may_cover_a_subrange(self):
+        """Restricting windows to part of the dataset stays allowed."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=2, boundaries=[0, 5]
+        )
+        assert sampler.boundaries == [0, 5]
+        assert max(i for b in sampler for i in b) < 5
