@@ -1404,7 +1404,7 @@ if __name__ == "__main__":
         n_channels=64,
         out_channels=3,
         down_block_types=("DownBlock",) * 4,
-        up_block_types=("UpBlock", "UpBlock", "AttnUpBlock", "AttnUpBlock"),
+        up_block_types=("AttnUpBlock", "AttnUpBlock", "UpBlock", "UpBlock"),
         block_out_channel_mults=(1, 2, 2, 4),
         res_act_fn="prelu",
         res_dropout=0.4,
