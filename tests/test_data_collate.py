@@ -498,6 +498,16 @@ class TestSlidingWindowCollatePerKeyTransform:
         assert out["a_target"].unique().tolist() == [2.0]
         assert out["b_target"].unique().tolist() == [1.0]
 
+    def test_unknown_key_error_survives_mixed_key_types(self):
+        """A mix of int and str keys must not break the KeyError formatting."""
+        coll = SlidingWindowCollate(window_size=2, transform={"nope": lambda t: t})
+        samples = [
+            {"vis": torch.tensor([float(i)]), 1: torch.tensor([float(i)])}
+            for i in range(4)
+        ]
+        with pytest.raises(KeyError, match="nope"):
+            coll(samples)
+
     def test_unknown_key_raises(self):
         """A typo must not silently transform nothing."""
         collate = SlidingWindowCollate(window_size=4, transform={"c": lambda t: t * 2})

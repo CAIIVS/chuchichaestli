@@ -5,7 +5,7 @@
 
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 import torch
 from torch.utils.data import default_collate
 from torchvision.transforms.v2 import Transform
@@ -187,9 +187,9 @@ class SlidingWindowCollate(_SourceProvenance):
         window_size: int,
         horizon: int = 0,
         target_suffix: str = "_target",
-        rename: dict[str, str] | None = None,
+        rename: Mapping[Hashable, Hashable] | None = None,
         transform: Callable[[torch.Tensor], torch.Tensor]
-        | Mapping[str, Callable[[torch.Tensor], torch.Tensor]]
+        | Mapping[Hashable, Callable[[torch.Tensor], torch.Tensor]]
         | None = None,
         source: Any | None = None,
         key_fn: Callable[[Path], str] | None = None,
@@ -262,8 +262,9 @@ class SlidingWindowCollate(_SourceProvenance):
         unknown = set(self.transform) - set(batch)
         if unknown:
             raise KeyError(
-                f"`transform` names {sorted(unknown)}, which the batch does not "
-                f"hold; available keys are {sorted(batch)}"
+                # Keys may be a mix of types (custom `ZipDataset(zip_as=...)`)
+                f"`transform` names {sorted(unknown, key=str)}, which the batch "
+                f"does not hold; available keys are {sorted(batch, key=str)}"
             )
         return {
             key: map_nested(value, self.transform[key])
@@ -349,9 +350,9 @@ def sliding_window_collate(
     window_size: int,
     horizon: int = 0,
     target_suffix: str = "_target",
-    rename: dict[str, str] | None = None,
+    rename: Mapping[Hashable, Hashable] | None = None,
     transform: Callable[[torch.Tensor], torch.Tensor]
-    | Mapping[str, Callable[[torch.Tensor], torch.Tensor]]
+    | Mapping[Hashable, Callable[[torch.Tensor], torch.Tensor]]
     | None = None,
     source: Any | None = None,
     key_fn: Callable[[Path], str] | None = None,
