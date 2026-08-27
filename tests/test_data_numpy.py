@@ -746,3 +746,68 @@ class TestSampleAxis:
         first = ds[5].clone()
         assert torch.equal(ds[5], first)
         assert torch.equal(first, torch.from_numpy(data[:, 5]))
+
+
+class TestNpyArrayViewTupleIndexing:
+    """Off-axis reads served from the view's own memory map."""
+
+    @staticmethod
+    def _view(tmp, data, name="cube.npy"):
+        """Write `data` and return its view alongside a np.load reference."""
+        path = tmp / name
+        np.save(path, data)
+        return NpyArrayView(path), np.load(path, mmap_mode="r")
+
+    @pytest.mark.parametrize(
+        "idx",
+        [
+            (slice(None), 3, slice(None)),
+            (slice(0, 2), slice(None), 1),
+            (1, 2, 0),
+            (slice(None), slice(1, 4), 2),
+        ],
+    )
+    def test_matches_numpy_indexing(self, temp_dir, idx):
+        """Tuple reads return what indexing the array directly returns."""
+        data = np.arange(4 * 7 * 3, dtype=np.float32).reshape(4, 7, 3)
+        view, ref = self._view(temp_dir, data)
+        assert np.array_equal(view[idx], np.asarray(ref[idx]))
+
+    def test_matches_numpy_indexing_for_fortran_order(self, temp_dir):
+        """Fortran-order files are mapped in their own memory order."""
+        data = np.asfortranarray(np.arange(24, dtype=np.float32).reshape(4, 3, 2))
+        view, ref = self._view(temp_dir, data, "fortran.npy")
+        idx = (slice(None), 1, slice(None))
+        assert np.array_equal(view[idx], np.asarray(ref[idx]))
+
+    def test_result_is_a_copy_not_a_view(self, temp_dir):
+        """The returned array owns its data, so it survives `close`."""
+        data = np.arange(12, dtype=np.float32).reshape(3, 4)
+        view, _ = self._view(temp_dir, data)
+        out = view[(slice(None), 1)]
+        view.close()
+        assert np.array_equal(out, data[:, 1])
+
+    def test_map_is_reused_across_flush(self, temp_dir):
+        """`flush` releases the file descriptor but keeps the mapping."""
+        data = np.arange(12, dtype=np.float32).reshape(3, 4)
+        view, _ = self._view(temp_dir, data)
+        view[(slice(None), 1)]
+        mapped = view._local.mmap
+        view.flush()
+        view[(slice(None), 1)]
+        assert view._local.mmap is mapped
+
+    def test_close_releases_the_map(self, temp_dir):
+        """`close` drops the mapping, which the next read rebuilds."""
+        data = np.arange(12, dtype=np.float32).reshape(3, 4)
+        view, _ = self._view(temp_dir, data)
+        view[(slice(None), 1)]
+        view.close()
+        assert view._local.mmap is None
+        assert np.array_equal(view[(slice(None), 1)], data[:, 1])
+
+    def test_empty_array_is_indexable(self, temp_dir):
+        """A zero-length file cannot be mapped, but still indexes cleanly."""
+        view, _ = self._view(temp_dir, np.zeros((0, 4), dtype=np.float32), "empty.npy")
+        assert view[(slice(None), 1)].shape == (0,)

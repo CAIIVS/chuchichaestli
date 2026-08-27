@@ -64,6 +64,28 @@ class NpyArrayView:
             self._local.fd = open(self._path, "rb")
         return self._local.fd
 
+    def _get_mmap(self) -> np.ndarray:
+        """Return the thread-local memory map over the whole array.
+
+        Built from the header metadata read at construction, so no header is
+        re-parsed. Kept across `flush` and released in `close`.
+        """
+        mm = getattr(self._local, "mmap", None)
+        if mm is None:
+            if not self.shape[0] or not self._sample_elems:
+                mm = np.empty(self.shape, dtype=self.dtype)
+            else:
+                mm = np.memmap(
+                    self._path,
+                    dtype=self.dtype,
+                    mode="r",
+                    offset=self._data_offset,
+                    shape=self.shape,
+                    order="F" if self._fortran_order else "C",
+                )
+            self._local.mmap = mm
+        return mm
+
     def flush(self) -> None:
         """Close the thread-local file descriptor.
 
@@ -75,8 +97,9 @@ class NpyArrayView:
             fd.close()
 
     def close(self) -> None:
-        """Alias for `flush`; called explicitly during dataset teardown."""
+        """Release the file descriptor and the memory map."""
         self.flush()
+        self._local.mmap = None
 
     def _read_fortran_sample(self, f, idx: int) -> np.ndarray:
         """Read a single Fortran-order sample without extra file handles."""
@@ -93,7 +116,7 @@ class NpyArrayView:
         """Open the file, copy the requested slice, close immediately."""
         if isinstance(idx, tuple):
             # Off-axis-0 sampling: hand the striding to numpy
-            return np.asarray(np.load(self._path, mmap_mode="r")[idx]).copy()
+            return np.asarray(self._get_mmap()[idx]).copy()
         if isinstance(idx, slice):
             start, stop, step = idx.indices(self.shape[0])
             indices = range(start, stop, step)
