@@ -550,7 +550,7 @@ class TestZipNumpyDataset:
         ds = ZipNumpyDataset.from_paths(
             multiple_npy_files[0], multiple_npy_files[1], sample_axis=None
         )
-        # two datasets, treated as one sample each due to sample_axis -> ziped as one
+        # two datasets, treated as one sample each due to sample_axis -> zipped as one
         assert len(ds) == 1
         sample = ds[0]
         assert isinstance(sample, tuple)

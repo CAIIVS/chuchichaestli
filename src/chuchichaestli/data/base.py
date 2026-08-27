@@ -323,7 +323,7 @@ class FileDataset(Dataset, ABC):
             n_samples = 1 if self.sample_axis is None else self._axis_len(m)
             self._file_offsets.append(self._file_offsets[-1] + n_samples)
 
-    def _map_index(self, index: int) -> tuple[int, int]:
+    def _map_index(self, index: int) -> tuple[int, int | None]:
         """Map global index to (file_index, local_index).
 
         Args:
