@@ -70,10 +70,10 @@ class UNet(nn.Module):
         ),
         mid_block_type: UNetMidBlockTypes = "MidBlock",
         up_block_types: Sequence[UNetUpBlockTypes] = (
-            "UpBlock",
-            "UpBlock",
             "AttnUpBlock",
             "AttnUpBlock",
+            "UpBlock",
+            "UpBlock",
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 4),
         num_blocks_per_level: int = 1,
@@ -122,10 +122,10 @@ class UNet(nn.Module):
             n_channels: Number of channels in the first block.
             out_channels: Number of output channels.
             down_block_types: Types of down blocks as a list, starting at the
-                first block (in the highest level).
+                first block in the highest level (in data-flow order).
             mid_block_type: Type of mid block.
-            up_block_types: Types of up blocks as a list, starting with the last
-                block (lowest level).
+            up_block_types: Types of up blocks as a list, starting at the
+                first block in the lowest level (in data-flow order).
             block_out_channel_mults: Output channel multipliers for each block.
             num_blocks_per_level: Number of blocks per level
                 (blocks are repeated if `>1`).
@@ -271,12 +271,14 @@ class UNet(nn.Module):
         # Build decoder
         self.up_blocks = nn.ModuleList([])
 
-        for i in reversed(range(n_mults)):
+        for i, (up_block_type, mult) in enumerate(
+            zip(up_block_types, reversed(block_out_channel_mults))
+        ):
             ins = outs
-            outs = ins // block_out_channel_mults[i]
+            outs = ins // mult
 
             for j in range(num_blocks_per_level):
-                up_block = BLOCK_MAP[up_block_types[i]](
+                up_block = BLOCK_MAP[up_block_type](
                     dimensions=dimensions,
                     in_channels=ins if j == 0 else outs,
                     out_channels=outs,
@@ -292,8 +294,7 @@ class UNet(nn.Module):
                 )
                 self.up_blocks.append(up_block)
 
-            ins = outs
-            if i > 0:
+            if i < n_mults - 1:
                 self.up_blocks.append(upsample_cls(dimensions, outs))
 
         match add_noise:

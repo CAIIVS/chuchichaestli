@@ -39,6 +39,30 @@ def test_throws_warning_for_group_divisibility():
         UNet(n_channels=16, res_groups=32)
 
 
+def test_block_types_follow_data_flow():
+    """Test that down and up blocks are built in the order they are listed in."""
+    model = UNet(
+        down_block_types=("DownBlock", "DownBlock", "AttnDownBlock"),
+        up_block_types=("AttnUpBlock", "UpBlock", "UpBlock"),
+        block_out_channel_mults=(1, 2, 4),
+        res_groups=4,
+    )
+    assert [type(block).__name__ for block in model.down_blocks] == [
+        "DownBlock",
+        "Downsample",
+        "DownBlock",
+        "Downsample",
+        "AttnDownBlock",
+    ]
+    assert [type(block).__name__ for block in model.up_blocks] == [
+        "AttnUpBlock",
+        "Upsample",
+        "UpBlock",
+        "Upsample",
+        "UpBlock",
+    ]
+
+
 @pytest.mark.parametrize(
     "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
     [
