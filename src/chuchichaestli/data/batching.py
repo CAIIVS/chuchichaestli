@@ -342,7 +342,7 @@ class SlidingWindowBatchSampler(HierarchicalBatchSampler):
         self.shuffle = shuffle
         self.drop_last = drop_last
         self.boundaries = self._resolve_boundaries(dataset, boundaries)
-        self._batches = self._build_batches()
+        self._starts = self._build_starts()
 
     @property
     def span(self) -> int:
@@ -352,7 +352,10 @@ class SlidingWindowBatchSampler(HierarchicalBatchSampler):
     @property
     def n_windows(self) -> int:
         """Total number of windows across all sequences."""
-        return sum(len(b) // self.span for b in self._batches)
+        n = len(self._starts)
+        if self.drop_last:
+            n -= n % self.batch_size
+        return n
 
     @staticmethod
     def _resolve_boundaries(
@@ -377,19 +380,34 @@ class SlidingWindowBatchSampler(HierarchicalBatchSampler):
             raise ValueError(f"boundaries must lie within [0, {n}], got {boundaries}")
         return boundaries
 
-    def _build_batches(self) -> list[list[int]]:
-        """Group sliding windows into flattened fixed-size batches."""
-        span = self.span
-        windows: list[list[int]] = []
+    def _build_starts(self) -> list[int]:
+        """Collect the start index of every window, in sequence order.
+
+        Only the starts are kept; a batch is expanded to its flat index list
+        on demand in `__iter__`, so peak memory stays proportional to the
+        window count rather than to `n_windows * span`.
+        """
+        starts: list[int] = []
         for lo, hi in zip(self.boundaries[:-1], self.boundaries[1:], strict=False):
             # Last start for which a full window+horizon still fits the sequence.
-            for start in range(lo, hi - span + 1, self.stride):
-                windows.append(list(range(start, start + span)))
+            starts.extend(range(lo, hi - self.span + 1, self.stride))
+        return starts
 
-        batches = [
-            [idx for w in windows[i : i + self.batch_size] for idx in w]
-            for i in range(0, len(windows), self.batch_size)
-        ]
-        if self.drop_last and batches and len(batches[-1]) < self.batch_size * span:
-            batches = batches[:-1]
-        return batches
+    def _batch(self, i: int) -> list[int]:
+        """Expand the `i`-th batch of window starts into flat sample indices."""
+        span = self.span
+        chunk = self._starts[i * self.batch_size : (i + 1) * self.batch_size]
+        return [idx for start in chunk for idx in range(start, start + span)]
+
+    def __iter__(self):
+        """Iterate batches, expanding one batch of windows at a time."""
+        n = len(self)
+        order = torch.randperm(n).tolist() if self.shuffle else range(n)
+        yield from (self._batch(i) for i in order)
+
+    def __len__(self) -> int:
+        """Number of batches (not windows)."""
+        n = len(self._starts)
+        if self.drop_last:
+            return n // self.batch_size
+        return -(-n // self.batch_size)

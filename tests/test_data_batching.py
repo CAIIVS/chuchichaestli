@@ -519,7 +519,7 @@ class SizedSeq:
 def windows_of(sampler):
     """Split a sampler's flattened batches back into individual windows."""
     span = sampler.span
-    return [b[i : i + span] for b in sampler._batches for i in range(0, len(b), span)]
+    return [b[i : i + span] for b in sampler for i in range(0, len(b), span)]
 
 
 class TestSlidingWindowBatchSampler:
@@ -552,7 +552,7 @@ class TestSlidingWindowBatchSampler:
         sampler = SlidingWindowBatchSampler(
             SizedSeq(10), window_size=3, horizon=1, batch_size=2
         )
-        assert sampler._batches[0] == [0, 1, 2, 3, 1, 2, 3, 4]
+        assert next(iter(sampler)) == [0, 1, 2, 3, 1, 2, 3, 4]
 
     def test_windows_never_straddle_boundaries(self):
         """No window crosses a sequence boundary."""
@@ -616,8 +616,11 @@ class TestSlidingWindowBatchSampler:
         sampler = SlidingWindowBatchSampler(
             SizedSeq(10), window_size=3, batch_size=2, shuffle=True
         )
+        ordered = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=3, batch_size=2, shuffle=False
+        )
         torch.manual_seed(0)
-        assert sorted(list(sampler)) == sorted(sampler._batches)
+        assert sorted(list(sampler)) == sorted(ordered)
 
     def test_horizon_zero_gives_bare_windows(self):
         """horizon=0 yields windows with no trailing target."""
@@ -658,6 +661,43 @@ class TestSlidingWindowBatchSampler:
         """A negative start would wrap around the dataset unnoticed."""
         with pytest.raises(ValueError, match=r"within \[0, 10\]"):
             SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[-4, 10])
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"window_size": 2},
+            {"window_size": 3, "horizon": 1},
+            {"window_size": 2, "stride": 2, "batch_size": 3},
+            {"window_size": 2, "batch_size": 4, "drop_last": True},
+            {"window_size": 2, "horizon": 2, "batch_size": 3, "boundaries": [0, 5, 11]},
+        ],
+    )
+    def test_lazy_iteration_matches_eager_expansion(self, kwargs):
+        """Expanding batches on demand yields what materializing them did."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(11), **kwargs)
+        span = sampler.span
+        windows = [
+            list(range(start, start + span))
+            for lo, hi in zip(
+                sampler.boundaries[:-1], sampler.boundaries[1:], strict=False
+            )
+            for start in range(lo, hi - span + 1, sampler.stride)
+        ]
+        eager = [
+            [idx for w in windows[i : i + sampler.batch_size] for idx in w]
+            for i in range(0, len(windows), sampler.batch_size)
+        ]
+        if sampler.drop_last and eager and len(eager[-1]) < sampler.batch_size * span:
+            eager = eager[:-1]
+        assert list(sampler) == eager
+        assert len(sampler) == len(eager)
+        assert sampler.n_windows == sum(len(b) // span for b in eager)
+
+    def test_only_window_starts_are_stored(self):
+        """The sampler holds one int per window, not one per sample."""
+        sampler = SlidingWindowBatchSampler(SizedSeq(20), window_size=4, horizon=1)
+        assert sampler._starts == list(range(0, 16))
+        assert len(sampler._starts) == sampler.n_windows
 
     def test_boundaries_may_cover_a_subrange(self):
         """Restricting windows to part of the dataset stays allowed."""
