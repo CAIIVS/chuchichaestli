@@ -58,6 +58,11 @@ from chuchichaestli.data.transforms import (
     ZScale,
     ChannelExpand,
     ChannelCollapse,
+    ComplexExpand,
+    ComplexCollapse,
+    BasisProjection,
+    InvBasisProjection,
+    BASIS_REGISTRY,
     SequentialTransform,
 )
 
@@ -112,5 +117,10 @@ __all__ = [
     "ZScale",
     "ChannelExpand",
     "ChannelCollapse",
+    "ComplexExpand",
+    "ComplexCollapse",
+    "BasisProjection",
+    "InvBasisProjection",
+    "BASIS_REGISTRY",
     "SequentialTransform",
 ]
