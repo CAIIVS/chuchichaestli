@@ -271,12 +271,14 @@ class UNet(nn.Module):
         # Build decoder
         self.up_blocks = nn.ModuleList([])
 
-        for k, i in enumerate(reversed(range(n_mults))):
+        for i, (up_block_type, mult) in enumerate(
+            zip(up_block_types, reversed(block_out_channel_mults))
+        ):
             ins = outs
-            outs = ins // block_out_channel_mults[i]
+            outs = ins // mult
 
             for j in range(num_blocks_per_level):
-                up_block = BLOCK_MAP[up_block_types[k]](
+                up_block = BLOCK_MAP[up_block_type](
                     dimensions=dimensions,
                     in_channels=ins if j == 0 else outs,
                     out_channels=outs,
@@ -292,8 +294,7 @@ class UNet(nn.Module):
                 )
                 self.up_blocks.append(up_block)
 
-            ins = outs
-            if i > 0:
+            if i < n_mults - 1:
                 self.up_blocks.append(upsample_cls(dimensions, outs))
 
         match add_noise:
