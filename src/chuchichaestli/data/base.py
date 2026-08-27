@@ -21,7 +21,13 @@ from collections.abc import Sequence
 from types import TracebackType
 
 
-__all__ = ["FileDataset", "CachingDataset", "IndexedSample", "WithIndices", "with_indices"]
+__all__ = [
+    "FileDataset",
+    "CachingDataset",
+    "IndexedSample",
+    "WithIndices",
+    "with_indices",
+]
 
 
 DataReturnTypes = Literal["tuple", "dict"] | dict
@@ -424,7 +430,7 @@ class FileDataset(Dataset, ABC):
             sample = mmap[:]
         else:
             axis = self._axis_of(mmap)
-            # Scalar indexing on axis 0; a non-zero axis needs a mmap that takes 
+            # Scalar indexing on axis 0; a non-zero axis needs a mmap that takes
             # a tuple index (numpy memmap, h5py, torch tensor).
             sample = (
                 mmap[local_idx]
@@ -467,7 +473,9 @@ class FileDataset(Dataset, ABC):
                 pass
         return attr
 
-    def _get_from_mmap_attrs(self, file_idx: int, local_idx: int | None, copy: bool = True):
+    def _get_from_mmap_attrs(
+        self, file_idx: int, local_idx: int | None, copy: bool = True
+    ):
         """Hook for reading attribute/metadata from memory map.
 
         Override if `_mmap_attrs` requires special logic.

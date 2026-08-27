@@ -108,7 +108,11 @@ class NpyArrayView:
             if step == 1:
                 f.seek(self._data_offset + start * self._item_bytes)
                 buf = f.read(n * self._item_bytes)
-                return np.frombuffer(buf, dtype=self.dtype).reshape((n, *self._sample_shape)).copy()
+                return (
+                    np.frombuffer(buf, dtype=self.dtype)
+                    .reshape((n, *self._sample_shape))
+                    .copy()
+                )
             # Non-contiguous slice: read sample by sample
             return np.stack([self[i] for i in indices])
         f = self._get_fd()
@@ -210,7 +214,7 @@ class NumpyDataset(CachingDataset):
         # Issue warning if keys have been passed, but files only include .npy
         npy_files = [f for f in self.files if f.suffix == ".npy"]
         npz_files = [f for f in self.files if f.suffix == ".npz"]
-        
+
         if npy_files and not npz_files and self.key_patterns != ("*",):
             warnings.warn(
                 f"key_patterns {self.key_patterns!r} are ignored for .npy files, "

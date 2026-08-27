@@ -128,14 +128,18 @@ class TestHierarchicalFileBatchSampler:
     def test_len_matches_batch_count(self):
         """__len__ equals the total number of built batches."""
         ds = make_file_dataset([("a.npy", 6), ("b.npy", 4)])
-        sampler = HierarchicalFileBatchSampler(ds, key_fn=lambda p: p.stem, batch_size=2)
+        sampler = HierarchicalFileBatchSampler(
+            ds, key_fn=lambda p: p.stem, batch_size=2
+        )
         # file a → 3 batches, file b → 2 batches
         assert len(sampler) == 5
 
     def test_iter_covers_all_indices(self):
         """All sample indices appear exactly once across batches."""
         ds = make_file_dataset([("a.npy", 6), ("b.npy", 4)])
-        sampler = HierarchicalFileBatchSampler(ds, key_fn=lambda p: p.stem, batch_size=2)
+        sampler = HierarchicalFileBatchSampler(
+            ds, key_fn=lambda p: p.stem, batch_size=2
+        )
         indices = sorted(i for batch in sampler for i in batch)
         assert indices == list(range(10))
 
@@ -157,11 +161,13 @@ class TestHierarchicalFileBatchSampler:
 
     def test_grouping_keeps_file_indices_separate(self):
         """Samples from files sharing a key are batched together."""
-        ds = make_file_dataset([
-            ("group_a_0.npy", 4),
-            ("group_a_1.npy", 4),
-            ("group_b_0.npy", 4),
-        ])
+        ds = make_file_dataset(
+            [
+                ("group_a_0.npy", 4),
+                ("group_a_1.npy", 4),
+                ("group_b_0.npy", 4),
+            ]
+        )
 
         def key_fn(p):
             return "_".join(p.stem.split("_")[:2])  # "group_a" / "group_b"
@@ -203,11 +209,13 @@ class TestHierarchicalFileBatchSamplerFromFilename:
 
     def test_groups_by_captured_pattern(self):
         """Files matched by the same capture group are batched together."""
-        ds = make_file_dataset([
-            ("run_001_frame_0.npy", 4),
-            ("run_001_frame_1.npy", 4),
-            ("run_002_frame_0.npy", 4),
-        ])
+        ds = make_file_dataset(
+            [
+                ("run_001_frame_0.npy", 4),
+                ("run_001_frame_1.npy", 4),
+                ("run_002_frame_0.npy", 4),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_filename(
             ds, pattern=r"(run_\d+)", batch_size=4
         )
@@ -262,32 +270,38 @@ class TestHierarchicalFileBatchSamplerFromDirectory:
 
     def test_groups_by_immediate_parent(self):
         """depth=1 groups files by their immediate parent directory."""
-        ds = make_file_dataset([
-            ("/data/classA/img0.npy", 4),
-            ("/data/classA/img1.npy", 4),
-            ("/data/classB/img0.npy", 4),
-        ])
+        ds = make_file_dataset(
+            [
+                ("/data/classA/img0.npy", 4),
+                ("/data/classA/img1.npy", 4),
+                ("/data/classB/img0.npy", 4),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_directory(ds, depth=1, batch_size=4)
         # classA: 8 samples → 2 batches; classB: 4 → 1
         assert len(sampler) == 3
 
     def test_depth_two_groups_by_grandparent(self):
         """depth=2 groups by the grandparent directory."""
-        ds = make_file_dataset([
-            ("/root/split/classA/img0.npy", 4),
-            ("/root/split/classA/img1.npy", 4),
-            ("/root/other/classA/img0.npy", 4),
-        ])
+        ds = make_file_dataset(
+            [
+                ("/root/split/classA/img0.npy", 4),
+                ("/root/split/classA/img1.npy", 4),
+                ("/root/other/classA/img0.npy", 4),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_directory(ds, depth=2, batch_size=4)
         # "split" vs "other" → 2 distinct keys → 3 batches
         assert len(sampler) == 3
 
     def test_all_indices_covered(self):
         """All sample indices appear across all batches."""
-        ds = make_file_dataset([
-            ("/data/A/f0.npy", 5),
-            ("/data/B/f0.npy", 5),
-        ])
+        ds = make_file_dataset(
+            [
+                ("/data/A/f0.npy", 5),
+                ("/data/B/f0.npy", 5),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_directory(ds, depth=1, batch_size=2)
         indices = sorted(i for batch in sampler for i in batch)
         assert indices == list(range(10))
@@ -322,11 +336,13 @@ class TestOrderFn:
     def test_order_fn_sorts_group_numerically(self):
         """order_fn reorders a group's samples by the numeric key (2,3,10)."""
         # Files listed in lexical glob order: _10 precedes _2, _3.
-        ds = make_file_dataset([
-            ("xfrac_z9.940_10.npy", 1),
-            ("xfrac_z9.940_2.npy", 1),
-            ("xfrac_z9.940_3.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("xfrac_z9.940_10.npy", 1),
+                ("xfrac_z9.940_2.npy", 1),
+                ("xfrac_z9.940_3.npy", 1),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler(
             ds, key_fn=lambda p: "z9.940", batch_size=None, order_fn=_order_n
         )
@@ -349,13 +365,15 @@ class TestWholeGroupBatching:
 
     def test_merges_group_into_single_batch(self):
         """batch_size=None yields one batch per group, merging all indices."""
-        ds = make_file_dataset([
-            ("run_a_1.npy", 1),
-            ("run_a_2.npy", 1),
-            ("run_a_3.npy", 1),
-            ("run_b_1.npy", 1),
-            ("run_b_2.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("run_a_1.npy", 1),
+                ("run_a_2.npy", 1),
+                ("run_a_3.npy", 1),
+                ("run_b_1.npy", 1),
+                ("run_b_2.npy", 1),
+            ]
+        )
         key_fn = lambda p: p.name.split("_")[1]  # "a" / "b"  # noqa: E731
         sampler = HierarchicalFileBatchSampler(ds, key_fn=key_fn, batch_size=None)
         batches = list(sampler)
@@ -375,24 +393,32 @@ class TestWholeGroupBatching:
         """drop_last has no effect when batch_size is None."""
         specs = [("g_1.npy", 1), ("g_2.npy", 1), ("g_3.npy", 1)]
         keep = HierarchicalFileBatchSampler(
-            make_file_dataset(specs), key_fn=lambda p: "g",
-            batch_size=None, order_fn=_order_n, drop_last=False,
+            make_file_dataset(specs),
+            key_fn=lambda p: "g",
+            batch_size=None,
+            order_fn=_order_n,
+            drop_last=False,
         )
         drop = HierarchicalFileBatchSampler(
-            make_file_dataset(specs), key_fn=lambda p: "g",
-            batch_size=None, order_fn=_order_n, drop_last=True,
+            make_file_dataset(specs),
+            key_fn=lambda p: "g",
+            batch_size=None,
+            order_fn=_order_n,
+            drop_last=True,
         )
         assert list(keep) == list(drop) == [[0, 1, 2]]
 
     def test_shuffle_preserves_intra_batch_order(self):
         """Shuffle reorders batches but each batch stays order_fn-monotonic."""
-        ds = make_file_dataset([
-            ("s1_10.npy", 1),
-            ("s1_2.npy", 1),
-            ("s1_3.npy", 1),
-            ("s2_2.npy", 1),
-            ("s2_1.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("s1_10.npy", 1),
+                ("s1_2.npy", 1),
+                ("s1_3.npy", 1),
+                ("s2_2.npy", 1),
+                ("s2_1.npy", 1),
+            ]
+        )
         key_fn = lambda p: p.name.split("_")[0]  # "s1" / "s2"  # noqa: E731
         sampler = HierarchicalFileBatchSampler(
             ds, key_fn=key_fn, batch_size=None, order_fn=_order_n, shuffle=True
@@ -406,9 +432,11 @@ class TestWholeGroupBatching:
         """shuffle=True yields a batch order that differs from insertion order."""
         specs = [(f"g{i}_1.npy", 1) for i in range(8)]
         key_fn = lambda p: p.name.split("_")[0]  # one group per file  # noqa: E731
-        ref = list(HierarchicalFileBatchSampler(
-            make_file_dataset(specs), key_fn=key_fn, batch_size=None, shuffle=False
-        ))
+        ref = list(
+            HierarchicalFileBatchSampler(
+                make_file_dataset(specs), key_fn=key_fn, batch_size=None, shuffle=False
+            )
+        )
         sampler = HierarchicalFileBatchSampler(
             make_file_dataset(specs), key_fn=key_fn, batch_size=None, shuffle=True
         )
@@ -425,13 +453,15 @@ class TestHierarchicalFileBatchSamplerFromSequences:
 
     def test_one_batch_per_sequence_key(self):
         """Each z-label group becomes one N-ascending batch."""
-        ds = make_file_dataset([
-            ("xfrac_z9.940_2.npy", 1),
-            ("xfrac_z9.940_10.npy", 1),
-            ("xfrac_z9.940_3.npy", 1),
-            ("xfrac_z8.100_2.npy", 1),
-            ("xfrac_z8.100_4.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("xfrac_z9.940_2.npy", 1),
+                ("xfrac_z9.940_10.npy", 1),
+                ("xfrac_z9.940_3.npy", 1),
+                ("xfrac_z8.100_2.npy", 1),
+                ("xfrac_z8.100_4.npy", 1),
+            ]
+        )
         sampler = HierarchicalFileBatchSampler.from_sequences(
             ds, pattern=r"_z([0-9.]+)_(\d+)", group=1, order_group=2, order_cast=int
         )
@@ -444,10 +474,12 @@ class TestHierarchicalFileBatchSamplerFromSequences:
 
     def test_warns_on_unmatched_files(self):
         """Unmatched files trigger a warning and form one fallback batch."""
-        ds = make_file_dataset([
-            ("xfrac_z9.940_2.npy", 1),
-            ("README.npy", 1),
-        ])
+        ds = make_file_dataset(
+            [
+                ("xfrac_z9.940_2.npy", 1),
+                ("README.npy", 1),
+            ]
+        )
         with pytest.warns(UserWarning, match="did not match"):
             sampler = HierarchicalFileBatchSampler.from_sequences(
                 ds, pattern=r"_z([0-9.]+)_(\d+)"

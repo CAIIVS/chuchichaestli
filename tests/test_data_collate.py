@@ -157,7 +157,9 @@ class TestSequenceCollateProvenance:
 
     def _source(self):
         files = [Path(f"xfrac_z9.940_{n}.npy") for n in (2, 3, 10)]
-        return SimpleNamespace(files=files, _file_offsets=[0, 1, 2, 3], sample_axis=None)
+        return SimpleNamespace(
+            files=files, _file_offsets=[0, 1, 2, 3], sample_axis=None
+        )
 
     def test_attaches_key_files_indices(self):
         """A provenance batch carries key/files/indices matching the indices."""
