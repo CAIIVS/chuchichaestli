@@ -11,13 +11,17 @@ __all__ = ["ComplexExpand", "ComplexCollapse"]
 
 
 class ComplexExpand(Transform):
-    """Expand a complex tensor into a real one with a trailing axis of 2.
+    """Expand a complex tensor into a real one with an axis of 2.
+
+    The real/imaginary axis is appended by `torch.view_as_real` and then moved
+    to `dim`, so it is trailing only for the default `dim=-1`.
 
     Use this if complex data should work with `SharedArray`.
     Both directions are zero-copy views wherever the strides allow it; only
     `revert` on a non-contiguous input falls back to a copy.
 
     Note that the real dtype follows the complex one:
+        - `complex128` expands to `float64`
         - `complex64` expands to `float32`
         - `complex32` expands to `float16` (incompatible with `SharedArray`)
     """

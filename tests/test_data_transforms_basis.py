@@ -275,6 +275,21 @@ class TestValidationAndState:
         with pytest.raises(ValueError, match="both refer to axis"):
             proj.transform(torch.randn(3, 8, dtype=torch.float64))
 
+    def test_weights_for_an_undeclared_axis_raise(self):
+        """Weights are keyed by the `bases` key, so a stray axis is a typo."""
+        with pytest.raises(ValueError, match="weights names axes"):
+            BasisProjection({0: 2}, weights={1: torch.ones(8)})
+
+    def test_weights_written_with_the_other_sign_raise(self):
+        """`-1` and the equivalent positive axis are not interchangeable here."""
+        with pytest.raises(ValueError, match="same sign"):
+            BasisProjection({1: 2}, weights={-1: torch.ones(8)})
+
+    def test_lengths_for_an_undeclared_axis_raise(self):
+        """A length can only be declared for an axis that has a basis."""
+        with pytest.raises(ValueError, match="lengths names axes"):
+            BasisProjection({0: 2}, lengths={1: 8})
+
     def test_axis_out_of_range_raises(self):
         """An axis beyond the input rank is rejected."""
         with pytest.raises(ValueError, match="out of range"):

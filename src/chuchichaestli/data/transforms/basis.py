@@ -103,24 +103,14 @@ class BasisProjection(Transform):
             basis: Default family for entries given as a bare order. One of
                 `BASIS_REGISTRY`: chebyshev, legendre, monomial, fourier, dct.
             weights: Optional per-axis 1-D non-negative weights of length
-                `N`, giving a weighted least-squares fit. Use for measurement
-                noise or masked samples. Solved in whitened form,
-                `pinv(sqrt(W) B) sqrt(W)`, rather than through the normal
-                equations, whose condition number is the square of this one.
-                The weights are copied and read once; mutating the tensor you
-                passed has no effect afterwards.
+                `N` for a weighted least-squares fit, e.g. for measurement
+                noise or masked samples. Axes as in `bases`, sign included.
             rcond: Relative cutoff for small singular values in the
                 pseudoinverse, forwarded to `torch.linalg.pinv` as `rtol`.
-            lengths: Original length `N` per axis. Reconstruction needs it, and
-                it cannot be inferred from coefficients; supply it here to
-                revert standalone. Projecting records it automatically, and an
-                explicit design matrix carries it in its row count. A recorded
-                length that is later contradicted invalidates any coefficients
-                already produced for that axis, so it warns; a length given
-                here is treated as a declaration and raises instead. Note that
-                auto-recording happens in whichever process projects, so pass
-                `lengths` explicitly when projecting in DataLoader workers and
-                reverting in the parent.
+            lengths: Original length `N` per axis, which coefficients do not
+                carry. Projecting records it, but pass it explicitly to revert
+                standalone or across processes. Axes as in `bases`, sign
+                included.
             cond_warn: Warn when the fitted matrix's condition number exceeds
                 this. `None` disables the check.
         """
@@ -145,6 +135,13 @@ class BasisProjection(Transform):
             if order < 1:
                 raise ValueError(f"order for axis {axis} must be >= 1, got {order}")
             normalised[axis] = (name, order)
+        for name, mapping in (("weights", weights), ("lengths", lengths)):
+            stray = sorted(set(mapping or ()) - set(normalised))
+            if stray:
+                raise ValueError(
+                    f"{name} names axes {stray} that are absent from bases "
+                    f"{sorted(normalised)}; write them with the same sign"
+                )
         self.bases = normalised
         self.basis = basis
         self.weights = {a: w.detach().clone() for a, w in (weights or {}).items()}
@@ -168,7 +165,11 @@ class BasisProjection(Transform):
         self._cache = {}
 
     def design_matrix(self, axis: int, n: int) -> torch.Tensor:
-        """Return the `(n, M)` design matrix for `axis` (float64, on CPU)."""
+        """Return the `(n, M)` design matrix for `axis`, in float64.
+
+        Built-in families are built on the CPU; an explicit design matrix is
+        returned on whichever device the caller supplied it on.
+        """
         spec = self.bases[axis]
         if isinstance(spec, torch.Tensor):
             if spec.shape[0] != n:
