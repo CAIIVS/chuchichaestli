@@ -373,6 +373,8 @@ class SlidingWindowBatchSampler(HierarchicalBatchSampler):
             )
         if any(a > b for a, b in zip(boundaries[:-1], boundaries[1:], strict=False)):
             raise ValueError(f"boundaries must be non-decreasing, got {boundaries}")
+        if boundaries[0] < 0 or boundaries[-1] > n:
+            raise ValueError(f"boundaries must lie within [0, {n}], got {boundaries}")
         return boundaries
 
     def _build_batches(self) -> list[list[int]]:

@@ -306,7 +306,16 @@ class SlidingWindowCollate(_SourceProvenance):
         if isinstance(batch, dict):
             merged = dict(window)
             for key, value in target.items():
-                merged[self._target_key(key)] = value
+                target_key = self._target_key(key)
+                if target_key in merged:
+                    # Non-string keys (e.g. `ZipDataset(zip_as="dict")`) get no
+                    # automatic suffix, so the target would replace its window.
+                    raise ValueError(
+                        f"the target for key {key!r} is named {target_key!r}, "
+                        "which already holds the input window; pass "
+                        f"`rename={{{key!r}: <target key>}}` to name it apart"
+                    )
+                merged[target_key] = value
             return self._merge(merged, provenance)
         if provenance:
             # Anonymous tensor samples are named "data"

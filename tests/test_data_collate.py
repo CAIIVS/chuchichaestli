@@ -318,6 +318,32 @@ class TestSlidingWindowCollate:
         out = coll(samples)
         assert set(out) == {"vis", "uvw", "target", "uvw_target"}
 
+    def test_non_string_keys_collide_and_raise(self):
+        """Int keys get no suffix, so the target would replace its window."""
+        coll = SlidingWindowCollate(window_size=2, horizon=1)
+        samples = [{0: torch.tensor([float(i)])} for i in range(3)]
+        with pytest.raises(ValueError, match="already holds the input window"):
+            coll(samples)
+
+    def test_non_string_keys_work_with_rename(self):
+        """`rename` names the target apart, which is the documented way out."""
+        coll = SlidingWindowCollate(window_size=2, horizon=1, rename={0: "0_target"})
+        samples = [{0: torch.tensor([float(i)])} for i in range(3)]
+        out = coll(samples)
+        assert set(out) == {0, "0_target"}
+        assert out[0].shape == (1, 2, 1)
+        assert out["0_target"].shape == (1, 1, 1)
+
+    def test_suffixed_key_already_present_raises(self):
+        """A sample already holding `<key>_target` collides just the same."""
+        coll = SlidingWindowCollate(window_size=2, horizon=1)
+        samples = [
+            {"vis": torch.tensor([float(i)]), "vis_target": torch.tensor([float(i)])}
+            for i in range(3)
+        ]
+        with pytest.raises(ValueError, match="already holds the input window"):
+            coll(samples)
+
     def test_transform_applied_to_every_leaf(self):
         """The optional transform runs on each tensor leaf of the output."""
         coll = SlidingWindowCollate(window_size=2, horizon=1, transform=lambda t: t * 0)

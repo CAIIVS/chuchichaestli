@@ -616,3 +616,21 @@ class TestSlidingWindowBatchSampler:
         """A boundary list needs at least a start and an end."""
         with pytest.raises(ValueError, match="start and an end"):
             SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[0])
+
+    def test_boundaries_past_the_end_raise(self):
+        """An end beyond the dataset would emit out-of-bounds indices."""
+        with pytest.raises(ValueError, match=r"within \[0, 10\]"):
+            SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[0, 20])
+
+    def test_negative_boundaries_raise(self):
+        """A negative start would wrap around the dataset unnoticed."""
+        with pytest.raises(ValueError, match=r"within \[0, 10\]"):
+            SlidingWindowBatchSampler(SizedSeq(10), window_size=2, boundaries=[-4, 10])
+
+    def test_boundaries_may_cover_a_subrange(self):
+        """Restricting windows to part of the dataset stays allowed."""
+        sampler = SlidingWindowBatchSampler(
+            SizedSeq(10), window_size=2, boundaries=[0, 5]
+        )
+        assert sampler.boundaries == [0, 5]
+        assert max(i for b in sampler for i in b) < 5
