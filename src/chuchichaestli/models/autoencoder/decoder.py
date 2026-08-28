@@ -7,6 +7,8 @@ import torch
 from torch import nn
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
+    ATTENTION_BLOCK_TYPES,
+    AUTOENCODER_OPAQUE_ATTN_ARGS,
     BLOCK_MAP,
     NormActConvBlock,
     AutoencoderUpBlockTypes,
@@ -15,7 +17,7 @@ from chuchichaestli.models.blocks import (
 )
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS, UpsampleTypes
-from chuchichaestli.utils import prod
+from chuchichaestli.utils import per_position_args, prod
 from collections.abc import Sequence
 
 
@@ -68,13 +70,18 @@ class Decoder(nn.Module):
             norm_type: Normalization type for the output layer.
             num_groups: Number of groups for normalization in the output layer.
             kernel_size: Kernel size for the output convolution.
-            res_args: Arguments for residual blocks.
-            attn_args: Arguments for attention blocks.
+            res_args: Arguments for residual blocks. Each value is either a
+                single value or one per block position, in order of data flow:
+                the mid blocks, then the levels.
+            attn_args: Arguments for attention blocks, per block position or per
+                block that has attention. `norm_type`, `scales`, `context_args`
+                and `local_args` are passed through unchanged.
             in_shortcut: Whether to use a shortcut for the input block.
         """
         super().__init__()
 
         upsample_cls = UPSAMPLE_FUNCTIONS[upsample_type]
+        block_out_channel_mults = tuple(block_out_channel_mults)
         if len(block_out_channel_mults) < len(up_block_types):
             block_out_channel_mults += (1,) * (
                 len(up_block_types) - len(block_out_channel_mults)
@@ -85,10 +92,28 @@ class Decoder(nn.Module):
         self.channel_mults = prod(block_out_channel_mults)
         if isinstance(num_layers_per_block, int):
             num_layers_per_block = (num_layers_per_block,) * n_mults
-        elif len(num_layers_per_block) < len(up_block_types):
-            num_layers_per_block += (num_layers_per_block[-1],) * (
-                len(up_block_types) - len(num_layers_per_block)
-            )
+        else:
+            num_layers_per_block = tuple(num_layers_per_block)
+            if len(num_layers_per_block) < len(up_block_types):
+                num_layers_per_block += (num_layers_per_block[-1],) * (
+                    len(up_block_types) - len(num_layers_per_block)
+                )
+
+        # Block positions in order of data flow
+        n_pos = n_mults + len(mid_block_types)
+        path = f"[{len(mid_block_types)} mid block(s), {n_mults} level(s)]"
+        attn_mask = [
+            block_type in ATTENTION_BLOCK_TYPES
+            for block_type in (*mid_block_types, *up_block_types)
+        ]
+        res_args = per_position_args(res_args, n_pos, context=path)
+        attn_args = per_position_args(
+            attn_args,
+            n_pos,
+            mask=attn_mask,
+            opaque=AUTOENCODER_OPAQUE_ATTN_ARGS,
+            context=path,
+        )
 
         self.in_block = BLOCK_MAP[in_block_type](
             dimensions=dimensions,
@@ -98,12 +123,12 @@ class Decoder(nn.Module):
         )
 
         self.mid_blocks = nn.ModuleList([])
-        for mid_block_type in mid_block_types:
+        for j, mid_block_type in enumerate(mid_block_types):
             mid_block = BLOCK_MAP[mid_block_type](
                 dimensions=dimensions,
                 channels=n_channels,
-                res_args=res_args,
-                attn_args=attn_args,
+                res_args=res_args[j],
+                attn_args=attn_args[j],
             )
             self.mid_blocks.append(mid_block)
 
@@ -119,8 +144,8 @@ class Decoder(nn.Module):
                     dimensions=dimensions,
                     in_channels=ins,
                     out_channels=outs,
-                    res_args=res_args,
-                    attn_args=attn_args,
+                    res_args=res_args[len(mid_block_types) + i],
+                    attn_args=attn_args[len(mid_block_types) + i],
                 )
                 stage.append(up_block)
                 ins = outs

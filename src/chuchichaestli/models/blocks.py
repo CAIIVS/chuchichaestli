@@ -2587,6 +2587,12 @@ ATTENTION_BLOCK_TYPES: frozenset[str] = frozenset(
     }
 )
 
+# `attn_args` keys of the autoencoder blocks whose value is a payload rather than
+# a per-position list; a sequence there addresses sub-layers within a block
+AUTOENCODER_OPAQUE_ATTN_ARGS: frozenset[str] = frozenset(
+    {"norm_type", "scales", "context_args", "local_args"}
+)
+
 
 # general convolutional blocks
 CONV_BLOCK_MAP: dict[str, Callable] = {

@@ -256,3 +256,82 @@ def test_efficientvit_block_inspect():
 
 if __name__ == "__main__":
     pytest.main(["-sv", "test_autoencoder_blocks.py"])
+
+
+ENC_CONF = {
+    "n_channels": 16,
+    "block_out_channel_mults": (1, 2, 2),
+    "num_layers_per_block": 1,
+    "down_block_types": ("AutoencoderDownBlock",) * 3,
+    "mid_block_types": ("AutoencoderMidBlock", "AttnAutoencoderMidBlock"),
+}
+DEC_CONF = {
+    "n_channels": 64,
+    "block_out_channel_mults": (1, 2, 2),
+    "num_layers_per_block": 1,
+    "up_block_types": ("AutoencoderUpBlock",) * 3,
+    "mid_block_types": ("AutoencoderMidBlock", "AttnAutoencoderMidBlock"),
+}
+
+
+def test_encoder_per_level_args_run_levels_then_mid_blocks():
+    """Test that an encoder reads a per-level sequence as levels, then mid blocks."""
+    encoder = Encoder(
+        **ENC_CONF, res_args={"res_dropout": (0.1, 0.2, 0.3, 0.4, 0.5), "res_groups": 4}
+    )
+    assert [s[0].res_block.dropout.p for s in encoder.down_blocks[::2]] == [
+        0.1,
+        0.2,
+        0.3,
+    ]
+    assert [m.res_block.dropout.p for m in encoder.mid_blocks] == [0.4, 0.5]
+
+
+def test_decoder_per_level_args_run_mid_blocks_then_levels():
+    """Test that a decoder reads a per-level sequence as mid blocks, then levels."""
+    decoder = Decoder(
+        **DEC_CONF, res_args={"res_dropout": (0.5, 0.4, 0.3, 0.2, 0.1), "res_groups": 4}
+    )
+    assert [m.res_block.dropout.p for m in decoder.mid_blocks] == [0.5, 0.4]
+    assert [s[0].res_block.dropout.p for s in decoder.up_blocks[::2]] == [0.3, 0.2, 0.1]
+
+
+def test_single_values_still_reach_every_position():
+    """Test that a single value in res_args is applied to levels and mid blocks alike."""
+    encoder = Encoder(**ENC_CONF, res_args={"res_dropout": 0.25, "res_groups": 4})
+    stages = [s[0].res_block.dropout.p for s in encoder.down_blocks[::2]]
+    assert stages + [m.res_block.dropout.p for m in encoder.mid_blocks] == [0.25] * 5
+
+
+def test_opaque_attention_keys_are_passed_through():
+    """Test that a norm_type sequence keeps its intra-block meaning."""
+    encoder = Encoder(
+        n_channels=16,
+        block_out_channel_mults=(1, 2),
+        num_layers_per_block=1,
+        down_block_types=("AutoencoderDownBlock",) * 2,
+        mid_block_types=(),
+        res_args={"res_groups": 4},
+        attn_args={"norm_type": ("rms", "group")},
+    )
+    assert encoder.levels == 2
+
+
+def test_throws_error_on_wrong_per_level_length():
+    """Test that a sequence matching no accepted position count is rejected."""
+    with pytest.raises(ValueError):
+        Encoder(**ENC_CONF, res_args={"res_dropout": (0.1, 0.2)})
+
+
+def test_caller_sequences_are_not_mutated():
+    """Test that padding the channel multipliers leaves the caller's list alone."""
+    mults = [1, 2]
+    Encoder(
+        n_channels=16,
+        down_block_types=("AutoencoderDownBlock",) * 4,
+        block_out_channel_mults=mults,
+        num_layers_per_block=1,
+        mid_block_types=(),
+        res_args={"res_groups": 4},
+    )
+    assert mults == [1, 2]
