@@ -260,3 +260,60 @@ def test_autoencoder_inspect():
 
 if __name__ == "__main__":
     pytest.main(["-v", "test_autoencoder.py"])
+
+
+PER_HALF_CONF = {
+    "n_channels": 16,
+    "latent_dim": 4,
+    "block_out_channel_mults": (1, 2, 2),
+    "down_block_types": ("AutoencoderDownBlock",) * 3,
+    "up_block_types": ("AutoencoderUpBlock",) * 3,
+    "encoder_mid_block_types": ("AutoencoderMidBlock",),
+    "decoder_mid_block_types": ("AutoencoderMidBlock",),
+    "down_layers_per_block": 1,
+    "up_layers_per_block": 1,
+    "res_groups": 4,
+}
+
+
+def test_per_half_args_follow_each_half_own_path():
+    """Test that each half reads its override dict in its own data-flow order."""
+    model = Autoencoder(
+        **PER_HALF_CONF,
+        encoder_res_args={"res_dropout": (0.1, 0.2, 0.4, 0.5)},
+        decoder_res_args={"res_dropout": (0.5, 0.4, 0.2, 0.1)},
+    )
+    encoder_levels = [s[0].res_block.dropout.p for s in model.encoder.down_blocks[::2]]
+    decoder_levels = [s[0].res_block.dropout.p for s in model.decoder.up_blocks[::2]]
+    assert encoder_levels == [0.1, 0.2, 0.4]
+    assert [b.res_block.dropout.p for b in model.encoder.mid_blocks] == [0.5]
+    assert [b.res_block.dropout.p for b in model.decoder.mid_blocks] == [0.5]
+    assert decoder_levels == [0.4, 0.2, 0.1]
+
+
+def test_shared_scalars_fill_keys_absent_from_the_override():
+    """Test that an override dict replaces only the keys it names."""
+    model = Autoencoder(
+        **PER_HALF_CONF, res_dropout=0.3, encoder_res_args={"res_kernel_size": 1}
+    )
+    assert model.encoder.down_blocks[0][0].res_block.dropout.p == 0.3
+
+
+def test_each_half_gets_an_independent_argument_dict():
+    """Test that an encoder override does not leak into the decoder."""
+    model = Autoencoder(
+        **PER_HALF_CONF, res_dropout=0.3, encoder_res_args={"res_dropout": 0.6}
+    )
+    assert model.encoder.down_blocks[0][0].res_block.dropout.p == 0.6
+    assert model.decoder.up_blocks[0][0].res_block.dropout.p == 0.3
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"res_dropout": (0.1, 0.2)}, {"attn_n_heads": (1, 2)}],
+    ids=["res", "attn"],
+)
+def test_throws_error_on_sequence_for_a_shared_argument(kwargs):
+    """Test that a shared argument rejects sequences and names the dict to use."""
+    with pytest.raises(ValueError, match="encoder_"):
+        Autoencoder(**PER_HALF_CONF, **kwargs)

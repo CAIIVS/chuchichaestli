@@ -26,6 +26,24 @@ from collections.abc import Sequence
 __all__ = ["Autoencoder"]
 
 
+def _reject_sequences(**kwargs) -> None:
+    """Reject per-level sequences on arguments that both halves share.
+
+    Args:
+        kwargs: Shared argument names and values.
+
+    Raises:
+        ValueError: If any value is a list or tuple.
+    """
+    for name, value in kwargs.items():
+        if isinstance(value, (list, tuple)):
+            group = "res_args" if name.startswith("res_") else "attn_args"
+            raise ValueError(
+                f"{name}: shared arguments take a single value; pass per-level values"
+                f" in encoder_{group} or decoder_{group} instead."
+            )
+
+
 class Autoencoder(nn.Module):
     """Flexible autoencoder implementation.
 
@@ -94,11 +112,15 @@ class Autoencoder(nn.Module):
         encoder_groups: int = 8,
         encoder_kernel_size: int = 3,
         encoder_out_shortcut: bool = False,
+        encoder_res_args: dict = {},
+        encoder_attn_args: dict = {},
         decoder_act_fn: ActivationTypes = "silu",
         decoder_norm_type: NormTypes = "group",
         decoder_groups: int = 8,
         decoder_kernel_size: int = 3,
         decoder_in_shortcut: bool = False,
+        decoder_res_args: dict = {},
+        decoder_attn_args: dict = {},
         double_z: bool = False,
     ):
         """Initializes the VAE model with the given parameters.
@@ -152,6 +174,10 @@ class Autoencoder(nn.Module):
             encoder_groups: Number of groups for normalization in the output layer of the encoder.
             encoder_kernel_size: Kernel size for the output convolution in the encoder.
             encoder_out_shortcut: Whether to use an encoder shortcut.
+            encoder_res_args: Encoder residual block arguments, overriding the shared
+                `res_*` values. Each entry is a single value or one per block position.
+            encoder_attn_args: Encoder attention block arguments, overriding the shared
+                `attn_*` values.
             decoder_act_fn: Activation function for the input/output layers in the decoder
                 (see `chuchichaestli.models.activations` for details).
             decoder_norm_type: Normalization type for the decoder's output block
@@ -159,19 +185,36 @@ class Autoencoder(nn.Module):
             decoder_groups: Number of groups for normalization in the input/output layer of the decoder.
             decoder_kernel_size: Kernel size for the output convolution in the decoder.
             decoder_in_shortcut: Whether to use a decoder shortcut.
+            decoder_res_args: Decoder residual block arguments, overriding the shared
+                `res_*` values. Each entry is a single value or one per block position.
+            decoder_attn_args: Decoder attention block arguments, overriding the shared
+                `attn_*` values.
             double_z: Whether to double the latent space.
         """
         super().__init__()
 
         if encoder_out_block_type == "DCEncoderOutBlock":
-            assert (
-                dimensions == 2
-            ), "Deep-compression autoencoding is only supported for 2D data."
+            assert dimensions == 2, (
+                "Deep-compression autoencoding is only supported for 2D data."
+            )
 
         self.double_z = double_z
         self.channel_mults = prod(block_out_channel_mults)
         if decoder_block_out_channel_mults is None:
             decoder_block_out_channel_mults = block_out_channel_mults
+
+        _reject_sequences(
+            res_act_fn=res_act_fn,
+            res_dropout=res_dropout,
+            res_groups=res_groups,
+            res_norm_type=res_norm_type,
+            res_kernel_size=res_kernel_size,
+            attn_head_dim=attn_head_dim,
+            attn_n_heads=attn_n_heads,
+            attn_dropout_p=attn_dropout_p,
+            attn_groups=attn_groups,
+            attn_kernel_size=attn_kernel_size,
+        )
 
         res_args = {
             "res_act_fn": res_act_fn,
@@ -208,8 +251,8 @@ class Autoencoder(nn.Module):
             norm_type=encoder_norm_type,
             num_groups=encoder_groups,
             kernel_size=encoder_kernel_size,
-            res_args=res_args,
-            attn_args=attn_args,
+            res_args={**res_args, **encoder_res_args},
+            attn_args={**attn_args, **encoder_attn_args},
             double_z=double_z,
             out_shortcut=encoder_out_shortcut,
         )
@@ -228,8 +271,8 @@ class Autoencoder(nn.Module):
             norm_type=decoder_norm_type,
             num_groups=decoder_groups,
             kernel_size=decoder_kernel_size,
-            res_args=res_args,
-            attn_args=attn_args,
+            res_args={**res_args, **decoder_res_args},
+            attn_args={**attn_args, **decoder_attn_args},
             in_shortcut=decoder_in_shortcut,
         )
         self.latent_proj = (

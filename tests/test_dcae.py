@@ -346,3 +346,9 @@ def test_dcae_inspect():
 
 if __name__ == "__main__":
     pytest.main(["-v", "test_dcae.py"])
+
+
+def test_attn_norm_type_sequence_keeps_its_intra_block_meaning():
+    """Test that a norm_type sequence is not read as a per-level list."""
+    model = DCAE(attn_norm_type=("rms", "rms"))
+    assert model.levels == (6, 6)
