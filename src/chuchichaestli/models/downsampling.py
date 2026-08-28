@@ -133,6 +133,16 @@ class DownsampleUnshuffle(nn.Module):
         return h + shortcut
 
 
+ADAPTIVE_POOL_FUNCTIONS = {
+    (1, False): F.adaptive_max_pool1d,
+    (2, False): F.adaptive_max_pool2d,
+    (3, False): F.adaptive_max_pool3d,
+    (1, True): F.adaptive_avg_pool1d,
+    (2, True): F.adaptive_avg_pool2d,
+    (3, True): F.adaptive_avg_pool3d,
+}
+
+
 class Pool(nn.Module):
     """Max/avg (optionally adaptive) pooling layer for 1D, 2D, and 3D inputs."""
 
@@ -144,24 +154,33 @@ class Pool(nn.Module):
         adaptive: bool = False,
         **kwargs,
     ):
-        """Initialize the pooling layer (default: max pooling)."""
+        """Initialize the pooling layer (default: max pooling).
+
+        An adaptive layer without an explicit `output_size` pools down by `stride`,
+        computing the output size from each input; give `output_size` to pool to a
+        fixed size instead.
+        """
         super().__init__()
-        pool_type = "MaxPool"
+        self.dimensions = dimensions
+        self.average = average
+        self.adaptive = adaptive
+        self.output_size = kwargs.pop("output_size", None)
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 2)
         kwargs.setdefault("padding", 1)
-        if average:
-            pool_type = "AvgPool"
+        self.factor = None if self.output_size is not None else kwargs["stride"]
         if adaptive:
-            pool_type = "Adaptive" + pool_type
-            out = kwargs.get("output_size", None)
-            kwargs = {"output_size": out if out is not None else (1,) * dimensions}
-        pool_cls = DIM_TO_POOL_MAP[dimensions][pool_type]
+            self.pool = None
+            return
+        pool_cls = DIM_TO_POOL_MAP[dimensions]["AvgPool" if average else "MaxPool"]
         self.pool = pool_cls(**kwargs)
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the pooling layer."""
-        return self.pool(x)
+        if not self.adaptive:
+            return self.pool(x)
+        size = self.output_size or [s // self.factor for s in x.shape[2:]]
+        return ADAPTIVE_POOL_FUNCTIONS[(self.dimensions, self.average)](x, size)
 
 
 MaxPool = partialclass("MaxPool", Pool, average=False, adaptive=False)

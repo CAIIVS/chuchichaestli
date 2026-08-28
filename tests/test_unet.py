@@ -6,6 +6,11 @@
 import pytest
 import torch
 from chuchichaestli.models.unet import UNet
+from chuchichaestli.models.unet.unet import (
+    CHANNEL_CARRYING_SAMPLERS,
+    UNET_DOWNSAMPLE_MAP,
+    UNET_UPSAMPLE_MAP,
+)
 
 
 def test_throws_error_on_invalid_dimension():
@@ -873,22 +878,45 @@ def test_per_level_skip_connection_actions():
 
 @pytest.mark.parametrize(
     "kwargs",
-    [{"downsample_type": "AdaptiveMaxPool"}],
-    ids=["adaptive"],
+    [{"downsample_type": "NotASampler"}, {"upsample_type": "NotASampler"}],
+    ids=["down", "up"],
 )
 def test_throws_error_on_unsupported_sampling_type(kwargs):
-    """Test that sampling types the UNet cannot build are rejected up front."""
+    """Test that a sampling type the UNet cannot build is rejected up front."""
     with pytest.raises(ValueError, match="Unsupported sampling type"):
         UNet(**PER_LEVEL_CONF, **kwargs)
 
 
-@pytest.mark.parametrize(
-    "downsample_type",
-    ["Downsample", "DownsampleInterpolate", "MaxPool", "AvgPool"],
-)
-def test_every_supported_downsampling_type_runs(downsample_type):
-    """Test that each supported downsampling type builds and preserves the shape."""
-    model = UNet(**PER_LEVEL_CONF, downsample_type=downsample_type)
+@pytest.mark.parametrize("downsample_type", sorted(UNET_DOWNSAMPLE_MAP))
+def test_every_registered_downsampling_type_runs(downsample_type):
+    """Test that every registered downsampling type builds and preserves the shape."""
+    # the channel-carrying samplers have to be mirrored in the other half
+    upsample_type = (
+        "UpsampleShuffle"
+        if downsample_type in CHANNEL_CARRYING_SAMPLERS
+        else "Upsample"
+    )
+    model = UNet(
+        **PER_LEVEL_CONF,
+        downsample_type=downsample_type,
+        upsample_type=upsample_type,
+    )
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+@pytest.mark.parametrize("upsample_type", sorted(UNET_UPSAMPLE_MAP))
+def test_every_registered_upsampling_type_runs(upsample_type):
+    """Test that every registered upsampling type builds and preserves the shape."""
+    downsample_type = (
+        "DownsampleUnshuffle"
+        if upsample_type in CHANNEL_CARRYING_SAMPLERS
+        else "Downsample"
+    )
+    model = UNet(
+        **PER_LEVEL_CONF,
+        downsample_type=downsample_type,
+        upsample_type=upsample_type,
+    )
     assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
 
 
@@ -933,3 +961,33 @@ def test_throws_error_on_mirrored_sampling_type_mismatch():
     """Test that the halves must agree on which levels spend the channel multiplier."""
     with pytest.raises(ValueError, match="must agree"):
         UNet(**PER_LEVEL_CONF, upsample_type=("Upsample", "UpsampleShuffle"))
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+@pytest.mark.parametrize("pool", ["AdaptiveMaxPool", "AdaptiveAvgPool"])
+def test_adaptive_pooling_downsamples_a_unet(dimensions, pool):
+    """Test that adaptive pooling halves each level rather than collapsing it."""
+    model = UNet(
+        dimensions=dimensions,
+        n_channels=16,
+        res_groups=4,
+        block_out_channel_mults=(1, 2, 4),
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=("UpBlock",) * 3,
+        downsample_type=pool,
+    )
+    shape = (1, 1) + (32,) * dimensions
+    assert model(torch.randn(shape)).shape == shape
+
+
+def test_adaptive_pooling_tolerates_indivisible_input_sizes():
+    """Test that adaptive pooling accepts a size the strided samplers cannot halve."""
+    model = UNet(
+        n_channels=16,
+        res_groups=4,
+        block_out_channel_mults=(1, 2),
+        down_block_types=("DownBlock",) * 2,
+        up_block_types=("UpBlock",) * 2,
+        downsample_type="AdaptiveMaxPool",
+    )
+    assert model(torch.randn(1, 1, 30, 30)).shape == (1, 1, 30, 30)

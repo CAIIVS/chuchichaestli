@@ -44,6 +44,8 @@ UNET_DOWNSAMPLE_MAP: dict[str, Callable] = {
         "DownsampleUnshuffle",
         "MaxPool",
         "AvgPool",
+        "AdaptiveMaxPool",
+        "AdaptiveAvgPool",
     )
 }
 UNET_UPSAMPLE_MAP: dict[str, Callable] = {
