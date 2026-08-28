@@ -6,7 +6,10 @@
 import pytest
 import torch
 from chuchichaestli.models.downsampling import DownsampleUnshuffle
+from typing import get_args
 from chuchichaestli.models.upsampling import (
+    UPSAMPLE_FUNCTIONS,
+    UpsampleTypes,
     Upsample,
     UpsampleInterpolate,
     UpsampleShuffle,
@@ -96,3 +99,8 @@ def test_upsampleshuffle_throws_error_on_indivisible_channels():
     """Test that a channel count the factor cannot divide is rejected."""
     with pytest.raises(ValueError, match="Cannot shuffle"):
         UpsampleShuffle(dimensions=2, in_channels=7, out_channels=3)
+
+
+def test_upsample_types_match_the_registry():
+    """Test that the type alias cannot drift from the registered upsamplers."""
+    assert set(get_args(UpsampleTypes)) == set(UPSAMPLE_FUNCTIONS)

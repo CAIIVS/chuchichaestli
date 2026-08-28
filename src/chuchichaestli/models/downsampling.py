@@ -25,7 +25,15 @@ __all__ = [
 ]
 
 
-DownsampleTypes = Literal["Downsample", "DownsampleInterpolate", "DownsampleUnshuffle"]
+DownsampleTypes = Literal[
+    "Downsample",
+    "DownsampleInterpolate",
+    "DownsampleUnshuffle",
+    "MaxPool",
+    "AdaptiveMaxPool",
+    "AvgPool",
+    "AdaptiveAvgPool",
+]
 
 
 class Downsample(nn.Module):

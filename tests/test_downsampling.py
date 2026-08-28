@@ -5,7 +5,10 @@
 
 import pytest
 import torch
+from typing import get_args
 from chuchichaestli.models.downsampling import (
+    DOWNSAMPLE_FUNCTIONS,
+    DownsampleTypes,
     Downsample,
     MaxPool,
     AdaptiveMaxPool,
@@ -144,3 +147,8 @@ def test_adaptive_pool_honours_an_explicit_output_size(dimensions):
     out_wh = (8,) * dimensions
     pool = AdaptiveMaxPool(dimensions=dimensions, output_size=out_wh)
     assert pool(torch.randn((2, 8) + (32,) * dimensions)).shape == (2, 8) + out_wh
+
+
+def test_downsample_types_match_the_registry():
+    """Test that the type alias cannot drift from the registered downsamplers."""
+    assert set(get_args(DownsampleTypes)) == set(DOWNSAMPLE_FUNCTIONS)
