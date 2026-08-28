@@ -187,8 +187,20 @@ class Decoder(nn.Module):
 
     @property
     def f(self) -> int:
-        """Expansion factor of the decoder."""
-        return 2 ** max(self.levels - 1, 0)
+        """Expansion factor of the decoder.
+
+        Raises:
+            ValueError: If a sampling block does not scale by a constant factor.
+        """
+        factors = [
+            getattr(b, "factor", None) for b in self.up_blocks if hasattr(b, "factor")
+        ]
+        if any(factor is None for factor in factors):
+            raise ValueError(
+                "A sampling block pools to a fixed size rather than by a factor,"
+                " so the model has no constant scaling factor."
+            )
+        return prod(factors)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         """Decoding forward pass."""

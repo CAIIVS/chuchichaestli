@@ -38,6 +38,7 @@ class Downsample(nn.Module):
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 2)
         kwargs.setdefault("padding", 1)
+        self.factor = kwargs["stride"]
         self.conv = conv_cls(num_channels, num_channels, **kwargs)
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:

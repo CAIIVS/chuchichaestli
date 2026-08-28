@@ -196,8 +196,20 @@ class Encoder(nn.Module):
 
     @property
     def f(self) -> int:
-        """Compression factor of the encoder."""
-        return 2 ** max(self.levels - 1, 0)
+        """Compression factor of the encoder.
+
+        Raises:
+            ValueError: If a sampling block does not scale by a constant factor.
+        """
+        factors = [
+            getattr(b, "factor", None) for b in self.down_blocks if hasattr(b, "factor")
+        ]
+        if any(factor is None for factor in factors):
+            raise ValueError(
+                "A sampling block pools to a fixed size rather than by a factor,"
+                " so the model has no constant scaling factor."
+            )
+        return prod(factors)
 
     def forward(self, x):
         """Forward pass."""

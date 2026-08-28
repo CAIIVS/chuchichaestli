@@ -27,6 +27,7 @@ class Upsample(nn.Module):
         """Initialize the upsampling layer."""
         super().__init__()
         conv_cls = DIM_TO_CONVT_MAP[dimensions]
+        self.factor = 2
         self.conv = conv_cls(
             num_channels, num_channels, kernel_size=4, stride=2, padding=1
         )

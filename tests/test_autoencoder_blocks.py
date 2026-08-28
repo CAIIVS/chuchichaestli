@@ -353,3 +353,34 @@ def test_encoder_per_level_sampling_types():
         "DownsampleUnshuffle",
     ]
     assert encoder(torch.randn(1, 1, 32, 32)).shape[-2:] == (8, 8)
+
+
+F_CONF = {
+    "n_channels": 16,
+    "block_out_channel_mults": (1, 2, 2),
+    "num_layers_per_block": 1,
+    "down_block_types": ("AutoencoderDownBlock",) * 3,
+    "mid_block_types": (),
+    "res_args": {"res_groups": 4},
+}
+
+
+def test_compression_factor_is_the_product_of_the_sampler_factors():
+    """Test that the compression factor comes from the samplers that were built."""
+    from chuchichaestli.models.downsampling import Downsample
+
+    encoder = Encoder(**F_CONF)
+    assert encoder.f == 4
+
+    encoder.down_blocks[1] = Downsample(2, 16, stride=4)
+    assert encoder.f == 8
+
+
+def test_compression_factor_rejects_a_fixed_size_sampler():
+    """Test that a pool with a fixed output size has no constant compression factor."""
+    from chuchichaestli.models.downsampling import AdaptiveMaxPool
+
+    encoder = Encoder(**F_CONF)
+    encoder.down_blocks[1] = AdaptiveMaxPool(2, 16, output_size=(8, 8))
+    with pytest.raises(ValueError, match="fixed size"):
+        encoder.f
