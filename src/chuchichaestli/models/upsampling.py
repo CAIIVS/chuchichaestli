@@ -6,6 +6,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from chuchichaestli.models.shuffle import PixelShuffleND
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP, DIM_TO_CONVT_MAP, UPSAMPLE_MODE
 from typing import Literal
 
@@ -98,13 +99,19 @@ class UpsampleShuffle(nn.Module):
         conv_cls = DIM_TO_CONV_MAP[dimensions]
         self.dimensions = dimensions
         self.factor = factor if factor is not None else 2
-        r2 = self.factor**2
-        self.repeats = out_channels * r2 // in_channels
+        rd = self.factor**dimensions
+        if out_channels * rd % in_channels:
+            raise ValueError(
+                f"Cannot shuffle {in_channels} into {out_channels} channels by a factor of"
+                f" {self.factor} over {dimensions} dimension(s):"
+                f" {rd} * out_channels must be divisible by in_channels."
+            )
+        self.repeats = out_channels * rd // in_channels
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 1)
         kwargs.setdefault("padding", "same")
-        self.conv = conv_cls(in_channels, out_channels * r2, **kwargs)
-        self.pixel_shuffle = nn.PixelShuffle(self.factor)
+        self.conv = conv_cls(in_channels, out_channels * rd, **kwargs)
+        self.pixel_shuffle = PixelShuffleND(dimensions, self.factor)
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the upsampling layer."""

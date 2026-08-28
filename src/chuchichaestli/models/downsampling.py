@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP, DIM_TO_POOL_MAP, DOWNSAMPLE_MODE
+from chuchichaestli.models.shuffle import PixelUnshuffleND
 from chuchichaestli.utils import partialclass
 from typing import Literal
 
@@ -110,13 +111,19 @@ class DownsampleUnshuffle(nn.Module):
         conv_cls = DIM_TO_CONV_MAP[dimensions]
         self.dimensions = dimensions
         self.factor = factor if factor is not None else 2
-        r2 = self.factor**2
-        self.group_size = in_channels * r2 // out_channels
+        rd = self.factor**dimensions
+        if out_channels % rd or in_channels * rd % out_channels:
+            raise ValueError(
+                f"Cannot unshuffle {in_channels} into {out_channels} channels by a factor"
+                f" of {self.factor} over {dimensions} dimension(s): out_channels must be"
+                f" divisible by {rd}, and {rd} * in_channels by out_channels."
+            )
+        self.group_size = in_channels * rd // out_channels
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 1)
         kwargs.setdefault("padding", "same")
-        self.conv = conv_cls(in_channels, out_channels // r2, **kwargs)
-        self.pixel_unshuffle = nn.PixelUnshuffle(self.factor)
+        self.conv = conv_cls(in_channels, out_channels // rd, **kwargs)
+        self.pixel_unshuffle = PixelUnshuffleND(dimensions, self.factor)
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the downsampling layer."""

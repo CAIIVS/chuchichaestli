@@ -9,6 +9,7 @@ from chuchichaestli.models.downsampling import (
     Downsample,
     MaxPool,
     AdaptiveMaxPool,
+    DownsampleUnshuffle,
     DownsampleInterpolate,
 )
 
@@ -97,3 +98,29 @@ def test_adamaxpool_forward(dimensions):
 
     # Check the output tensor shape
     assert output_tensor.shape == output_shape
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+@pytest.mark.parametrize("factor", [2, 4])
+def test_downsampleunshuffle_forward(dimensions, factor):
+    """Test the forward method of the `DownsampleUnshuffle` module at every rank."""
+    in_channels = 16
+    out_channels = 2 * factor**dimensions
+    input_shape = (2, in_channels) + (16,) * dimensions
+    output_shape = (2, out_channels) + (16 // factor,) * dimensions
+    input_tensor = torch.randn(input_shape)
+
+    downsample = DownsampleUnshuffle(
+        dimensions=dimensions,
+        in_channels=in_channels,
+        out_channels=out_channels,
+        factor=factor,
+    )
+
+    assert downsample.forward(input_tensor, None).shape == output_shape
+
+
+def test_downsampleunshuffle_throws_error_on_indivisible_channels():
+    """Test that a channel count the factor cannot divide is rejected."""
+    with pytest.raises(ValueError, match="Cannot unshuffle"):
+        DownsampleUnshuffle(dimensions=2, in_channels=16, out_channels=6)
