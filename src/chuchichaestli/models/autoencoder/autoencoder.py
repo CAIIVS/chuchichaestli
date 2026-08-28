@@ -224,6 +224,7 @@ class Autoencoder(nn.Module):
             "head_dim": attn_head_dim,
             "dropout_p": attn_dropout_p,
             "norm_type": attn_norm_type,
+            "kernel_size": attn_kernel_size,
             "groups": attn_groups,
             "num_groups": attn_groups,
             "scales": attn_scales,
