@@ -36,9 +36,7 @@ from typing import Literal
 from collections.abc import Callable, Sequence
 
 
-# samplers that trade spatial extent against channels (and back, on the up path), so
-# they spend the level's channel multiplier themselves and the blocks of that level
-# keep the channel count instead; they take `cls(dim, in_ch, out_ch)`
+# samplers that trade spatial extent against channels (and back, on the up path)
 SPATIAL_TO_CHANNEL_SAMPLERS: frozenset[str] = frozenset(
     {"DownsampleUnshuffle", "UpsampleShuffle"}
 )
@@ -226,6 +224,7 @@ class UNet(nn.Module):
             for block_type in (*down_block_types, mid_block_type, *up_block_types)
         ]
 
+        # Up-/Downsampling block broadcasting
         n_samplers = n_mults - 1
         samplers = f"[{n_samplers} sampling block(s)]"
         downsample_types = broadcast(
