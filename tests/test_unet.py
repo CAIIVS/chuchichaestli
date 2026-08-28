@@ -873,12 +873,8 @@ def test_per_level_skip_connection_actions():
 
 @pytest.mark.parametrize(
     "kwargs",
-    [
-        {"downsample_type": "AdaptiveMaxPool"},
-        {"downsample_type": "DownsampleUnshuffle"},
-        {"upsample_type": ("Upsample", "UpsampleShuffle")},
-    ],
-    ids=["adaptive", "unshuffle", "shuffle"],
+    [{"downsample_type": "AdaptiveMaxPool"}],
+    ids=["adaptive"],
 )
 def test_throws_error_on_unsupported_sampling_type(kwargs):
     """Test that sampling types the UNet cannot build are rejected up front."""
@@ -894,3 +890,46 @@ def test_every_supported_downsampling_type_runs(downsample_type):
     """Test that each supported downsampling type builds and preserves the shape."""
     model = UNet(**PER_LEVEL_CONF, downsample_type=downsample_type)
     assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+def test_shuffle_sampling_types_at_every_rank(dimensions):
+    """Test that the channel-carrying samplers keep the skip connections aligned."""
+    model = UNet(
+        dimensions=dimensions,
+        n_channels=16,
+        res_groups=4,
+        block_out_channel_mults=(1, 2, 4),
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=("UpBlock",) * 3,
+        downsample_type="DownsampleUnshuffle",
+        upsample_type="UpsampleShuffle",
+    )
+    shape = (1, 1) + (32,) * dimensions
+    out = model(torch.randn(shape))
+    assert out.shape == shape
+    out.sum().backward()
+
+
+def test_shuffle_and_conv_sampling_types_can_be_mixed():
+    """Test that a level may spend its multiplier in the sampler and the next in blocks."""
+    model = UNet(
+        **PER_LEVEL_CONF,
+        downsample_type=("Downsample", "DownsampleUnshuffle"),
+        upsample_type=("UpsampleShuffle", "Upsample"),
+    )
+    assert [type(b).__name__ for b in model.down_blocks][1::2] == [
+        "Downsample",
+        "DownsampleUnshuffle",
+    ]
+    assert [type(b).__name__ for b in model.up_blocks][1::2] == [
+        "UpsampleShuffle",
+        "Upsample",
+    ]
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+def test_throws_error_on_mirrored_sampling_type_mismatch():
+    """Test that the halves must agree on which levels spend the channel multiplier."""
+    with pytest.raises(ValueError, match="must agree"):
+        UNet(**PER_LEVEL_CONF, upsample_type=("Upsample", "UpsampleShuffle"))
