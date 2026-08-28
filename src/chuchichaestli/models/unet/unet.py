@@ -9,7 +9,7 @@ from torch import nn
 
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
-    ATTENTION_BLOCK_TYPES,
+    ATTENTION_BLOCK_MAP,
     BLOCK_MAP,
     CONV_BLOCK_MAP,
     GaussianNoiseBlock,
@@ -37,15 +37,17 @@ from chuchichaestli.models.upsampling import (
 )
 from chuchichaestli.utils import per_position, per_position_args
 from typing import Literal
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 
 # the U-Net builds samplers as `cls(dimensions, channels)`; the remaining entries of
 # DOWNSAMPLE_FUNCTIONS/UPSAMPLE_FUNCTIONS need a different signature or change the shape
-UNET_DOWNSAMPLE_TYPES: frozenset[str] = frozenset(
-    {"Downsample", "DownsampleInterpolate"}
-)
-UNET_UPSAMPLE_TYPES: frozenset[str] = frozenset({"Upsample", "UpsampleInterpolate"})
+UNET_DOWNSAMPLE_MAP: dict[str, Callable] = {
+    name: DOWNSAMPLE_FUNCTIONS[name] for name in ("Downsample", "DownsampleInterpolate")
+}
+UNET_UPSAMPLE_MAP: dict[str, Callable] = {
+    name: UPSAMPLE_FUNCTIONS[name] for name in ("Upsample", "UpsampleInterpolate")
+}
 
 TIME_EMBEDDING_MAP = {
     "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
@@ -54,13 +56,12 @@ TIME_EMBEDDING_MAP = {
 }
 
 
-def _sampler_cls(name: str, functions: dict, supported: frozenset[str]):
+def _sampler_cls(name: str, supported: dict[str, Callable]):
     """Look up a sampling block class, rejecting the ones the U-Net cannot build.
 
     Args:
         name: Name of the sampling block type.
-        functions: Mapping of sampling block names to classes.
-        supported: Names the U-Net can construct.
+        supported: Sampling block types the U-Net can construct.
 
     Raises:
         ValueError: If `name` is not one of the supported types.
@@ -70,7 +71,7 @@ def _sampler_cls(name: str, functions: dict, supported: frozenset[str]):
             f"Unsupported sampling type for a U-Net: {name!r}."
             f" Use one of {sorted(supported)}."
         )
-    return functions[name]
+    return supported[name]
 
 
 class UNet(nn.Module):
@@ -229,20 +230,20 @@ class UNet(nn.Module):
         n_pos = 2 * n_mults + 1
         path = f"[{n_mults} down level(s), mid block, {n_mults} up level(s)]"
         attn_mask = [
-            block_type in ATTENTION_BLOCK_TYPES
+            block_type in ATTENTION_BLOCK_MAP
             for block_type in (*down_block_types, mid_block_type, *up_block_types)
         ]
 
         n_samplers = n_mults - 1
         samplers = f"[{n_samplers} sampling block(s)]"
         downsample_clss = [
-            _sampler_cls(name, DOWNSAMPLE_FUNCTIONS, UNET_DOWNSAMPLE_TYPES)
+            _sampler_cls(name, UNET_DOWNSAMPLE_MAP)
             for name in per_position(
                 downsample_type, n_samplers, "downsample_type", None, samplers
             )
         ]
         upsample_clss = [
-            _sampler_cls(name, UPSAMPLE_FUNCTIONS, UNET_UPSAMPLE_TYPES)
+            _sampler_cls(name, UNET_UPSAMPLE_MAP)
             for name in per_position(
                 upsample_type, n_samplers, "upsample_type", None, samplers
             )

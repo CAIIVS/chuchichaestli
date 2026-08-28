@@ -2564,32 +2564,30 @@ BLOCK_MAP: dict[str, Callable] = {
 
 
 # blocks that consume `attn_args`; the rest ignore it
-ATTENTION_BLOCK_TYPES: frozenset[str] = frozenset(
-    {
-        "AttnDownBlock",
-        "AttnMidBlock",
-        "AttnUpBlock",
-        "AttnGateUpBlock",
-        "ConvAttnDownBlock",
-        "ConvAttnMidBlock",
-        "ConvAttnUpBlock",
-        "AttnAutoencoderDownBlock",
-        "AttnAutoencoderMidBlock",
-        "AttnAutoencoderUpBlock",
-        "ConvAttnAutoencoderDownBlock",
-        "ConvAttnAutoencoderMidBlock",
-        "ConvAttnAutoencoderUpBlock",
-        "AttnDCAutoencoderDownBlock",
-        "AttnDCAutoencoderUpBlock",
-        "ConvAttnDCAutoencoderDownBlock",
-        "ConvAttnDCAutoencoderUpBlock",
-        "EfficientViTBlock",
-    }
-)
+ATTENTION_BLOCK_MAP: dict[str, Callable] = {
+    "AttnDownBlock": AttnDownBlock,
+    "AttnMidBlock": AttnMidBlock,
+    "AttnUpBlock": AttnUpBlock,
+    "AttnGateUpBlock": AttnGateUpBlock,
+    "ConvAttnDownBlock": ConvAttnDownBlock,
+    "ConvAttnMidBlock": ConvAttnMidBlock,
+    "ConvAttnUpBlock": ConvAttnUpBlock,
+    "AttnAutoencoderDownBlock": AttnAutoencoderDownBlock,
+    "AttnAutoencoderMidBlock": AttnAutoencoderMidBlock,
+    "AttnAutoencoderUpBlock": AttnAutoencoderUpBlock,
+    "ConvAttnAutoencoderDownBlock": ConvAttnAutoencoderDownBlock,
+    "ConvAttnAutoencoderMidBlock": ConvAttnAutoencoderMidBlock,
+    "ConvAttnAutoencoderUpBlock": ConvAttnAutoencoderUpBlock,
+    "AttnDCAutoencoderDownBlock": AttnDCAutoencoderDownBlock,
+    "AttnDCAutoencoderUpBlock": AttnDCAutoencoderUpBlock,
+    "ConvAttnDCAutoencoderDownBlock": ConvAttnDCAutoencoderDownBlock,
+    "ConvAttnDCAutoencoderUpBlock": ConvAttnDCAutoencoderUpBlock,
+    "EfficientViTBlock": EfficientViTBlock,
+}
 
-# `attn_args` keys of the autoencoder blocks whose value is a payload rather than
-# a per-position list; a sequence there addresses sub-layers within a block
-AUTOENCODER_OPAQUE_ATTN_ARGS: frozenset[str] = frozenset(
+# `attn_args` keys the blocks read within one block rather than across levels:
+# `norm_type` addresses sub-layers, the rest are payloads handed over whole
+INTRA_BLOCK_ATTN_ARGS: frozenset[str] = frozenset(
     {"norm_type", "scales", "context_args", "local_args"}
 )
 
