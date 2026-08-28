@@ -2592,6 +2592,23 @@ INTRA_BLOCK_ATTN_ARGS: frozenset[str] = frozenset(
 )
 
 
+# convolutional blocks that consume `attn_args`; the rest ignore it
+ATTENTION_CONV_BLOCK_MAP: dict[str, Callable] = {
+    "AttnConvDownBlock": AttnConvDownBlock,
+    "AttnConvDownsampleBlock": AttnConvDownsampleBlock,
+    "AttnConvBlock": AttnConvBlock,
+    "NormAttnConvBlock": NormAttnConvBlock,
+    "NormAttnConvDownBlock": NormAttnConvDownBlock,
+    "NormAttnConvDownsampleBlock": NormAttnConvDownsampleBlock,
+    "ActAttnConvBlock": ActAttnConvBlock,
+    "ActAttnConvDownBlock": ActAttnConvDownBlock,
+    "ActAttnConvDownsampleBlock": ActAttnConvDownsampleBlock,
+    "NormActAttnConvBlock": NormActAttnConvBlock,
+    "NormActAttnConvDownBlock": NormActAttnConvDownBlock,
+    "NormActAttnConvDownsampleBlock": NormActAttnConvDownsampleBlock,
+}
+
+
 # general convolutional blocks
 CONV_BLOCK_MAP: dict[str, Callable] = {
     "MBConvBlock": MBConvBlock,

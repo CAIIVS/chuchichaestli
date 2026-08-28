@@ -13,6 +13,12 @@ modules is intended.
 
 import hashlib
 import pytest
+from chuchichaestli.models.adversarial.discriminator import (
+    AttnPatchDiscriminator,
+    BlockDiscriminator,
+    PatchDiscriminator,
+    PixelDiscriminator,
+)
 from chuchichaestli.models.autoencoder import DCAE, VAE, Autoencoder
 from chuchichaestli.models.unet import UNet
 
@@ -47,6 +53,26 @@ def unet_multiblock_attn():
     )
 
 
+def block_discriminator():
+    """Build a discriminator with all-default block types."""
+    return BlockDiscriminator(2, 3, 64)
+
+
+def patch_discriminator():
+    """Build a PatchGAN discriminator with default depth."""
+    return PatchDiscriminator(2, 3, 64)
+
+
+def attn_patch_discriminator():
+    """Build a PatchGAN discriminator with attention blocks."""
+    return AttnPatchDiscriminator(2, 3, 64)
+
+
+def pixel_discriminator():
+    """Build a 1x1 pixel discriminator."""
+    return PixelDiscriminator(2, 3, 64)
+
+
 @pytest.mark.parametrize(
     "build,expected",
     [
@@ -55,8 +81,22 @@ def unet_multiblock_attn():
         (Autoencoder, (244, 53867309, "67f854b17a9e9175")),
         (VAE, (244, 53885797, "8944adbc4e0bd4a0")),
         (DCAE, (302, 357219041, "cbc0fadb90cab21e")),
+        (block_discriminator, (25, 2766529, "82e0c4347708df18")),
+        (patch_discriminator, (25, 2766529, "82e0c4347708df18")),
+        (attn_patch_discriminator, (37, 2792353, "bbb61f356287f425")),
+        (pixel_discriminator, (11, 8961, "10ed860453937a53")),
     ],
-    ids=["unet", "unet_multiblock", "autoencoder", "vae", "dcae"],
+    ids=[
+        "unet",
+        "unet_multiblock",
+        "autoencoder",
+        "vae",
+        "dcae",
+        "block_discriminator",
+        "patch_discriminator",
+        "attn_patch_discriminator",
+        "pixel_discriminator",
+    ],
 )
 def test_state_dict_parity(build, expected):
     """Test that a scalar configuration builds the same parameters as it always has."""

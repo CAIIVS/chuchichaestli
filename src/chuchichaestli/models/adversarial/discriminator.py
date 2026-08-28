@@ -7,8 +7,13 @@ import torch
 from torch import nn
 from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.pooling import _AvgPoolNd, _MaxPoolNd
+from collections.abc import Sequence
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
-from chuchichaestli.models.blocks import CONV_BLOCK_MAP
+from chuchichaestli.models.blocks import (
+    ATTENTION_CONV_BLOCK_MAP,
+    CONV_BLOCK_MAP,
+)
+from chuchichaestli.utils import per_position_args
 
 
 __all__ = [
@@ -41,9 +46,9 @@ class BlockDiscriminator(nn.Sequential):
         ),
         channel_mults: tuple[int, ...] | None = None,
         out_channels: int = 1,
-        attn_n_heads: int = 1,
-        attn_head_dim: int = 16,
-        attn_gate_inter_channels: int = 32,
+        attn_n_heads: int | Sequence[int] = 1,
+        attn_head_dim: int | Sequence[int] = 16,
+        attn_gate_inter_channels: int | Sequence[int] = 32,
         **kwargs,
     ):
         """Construct a discriminator.
@@ -55,9 +60,10 @@ class BlockDiscriminator(nn.Sequential):
           block_types: Types of down blocks.
           channel_mults: Channel multipliers for each block.
           out_channels: Output channels (should generally be 1, i.e. true/fake).
-          attn_n_heads: Number of attention heads.
-          attn_head_dim: Dimension of the attention head.
-          attn_gate_inter_channels: Number of intermediate channels for the attention gate.
+          attn_n_heads: Number of attention heads, per block or per attention block.
+          attn_head_dim: Dimension of the attention head, per block or per attention block.
+          attn_gate_inter_channels: Number of intermediate channels for the attention
+            gate, per block or per attention block.
           kwargs: Additional arguments for the blocks.
         """
         if dimensions not in DIM_TO_CONV_MAP:
@@ -81,32 +87,54 @@ class BlockDiscriminator(nn.Sequential):
             channel_mults = (2,) * (len(block_types) - 2)
         elif len(channel_mults) < n_blocks - 2:
             raise ValueError(
-                f"Not enough channel multipliers. Must be at least len(block_types)-2 = {n_blocks-2}."
+                f"Not enough channel multipliers. Must be at least len(block_types)-2 = {n_blocks - 2}."
             )
 
-        kwargs.setdefault(
-            "attn_args",
-            {
-                "n_heads": attn_n_heads,
-                "head_dim": attn_head_dim,
-                "inter_channels": attn_gate_inter_channels,
-            },
+        attn_spec = kwargs.pop("attn_args", None) or {
+            "n_heads": attn_n_heads,
+            "head_dim": attn_head_dim,
+            "inter_channels": attn_gate_inter_channels,
+        }
+        attn_args = per_position_args(
+            attn_spec,
+            n_blocks,
+            mask=[t in ATTENTION_CONV_BLOCK_MAP for t in block_types],
+            context=f"[{n_blocks} block(s)]",
         )
 
         # input block
         block_cls = CONV_BLOCK_MAP[block_types[0]]
-        blocks = [block_cls(dimensions, in_channels, n_channels, **kwargs)]
+        blocks = [
+            block_cls(
+                dimensions,
+                in_channels,
+                n_channels,
+                **(kwargs | {"attn_args": attn_args[0]}),
+            )
+        ]
         in_c = n_channels
-        for block_type, mult in zip(block_types[1:-1], channel_mults):
+        for i, (block_type, mult) in enumerate(
+            zip(block_types[1:-1], channel_mults), 1
+        ):
             out_c = int(in_c * mult)
             block_cls = CONV_BLOCK_MAP[block_type]
-            block = block_cls(dimensions, in_c, out_c, **(kwargs | {"bias": True}))
+            block = block_cls(
+                dimensions,
+                in_c,
+                out_c,
+                **(kwargs | {"attn_args": attn_args[i], "bias": True}),
+            )
             blocks.append(block)
             in_c = out_c
         # output block
         block_cls = CONV_BLOCK_MAP[block_types[-1]]
         blocks += [
-            block_cls(dimensions, in_c, out_channels, **(kwargs | {"bias": True}))
+            block_cls(
+                dimensions,
+                in_c,
+                out_channels,
+                **(kwargs | {"attn_args": attn_args[-1], "bias": True}),
+            )
         ]
         super().__init__(*blocks)
 

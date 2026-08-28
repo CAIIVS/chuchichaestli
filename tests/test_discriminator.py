@@ -580,3 +580,42 @@ def test_AntialiasingPatchDiscriminator_info(
         assert out.shape[1] == 1
         print(model)
     print()
+
+
+ATTN_BLOCK_TYPES = (
+    "ConvDownBlock",
+    "AttnConvDownBlock",
+    "NormActAttnConvDownBlock",
+    "NormActConvBlock",
+)
+
+
+def attention_heads(model):
+    """Collect the head count of every block that has attention, in build order."""
+    return [b.attn.n_heads for b in model if getattr(b, "attn", None) is not None]
+
+
+def test_attention_arguments_accept_both_lengths():
+    """Test that the block-path and attention-block spellings build the same model."""
+    by_path = BlockDiscriminator(
+        2, 3, 32, block_types=ATTN_BLOCK_TYPES, attn_n_heads=(1, 2, 4, 1)
+    )
+    by_attn = BlockDiscriminator(
+        2, 3, 32, block_types=ATTN_BLOCK_TYPES, attn_n_heads=(2, 4)
+    )
+    assert attention_heads(by_path) == attention_heads(by_attn) == [2, 4]
+
+
+def test_attention_arguments_broadcast_a_single_value():
+    """Test that a single value still reaches every attention block."""
+    model = BlockDiscriminator(2, 3, 32, block_types=ATTN_BLOCK_TYPES, attn_n_heads=8)
+    assert attention_heads(model) == [8, 8]
+    assert model(torch.randn(1, 3, 64, 64)).shape[:2] == (1, 1)
+
+
+def test_throws_error_on_wrong_per_block_length():
+    """Test that a sequence matching no accepted position count is rejected."""
+    with pytest.raises(ValueError):
+        BlockDiscriminator(
+            2, 3, 32, block_types=ATTN_BLOCK_TYPES, attn_n_heads=(1, 2, 3)
+        )
