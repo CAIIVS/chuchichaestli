@@ -15,6 +15,8 @@ from chuchichaestli.models.autoencoder import DCAE
         (2, 1, 64, 4, 1),
         (2, 1, 32, 8, 1),
         (2, 1, 32, 4, 3),
+        (1, 1, 32, 4, 1),
+        (3, 1, 32, 4, 1),
     ],
 )
 def test_dcae_init(dimensions, in_channels, n_channels, latent_dim, out_channels):
@@ -352,3 +354,27 @@ def test_attn_norm_type_sequence_keeps_its_intra_block_meaning():
     """Test that a norm_type sequence is not read as a per-level list."""
     model = DCAE(attn_norm_type=("rms", "rms"))
     assert model.levels == (6, 6)
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+def test_dcae_reconstructs_at_every_rank(dimensions):
+    """Test that deep-compression autoencoding works beyond 2D data."""
+    wh = 64
+    model = DCAE(
+        dimensions=dimensions,
+        in_channels=1,
+        n_channels=32,
+        latent_dim=4,
+        out_channels=1,
+        attn_groups=8,
+        res_groups=8,
+        decoder_groups=8,
+    )
+    shape = (1, 1) + (wh,) * dimensions
+    sample = torch.randn(shape)
+    out = model(sample)
+    assert out.shape == shape
+    assert (
+        model.compute_latent_shape(shape) == (1, 4) + (wh // model.f_comp,) * dimensions
+    )
+    out.sum().backward()

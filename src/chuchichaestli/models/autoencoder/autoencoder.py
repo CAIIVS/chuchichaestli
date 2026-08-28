@@ -193,11 +193,6 @@ class Autoencoder(nn.Module):
         """
         super().__init__()
 
-        if encoder_out_block_type == "DCEncoderOutBlock":
-            assert dimensions == 2, (
-                "Deep-compression autoencoding is only supported for 2D data."
-            )
-
         self.double_z = double_z
         self.channel_mults = prod(block_out_channel_mults)
         if decoder_block_out_channel_mults is None:
