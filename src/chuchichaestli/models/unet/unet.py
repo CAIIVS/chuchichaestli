@@ -36,9 +36,10 @@ from typing import Literal
 from collections.abc import Callable, Sequence
 
 
-# samplers that spend the level's channel multiplier themselves, so that the blocks
-# of that level keep the channel count instead; they take `cls(dim, in_ch, out_ch)`
-CHANNEL_CARRYING_SAMPLERS: frozenset[str] = frozenset(
+# samplers that trade spatial extent against channels (and back, on the up path), so
+# they spend the level's channel multiplier themselves and the blocks of that level
+# keep the channel count instead; they take `cls(dim, in_ch, out_ch)`
+SPATIAL_TO_CHANNEL_SAMPLERS: frozenset[str] = frozenset(
     {"DownsampleUnshuffle", "UpsampleShuffle"}
 )
 DOWNSAMPLE_BLOCKS: tuple[type, ...] = tuple(DOWNSAMPLE_FUNCTIONS.values())
@@ -239,17 +240,24 @@ class UNet(nn.Module):
         upsample_clss = [
             _require_sampling_cls(n, UPSAMPLE_FUNCTIONS) for n in upsample_types
         ]
-        widens = [name in CHANNEL_CARRYING_SAMPLERS for name in downsample_types]
-        up_widens = [name in CHANNEL_CARRYING_SAMPLERS for name in upsample_types]
+        sample_widens = [
+            name in SPATIAL_TO_CHANNEL_SAMPLERS for name in downsample_types
+        ]
+        up_sample_widens = [
+            name in SPATIAL_TO_CHANNEL_SAMPLERS for name in upsample_types
+        ]
         mismatched = [
-            i for i in range(n_samplers) if widens[i] != up_widens[n_samplers - 1 - i]
+            i
+            for i in range(n_samplers)
+            if sample_widens[i] != up_sample_widens[n_samplers - 1 - i]
         ]
         if mismatched:
             raise ValueError(
                 f"The down and up sampling types must agree on which levels spend the"
                 f" channel multiplier; they differ at level(s) {mismatched}."
             )
-        widens.append(False)  # the last level has no sampler, so its blocks widen
+        # the last level has no sampler, so its blocks widen
+        sample_widens.append(False)
 
         skip_actions = broadcast(
             skip_connection_action,
@@ -332,7 +340,7 @@ class UNet(nn.Module):
         self.down_blocks = nn.ModuleList([])
         ins = n_channels
         for i in range(n_mults):
-            outs = ins if widens[i] else ins * block_out_channel_mults[i]
+            outs = ins if sample_widens[i] else ins * block_out_channel_mults[i]
 
             for _ in range(num_blocks_per_level):
                 down_block = BLOCK_MAP[down_block_types[i]](
@@ -348,7 +356,7 @@ class UNet(nn.Module):
                 ins = outs
 
             if i < n_mults - 1:
-                if widens[i]:
+                if sample_widens[i]:
                     widened = ins * block_out_channel_mults[i]
                     self.down_blocks.append(
                         downsample_clss[i](dimensions, ins, widened)
@@ -373,7 +381,9 @@ class UNet(nn.Module):
         for i, up_block_type in enumerate(up_block_types):
             level = n_mults - 1 - i
             ins = outs
-            outs = ins if widens[level] else ins // block_out_channel_mults[level]
+            outs = (
+                ins if sample_widens[level] else ins // block_out_channel_mults[level]
+            )
 
             for j in range(num_blocks_per_level):
                 up_block = BLOCK_MAP[up_block_type](
@@ -394,7 +404,7 @@ class UNet(nn.Module):
 
             if i < n_mults - 1:
                 mirrored = n_mults - 2 - i
-                if widens[mirrored]:
+                if sample_widens[mirrored]:
                     narrowed = outs // block_out_channel_mults[mirrored]
                     self.up_blocks.append(upsample_clss[i](dimensions, outs, narrowed))
                     outs = narrowed

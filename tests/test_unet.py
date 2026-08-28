@@ -7,7 +7,7 @@ import pytest
 import torch
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
-from chuchichaestli.models.unet.unet import CHANNEL_CARRYING_SAMPLERS
+from chuchichaestli.models.unet.unet import SPATIAL_TO_CHANNEL_SAMPLERS
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
 
 
@@ -888,10 +888,10 @@ def test_throws_error_on_unsupported_sampling_type(kwargs):
 @pytest.mark.parametrize("downsample_type", sorted(DOWNSAMPLE_FUNCTIONS))
 def test_every_registered_downsampling_type_runs(downsample_type):
     """Test that every registered downsampling type builds and preserves the shape."""
-    # the channel-carrying samplers have to be mirrored in the other half
+    # the spatial-to-channel samplers have to be mirrored in the other half
     upsample_type = (
         "UpsampleShuffle"
-        if downsample_type in CHANNEL_CARRYING_SAMPLERS
+        if downsample_type in SPATIAL_TO_CHANNEL_SAMPLERS
         else "Upsample"
     )
     model = UNet(
@@ -907,7 +907,7 @@ def test_every_registered_upsampling_type_runs(upsample_type):
     """Test that every registered upsampling type builds and preserves the shape."""
     downsample_type = (
         "DownsampleUnshuffle"
-        if upsample_type in CHANNEL_CARRYING_SAMPLERS
+        if upsample_type in SPATIAL_TO_CHANNEL_SAMPLERS
         else "Downsample"
     )
     model = UNet(
@@ -920,7 +920,7 @@ def test_every_registered_upsampling_type_runs(upsample_type):
 
 @pytest.mark.parametrize("dimensions", [1, 2, 3])
 def test_shuffle_sampling_types_at_every_rank(dimensions):
-    """Test that the channel-carrying samplers keep the skip connections aligned."""
+    """Test that the spatial-to-channel samplers keep the skip connections aligned."""
     model = UNet(
         dimensions=dimensions,
         n_channels=16,
