@@ -17,7 +17,7 @@ from chuchichaestli.models.blocks import (
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS, DownsampleTypes
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
-from chuchichaestli.utils import per_position_args, prod
+from chuchichaestli.utils import per_position, per_position_args, prod
 from collections.abc import Sequence
 
 
@@ -43,7 +43,7 @@ class Encoder(nn.Module):
             "AttnAutoencoderMidBlock",
         ),
         out_block_type: EncoderOutBlockTypes = "EncoderOutBlock",
-        downsample_type: DownsampleTypes = "Downsample",
+        downsample_type: DownsampleTypes | Sequence[DownsampleTypes] = "Downsample",
         act_fn: ActivationTypes = "silu",
         norm_type: NormTypes = "group",
         num_groups: int = 8,
@@ -65,8 +65,9 @@ class Encoder(nn.Module):
             num_layers_per_block: Number of blocks per level (blocks are repeated if `>1`).
             mid_block_types: Type of blocks to use before the output.
             out_block_type: Type of block for output (latent space).
-            downsample_type: Type of downsampling block
-                (see `chuchichaestli.models.downsampling` for details).
+            downsample_type: Type of downsampling block, per level (see
+                `chuchichaestli.models.downsampling` for details). The last entry has
+                no sampler and only selects how that level spends its multiplier.
             act_fn: Activation function for the output layers
                 (see `chuchichaestli.models.activations` for details).
             norm_type: Normalization type for the output layer.
@@ -83,7 +84,6 @@ class Encoder(nn.Module):
         """
         super().__init__()
 
-        downsample_cls = DOWNSAMPLE_FUNCTIONS[downsample_type]
         block_out_channel_mults = tuple(block_out_channel_mults)
         if len(block_out_channel_mults) < len(down_block_types):
             block_out_channel_mults += (1,) * (
@@ -101,6 +101,16 @@ class Encoder(nn.Module):
                 num_layers_per_block += (num_layers_per_block[-1],) * (
                     len(down_block_types) - len(num_layers_per_block)
                 )
+
+        # One sampler entry per level; the last governs channel bookkeeping only
+        downsample_types = per_position(
+            downsample_type,
+            n_mults,
+            "downsample_type",
+            None,
+            f"[{n_mults} level(s)]",
+        )
+        downsample_clss = [DOWNSAMPLE_FUNCTIONS[name] for name in downsample_types]
 
         # Block positions in order of data flow
         n_pos = n_mults + len(mid_block_types)
@@ -130,7 +140,7 @@ class Encoder(nn.Module):
         ins = n_channels
         for i in range(n_mults):
             outs = ins
-            if downsample_type != "DownsampleUnshuffle":
+            if downsample_types[i] != "DownsampleUnshuffle":
                 outs = int(ins * block_out_channel_mults[i])
             stage = nn.Sequential()
             for _ in range(num_layers_per_block[i]):
@@ -146,11 +156,11 @@ class Encoder(nn.Module):
             self.down_blocks.append(stage)
 
             if i < n_mults - 1:
-                if downsample_type != "DownsampleUnshuffle":
-                    self.down_blocks.append(downsample_cls(dimensions, ins))
+                if downsample_types[i] != "DownsampleUnshuffle":
+                    self.down_blocks.append(downsample_clss[i](dimensions, ins))
                 else:
                     self.down_blocks.append(
-                        downsample_cls(
+                        downsample_clss[i](
                             dimensions,
                             ins,
                             outs := int(ins * block_out_channel_mults[i]),

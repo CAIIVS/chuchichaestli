@@ -839,3 +839,47 @@ def test_forward_pass_with_noise_at_inference(
     output2 = model(sample, timestep)
     assert output1.shape == input_dims  # Check output shape
     assert torch.equal(output1, output2)
+
+
+def test_per_level_sampling_types():
+    """Test that each level transition can use a different sampling block."""
+    model = UNet(
+        **PER_LEVEL_CONF,
+        downsample_type=("Downsample", "DownsampleInterpolate"),
+        upsample_type=("UpsampleInterpolate", "Upsample"),
+    )
+    assert [type(b).__name__ for b in model.down_blocks][1::2] == [
+        "Downsample",
+        "DownsampleInterpolate",
+    ]
+    assert [type(b).__name__ for b in model.up_blocks][1::2] == [
+        "UpsampleInterpolate",
+        "Upsample",
+    ]
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+def test_per_level_skip_connection_actions():
+    """Test that each up level can merge its skip connection differently."""
+    model = UNet(**PER_LEVEL_CONF, skip_connection_action=("concat", "add", None))
+    actions = [
+        b.skip_connection_action
+        for b in model.up_blocks
+        if hasattr(b, "skip_connection_action")
+    ]
+    assert actions == ["concat", "add", None]
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"downsample_type": "MaxPool"},
+        {"upsample_type": ("Upsample", "UpsampleShuffle")},
+    ],
+    ids=["down", "up"],
+)
+def test_throws_error_on_unsupported_sampling_type(kwargs):
+    """Test that sampling types the UNet cannot build are rejected up front."""
+    with pytest.raises(ValueError, match="Unsupported sampling type"):
+        UNet(**PER_LEVEL_CONF, **kwargs)

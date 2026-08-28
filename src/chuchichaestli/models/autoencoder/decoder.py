@@ -17,7 +17,7 @@ from chuchichaestli.models.blocks import (
 )
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS, UpsampleTypes
-from chuchichaestli.utils import per_position_args, prod
+from chuchichaestli.utils import per_position, per_position_args, prod
 from collections.abc import Sequence
 
 
@@ -43,7 +43,7 @@ class Decoder(nn.Module):
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 2),
         num_layers_per_block: int | Sequence[int] = 3,
-        upsample_type: UpsampleTypes = "UpsampleInterpolate",
+        upsample_type: UpsampleTypes | Sequence[UpsampleTypes] = "UpsampleInterpolate",
         act_fn: ActivationTypes = "silu",
         norm_type: NormTypes = "group",
         num_groups: int = 8,
@@ -64,7 +64,9 @@ class Decoder(nn.Module):
             up_block_types: Type of up blocks to use for each level.
             block_out_channel_mults: Multiplier for output channels of each block.
             num_layers_per_block: Number of blocks per level (blocks are repeated if `>1`).
-            upsample_type: Type of upsampling block (see `chuchichaestli.models.upsampling` for details).
+            upsample_type: Type of upsampling block, per level (see
+                `chuchichaestli.models.upsampling` for details). The last entry has no
+                sampler and only selects how that level spends its multiplier.
             act_fn: Activation function for the output layers
                 (see `chuchichaestli.models.activations` for details).
             norm_type: Normalization type for the output layer.
@@ -80,7 +82,6 @@ class Decoder(nn.Module):
         """
         super().__init__()
 
-        upsample_cls = UPSAMPLE_FUNCTIONS[upsample_type]
         block_out_channel_mults = tuple(block_out_channel_mults)
         if len(block_out_channel_mults) < len(up_block_types):
             block_out_channel_mults += (1,) * (
@@ -98,6 +99,12 @@ class Decoder(nn.Module):
                 num_layers_per_block += (num_layers_per_block[-1],) * (
                     len(up_block_types) - len(num_layers_per_block)
                 )
+
+        # One sampler entry per level; the last governs channel bookkeeping only
+        upsample_types = per_position(
+            upsample_type, n_mults, "upsample_type", None, f"[{n_mults} level(s)]"
+        )
+        upsample_clss = [UPSAMPLE_FUNCTIONS[name] for name in upsample_types]
 
         # Block positions in order of data flow
         n_pos = n_mults + len(mid_block_types)
@@ -136,7 +143,7 @@ class Decoder(nn.Module):
         ins = n_channels
         for i in range(n_mults):
             outs = ins
-            if upsample_type != "UpsampleShuffle":
+            if upsample_types[i] != "UpsampleShuffle":
                 outs = int(ins // block_out_channel_mults[i])
             stage = nn.Sequential()
             for _ in range(num_layers_per_block[i]):
@@ -152,11 +159,11 @@ class Decoder(nn.Module):
             self.up_blocks.append(stage)
 
             if i < n_mults - 1:
-                if upsample_type != "UpsampleShuffle":
-                    self.up_blocks.append(upsample_cls(dimensions, outs))
+                if upsample_types[i] != "UpsampleShuffle":
+                    self.up_blocks.append(upsample_clss[i](dimensions, outs))
                 else:
                     self.up_blocks.append(
-                        upsample_cls(
+                        upsample_clss[i](
                             dimensions,
                             ins,
                             outs := int(ins // block_out_channel_mults[i]),

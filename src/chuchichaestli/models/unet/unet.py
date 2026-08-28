@@ -40,11 +40,37 @@ from typing import Literal
 from collections.abc import Sequence
 
 
+# the U-Net builds samplers as `cls(dimensions, channels)`; the remaining entries of
+# DOWNSAMPLE_FUNCTIONS/UPSAMPLE_FUNCTIONS need a different signature or change the shape
+UNET_DOWNSAMPLE_TYPES: frozenset[str] = frozenset(
+    {"Downsample", "DownsampleInterpolate"}
+)
+UNET_UPSAMPLE_TYPES: frozenset[str] = frozenset({"Upsample", "UpsampleInterpolate"})
+
 TIME_EMBEDDING_MAP = {
     "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
     "DeepSinusoidalTimeEmbedding": DeepSinusoidalTimeEmbedding,
     True: SinusoidalTimeEmbedding,
 }
+
+
+def _sampler_cls(name: str, functions: dict, supported: frozenset[str]):
+    """Look up a sampling block class, rejecting the ones the U-Net cannot build.
+
+    Args:
+        name: Name of the sampling block type.
+        functions: Mapping of sampling block names to classes.
+        supported: Names the U-Net can construct.
+
+    Raises:
+        ValueError: If `name` is not one of the supported types.
+    """
+    if name not in supported:
+        raise ValueError(
+            f"Unsupported sampling type for a U-Net: {name!r}."
+            f" Use one of {sorted(supported)}."
+        )
+    return functions[name]
 
 
 class UNet(nn.Module):
@@ -84,8 +110,8 @@ class UNet(nn.Module):
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 4),
         num_blocks_per_level: int = 1,
-        upsample_type: UpsampleTypes = "Upsample",
-        downsample_type: DownsampleTypes = "Downsample",
+        upsample_type: UpsampleTypes | Sequence[UpsampleTypes] = "Upsample",
+        downsample_type: DownsampleTypes | Sequence[DownsampleTypes] = "Downsample",
         act_fn: ActivationTypes = "silu",
         norm_type: NormTypes = "group",
         groups: int = 8,
@@ -115,7 +141,9 @@ class UNet(nn.Module):
         attn_groups: int | Sequence[int] = 32,
         attn_kernel_size: int | Sequence[int] = 1,
         attn_gate_inter_channels: int = 32,
-        skip_connection_action: Literal["concat", "avg", "add"] | None = "concat",
+        skip_connection_action: Literal["concat", "avg", "add"]
+        | None
+        | Sequence[Literal["concat", "avg", "add"] | None] = "concat",
         skip_connection_to_all_blocks: bool | None = None,
         add_noise: Literal["up", "down"] | None = None,
         noise_sigma: float = 0.1,
@@ -136,9 +164,9 @@ class UNet(nn.Module):
             block_out_channel_mults: Output channel multipliers for each block.
             num_blocks_per_level: Number of blocks per level
                 (blocks are repeated if `>1`).
-            upsample_type: Type of upsampling block
+            upsample_type: Type of upsampling block, per level transition
                 (see `chuchichaestli.models.upsampling` for details).
-            downsample_type: Type of downsampling block
+            downsample_type: Type of downsampling block, per level transition
                 (see `chuchichaestli.models.downsampling` for details).
             act_fn: Activation function for the output layer
                 (see `chuchichaestli.models.activations` for details).
@@ -175,8 +203,8 @@ class UNet(nn.Module):
                 per attention block.
             attn_gate_inter_channels: Number of intermediate channels for the attention gate
                 (if `up_block_types` contains `"AttnGateUpBlock"`).
-            skip_connection_action: Action to take for the skip connection.
-                If `None`, no skip connections are used.
+            skip_connection_action: Action to take for the skip connection, per up
+                level. If `None`, no skip connection is used at that level.
             skip_connection_to_all_blocks: If `True`, the U-Net builds skip connections
                 to all blocks in a level, otherwise only to the first block in a level.
             add_noise: Add a Gaussian noise regularizer block in the bottleneck (before or after).
@@ -193,8 +221,6 @@ class UNet(nn.Module):
 
         # Cache commonly used values
         conv_cls = DIM_TO_CONV_MAP[dimensions]
-        upsample_cls = UPSAMPLE_FUNCTIONS[upsample_type]
-        downsample_cls = DOWNSAMPLE_FUNCTIONS[downsample_type]
         n_mults = len(block_out_channel_mults)
         self.num_blocks_per_level = num_blocks_per_level
         self.skip_connection_to_all_blocks = skip_connection_to_all_blocks
@@ -206,6 +232,28 @@ class UNet(nn.Module):
             block_type in ATTENTION_BLOCK_TYPES
             for block_type in (*down_block_types, mid_block_type, *up_block_types)
         ]
+
+        n_samplers = n_mults - 1
+        samplers = f"[{n_samplers} sampling block(s)]"
+        downsample_clss = [
+            _sampler_cls(name, DOWNSAMPLE_FUNCTIONS, UNET_DOWNSAMPLE_TYPES)
+            for name in per_position(
+                downsample_type, n_samplers, "downsample_type", None, samplers
+            )
+        ]
+        upsample_clss = [
+            _sampler_cls(name, UPSAMPLE_FUNCTIONS, UNET_UPSAMPLE_TYPES)
+            for name in per_position(
+                upsample_type, n_samplers, "upsample_type", None, samplers
+            )
+        ]
+        skip_actions = per_position(
+            skip_connection_action,
+            n_mults,
+            "skip_connection_action",
+            None,
+            f"[{n_mults} up level(s)]",
+        )
 
         # Group normalization configuration
         res_norm_types = per_position(res_norm_type, n_pos, "res_norm_type", None, path)
@@ -296,7 +344,7 @@ class UNet(nn.Module):
                 ins = outs
 
             if i < n_mults - 1:
-                self.down_blocks.append(downsample_cls(dimensions, ins))
+                self.down_blocks.append(downsample_clss[i](dimensions, ins))
 
         # Build middle block
         self.mid_block = BLOCK_MAP[mid_block_type](
@@ -327,7 +375,7 @@ class UNet(nn.Module):
                     res_args=res_args[n_mults + 1 + i],
                     attn_args=attn_args[n_mults + 1 + i],
                     skip_connection_action=(
-                        skip_connection_action
+                        skip_actions[i]
                         if j == 0 or skip_connection_to_all_blocks
                         else None
                     ),
@@ -335,7 +383,7 @@ class UNet(nn.Module):
                 self.up_blocks.append(up_block)
 
             if i < n_mults - 1:
-                self.up_blocks.append(upsample_cls(dimensions, outs))
+                self.up_blocks.append(upsample_clss[i](dimensions, outs))
 
         match add_noise:
             case "up":

@@ -335,3 +335,21 @@ def test_caller_sequences_are_not_mutated():
         res_args={"res_groups": 4},
     )
     assert mults == [1, 2]
+
+
+def test_encoder_per_level_sampling_types():
+    """Test that an encoder can mix sampling types and still shrink correctly."""
+    encoder = Encoder(
+        n_channels=16,
+        block_out_channel_mults=(1, 2, 2),
+        num_layers_per_block=1,
+        down_block_types=("AutoencoderDownBlock",) * 3,
+        mid_block_types=(),
+        res_args={"res_groups": 4},
+        downsample_type=("Downsample", "DownsampleUnshuffle", "Downsample"),
+    )
+    assert [type(b).__name__ for b in encoder.down_blocks][1::2] == [
+        "Downsample",
+        "DownsampleUnshuffle",
+    ]
+    assert encoder(torch.randn(1, 1, 32, 32)).shape[-2:] == (8, 8)
