@@ -153,7 +153,7 @@ class UNet(nn.Module):
         attn_norm_type: NormTypes | Sequence[NormTypes] = "group",
         attn_groups: int | Sequence[int] = 32,
         attn_kernel_size: int | Sequence[int] = 1,
-        attn_gate_inter_channels: int = 32,
+        attn_gate_inter_channels: int | Sequence[int] | None = None,
         skip_connection_action: Literal["concat", "avg", "add"]
         | None
         | Sequence[Literal["concat", "avg", "add"] | None] = "concat",
@@ -214,8 +214,9 @@ class UNet(nn.Module):
                 normalization (if `attn_norm_type` is `"group"`), per attention block.
             attn_kernel_size: Kernel size for the convolutional attention block,
                 per attention block.
-            attn_gate_inter_channels: Number of intermediate channels for the attention gate
-                (if `up_block_types` contains `"AttnGateUpBlock"`).
+            attn_gate_inter_channels: Number of intermediate channels for the attention
+                gate (if `up_block_types` contains `"AttnGateUpBlock"`), per attention
+                block; halves the block's channels by default.
             skip_connection_action: Action to take for the skip connection, per up
                 level. If `None`, no skip connection is used at that level.
             skip_connection_to_all_blocks: If `True`, the U-Net builds skip connections
@@ -320,7 +321,7 @@ class UNet(nn.Module):
                 "norm_type": attn_norm_type,
                 "groups": attn_groups,
                 "kernel_size": attn_kernel_size,
-                "inter_channels": attn_gate_inter_channels,
+                "num_channels_inter": attn_gate_inter_channels,
             },
             n_pos,
             mask=attn_mask,

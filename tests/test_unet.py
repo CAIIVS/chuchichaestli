@@ -991,3 +991,40 @@ def test_adaptive_pooling_tolerates_indivisible_input_sizes():
         downsample_type="AdaptiveMaxPool",
     )
     assert model(torch.randn(1, 1, 30, 30)).shape == (1, 1, 30, 30)
+
+
+GATE_CONF = {
+    "n_channels": 16,
+    "res_groups": 4,
+    "block_out_channel_mults": (1, 2, 4),
+    "down_block_types": ("DownBlock",) * 3,
+    "up_block_types": ("AttnGateUpBlock",) * 3,
+}
+
+
+def attention_gates(model):
+    """Collect the (input, intermediate) channel counts of every attention gate."""
+    return [
+        (b.attn.W_g.in_channels, b.attn.W_g.out_channels)
+        for b in model.up_blocks
+        if getattr(b, "attn", None) is not None
+    ]
+
+
+def test_attention_gate_halves_the_channels_by_default():
+    """Test that the gate derives its intermediate width from the block's channels."""
+    gates = attention_gates(UNet(**GATE_CONF))
+    assert gates == [(channels, channels // 2) for channels, _ in gates]
+    assert [inter for _, inter in gates] == [64, 16, 8]
+
+
+def test_attention_gate_inter_channels_reaches_the_gate():
+    """Test that an explicit intermediate width is applied rather than ignored."""
+    gates = attention_gates(UNet(**GATE_CONF, attn_gate_inter_channels=64))
+    assert [inter for _, inter in gates] == [64, 64, 64]
+
+
+def test_attention_gate_inter_channels_can_vary_per_level():
+    """Test that the gate width is a per-level argument like the other attn_ ones."""
+    gates = attention_gates(UNet(**GATE_CONF, attn_gate_inter_channels=(8, 16, 32)))
+    assert [inter for _, inter in gates] == [8, 16, 32]

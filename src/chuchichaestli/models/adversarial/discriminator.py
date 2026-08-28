@@ -48,7 +48,7 @@ class BlockDiscriminator(nn.Sequential):
         out_channels: int = 1,
         attn_n_heads: int | Sequence[int] = 1,
         attn_head_dim: int | Sequence[int] = 16,
-        attn_gate_inter_channels: int | Sequence[int] = 32,
+        attn_gate_inter_channels: int | Sequence[int] | None = None,
         **kwargs,
     ):
         """Construct a discriminator.
@@ -63,7 +63,8 @@ class BlockDiscriminator(nn.Sequential):
           attn_n_heads: Number of attention heads, per block or per attention block.
           attn_head_dim: Dimension of the attention head, per block or per attention block.
           attn_gate_inter_channels: Number of intermediate channels for the attention
-            gate, per block or per attention block.
+            gate, per block or per attention block; halves the block's channels by
+            default.
           kwargs: Additional arguments for the blocks.
         """
         if dimensions not in DIM_TO_CONV_MAP:
@@ -93,7 +94,7 @@ class BlockDiscriminator(nn.Sequential):
         attn_spec = kwargs.pop("attn_args", None) or {
             "n_heads": attn_n_heads,
             "head_dim": attn_head_dim,
-            "inter_channels": attn_gate_inter_channels,
+            "num_channels_inter": attn_gate_inter_channels,
         }
         attn_args = per_position_args(
             attn_spec,
