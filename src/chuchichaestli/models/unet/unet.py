@@ -19,8 +19,6 @@ from chuchichaestli.models.blocks import (
 )
 from chuchichaestli.models.downsampling import (
     DOWNSAMPLE_FUNCTIONS,
-    Downsample,
-    DownsampleInterpolate,
     DownsampleTypes,
 )
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
@@ -31,8 +29,6 @@ from chuchichaestli.models.unet.time_embeddings import (
 )
 from chuchichaestli.models.upsampling import (
     UPSAMPLE_FUNCTIONS,
-    Upsample,
-    UpsampleInterpolate,
     UpsampleTypes,
 )
 from chuchichaestli.utils import per_position, per_position_args
@@ -43,11 +39,14 @@ from collections.abc import Callable, Sequence
 # the U-Net builds samplers as `cls(dimensions, channels)`; the remaining entries of
 # DOWNSAMPLE_FUNCTIONS/UPSAMPLE_FUNCTIONS need a different signature or change the shape
 UNET_DOWNSAMPLE_MAP: dict[str, Callable] = {
-    name: DOWNSAMPLE_FUNCTIONS[name] for name in ("Downsample", "DownsampleInterpolate")
+    name: DOWNSAMPLE_FUNCTIONS[name]
+    for name in ("Downsample", "DownsampleInterpolate", "MaxPool", "AvgPool")
 }
 UNET_UPSAMPLE_MAP: dict[str, Callable] = {
     name: UPSAMPLE_FUNCTIONS[name] for name in ("Upsample", "UpsampleInterpolate")
 }
+DOWNSAMPLE_BLOCKS: tuple[type, ...] = tuple(UNET_DOWNSAMPLE_MAP.values())
+UPSAMPLE_BLOCKS: tuple[type, ...] = tuple(UNET_UPSAMPLE_MAP.values())
 
 TIME_EMBEDDING_MAP = {
     "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
@@ -442,9 +441,7 @@ class UNet(nn.Module):
         hh = []
         for i, down_block in enumerate(self.down_blocks):
             x = down_block(x, t_emb)
-            if isinstance(
-                down_block, Downsample | DownsampleInterpolate | GaussianNoiseBlock
-            ):
+            if isinstance(down_block, DOWNSAMPLE_BLOCKS + (GaussianNoiseBlock,)):
                 continue
             # Append skip connection for the last down_block in each layer
             if (i + 1) % self.num_blocks_per_level == 0:
@@ -454,9 +451,7 @@ class UNet(nn.Module):
 
         no_count_block = 0
         for i, up_block in enumerate(self.up_blocks):
-            if isinstance(
-                up_block, Upsample | UpsampleInterpolate | GaussianNoiseBlock
-            ):
+            if isinstance(up_block, UPSAMPLE_BLOCKS + (GaussianNoiseBlock,)):
                 x = up_block(x, t_emb)
                 no_count_block += 1
                 continue

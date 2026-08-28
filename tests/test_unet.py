@@ -874,12 +874,23 @@ def test_per_level_skip_connection_actions():
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"downsample_type": "MaxPool"},
+        {"downsample_type": "AdaptiveMaxPool"},
+        {"downsample_type": "DownsampleUnshuffle"},
         {"upsample_type": ("Upsample", "UpsampleShuffle")},
     ],
-    ids=["down", "up"],
+    ids=["adaptive", "unshuffle", "shuffle"],
 )
 def test_throws_error_on_unsupported_sampling_type(kwargs):
     """Test that sampling types the UNet cannot build are rejected up front."""
     with pytest.raises(ValueError, match="Unsupported sampling type"):
         UNet(**PER_LEVEL_CONF, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "downsample_type",
+    ["Downsample", "DownsampleInterpolate", "MaxPool", "AvgPool"],
+)
+def test_every_supported_downsampling_type_runs(downsample_type):
+    """Test that each supported downsampling type builds and preserves the shape."""
+    model = UNet(**PER_LEVEL_CONF, downsample_type=downsample_type)
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)

@@ -57,6 +57,7 @@ def _classes() -> SimpleNamespace:
         Downsample,
         DownsampleInterpolate,
         DownsampleUnshuffle,
+        Pool,
     )
     from chuchichaestli.models.upsampling import (
         Upsample,
@@ -85,7 +86,7 @@ def _classes() -> SimpleNamespace:
         GaussianNoiseBlock=GaussianNoiseBlock,
         RESIDUAL=residual,
         RECURSE=containers + blocks,
-        DOWNSAMPLE=(Downsample, DownsampleInterpolate, DownsampleUnshuffle),
+        DOWNSAMPLE=(Downsample, DownsampleInterpolate, DownsampleUnshuffle, Pool),
         UPSAMPLE=(Upsample, UpsampleInterpolate, UpsampleShuffle),
     )
     return _CLASSES
