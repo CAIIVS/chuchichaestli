@@ -51,12 +51,12 @@ TIME_EMBEDDING_MAP = {
 }
 
 
-def _sampler_cls(name: str, supported: dict[str, Callable]):
-    """Look up a sampling block class, rejecting the ones the U-Net cannot build.
+def _require_sampling_cls(name: str, supported: dict[str, Callable]):
+    """Look up a sampling block class, raising if the name is not registered.
 
     Args:
         name: Name of the sampling block type.
-        supported: Sampling block types the U-Net can construct.
+        supported: Sampling block types accepted at this position.
 
     Raises:
         ValueError: If `name` is not one of the supported types.
@@ -234,9 +234,11 @@ class UNet(nn.Module):
             upsample_type, n_samplers, "upsample_type", None, samplers
         )
         downsample_clss = [
-            _sampler_cls(n, DOWNSAMPLE_FUNCTIONS) for n in downsample_types
+            _require_sampling_cls(n, DOWNSAMPLE_FUNCTIONS) for n in downsample_types
         ]
-        upsample_clss = [_sampler_cls(n, UPSAMPLE_FUNCTIONS) for n in upsample_types]
+        upsample_clss = [
+            _require_sampling_cls(n, UPSAMPLE_FUNCTIONS) for n in upsample_types
+        ]
         widens = [name in CHANNEL_CARRYING_SAMPLERS for name in downsample_types]
         up_widens = [name in CHANNEL_CARRYING_SAMPLERS for name in upsample_types]
         mismatched = [
