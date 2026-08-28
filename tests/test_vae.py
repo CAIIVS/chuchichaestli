@@ -302,3 +302,29 @@ def test_vae_kl_div(
 
 if __name__ == "__main__":
     pytest.main(["-v", "test_vae.py"])
+
+
+def test_per_half_args_reach_the_encoder_only():
+    """Test that a VAE forwards the per-half override dicts to the right child."""
+    model = VAE(
+        n_channels=16,
+        latent_dim=4,
+        block_out_channel_mults=(1, 2),
+        down_block_types=("AutoencoderDownBlock",) * 2,
+        up_block_types=("AutoencoderUpBlock",) * 2,
+        encoder_mid_block_types=(),
+        decoder_mid_block_types=(),
+        down_layers_per_block=1,
+        up_layers_per_block=1,
+        res_groups=4,
+        res_dropout=0.1,
+        encoder_res_args={"res_dropout": (0.3, 0.6)},
+    )
+    assert [s[0].res_block.dropout.p for s in model.encoder.down_blocks[::2]] == [
+        0.3,
+        0.6,
+    ]
+    assert [s[0].res_block.dropout.p for s in model.decoder.up_blocks[::2]] == [
+        0.1,
+        0.1,
+    ]
