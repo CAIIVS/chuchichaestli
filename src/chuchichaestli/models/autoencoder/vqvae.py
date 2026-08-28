@@ -287,6 +287,7 @@ class VQVAE(Autoencoder):
             attn_norm_type=attn_norm_type,
             attn_groups=attn_groups,
             attn_kernel_size=attn_kernel_size,
+            attn_scales=attn_scales,
             encoder_act_fn=encoder_act_fn,
             encoder_norm_type=encoder_norm_type,
             encoder_groups=encoder_groups,
