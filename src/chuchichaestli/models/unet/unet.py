@@ -9,7 +9,7 @@ from torch import nn
 
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
-    ATTENTION_BLOCK_MAP,
+    ATTN_BLOCK_MAP,
     BLOCK_MAP,
     CONV_BLOCK_MAP,
     GaussianNoiseBlock,
@@ -243,7 +243,7 @@ class UNet(nn.Module):
         n_pos = 2 * n_mults + 1
         path = f"[{n_mults} down level(s), mid block, {n_mults} up level(s)]"
         attn_mask = [
-            block_type in ATTENTION_BLOCK_MAP
+            block_type in ATTN_BLOCK_MAP
             for block_type in (*down_block_types, mid_block_type, *up_block_types)
         ]
 

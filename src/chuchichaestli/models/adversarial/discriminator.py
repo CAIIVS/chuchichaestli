@@ -10,7 +10,7 @@ from torch.nn.modules.pooling import _AvgPoolNd, _MaxPoolNd
 from collections.abc import Sequence
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.blocks import (
-    ATTENTION_CONV_BLOCK_MAP,
+    ATTN_CONV_BLOCK_MAP,
     CONV_BLOCK_MAP,
 )
 from chuchichaestli.utils import per_position_args
@@ -99,7 +99,7 @@ class BlockDiscriminator(nn.Sequential):
         attn_args = per_position_args(
             attn_spec,
             n_blocks,
-            mask=[t in ATTENTION_CONV_BLOCK_MAP for t in block_types],
+            mask=[t in ATTN_CONV_BLOCK_MAP for t in block_types],
             context=f"[{n_blocks} block(s)]",
         )
 

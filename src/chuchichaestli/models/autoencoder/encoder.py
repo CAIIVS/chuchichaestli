@@ -7,7 +7,7 @@ from torch import nn
 
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
-    ATTENTION_BLOCK_MAP,
+    ATTN_BLOCK_MAP,
     INTRA_BLOCK_ATTN_ARGS,
     BLOCK_MAP,
     AutoencoderDownBlockTypes,
@@ -116,7 +116,7 @@ class Encoder(nn.Module):
         n_pos = n_mults + len(mid_block_types)
         path = f"[{n_mults} level(s), {len(mid_block_types)} mid block(s)]"
         attn_mask = [
-            block_type in ATTENTION_BLOCK_MAP
+            block_type in ATTN_BLOCK_MAP
             for block_type in (*down_block_types, *mid_block_types)
         ]
         res_args = per_position_args(res_args, n_pos, context=path)

@@ -920,7 +920,7 @@ class EfficientViTBlock(nn.Module):
             **(attn_args["local_args"] if "local_args" in attn_args else {}),
         }
 
-        self.context_block = ATTN_BLOCK_MAP[context_block_type](
+        self.context_block = CONTEXT_BLOCK_MAP[context_block_type](
             dimensions, in_channels, in_channels, **context_args
         )
         self.local_block = CONV_BLOCK_MAP[local_block_type](
@@ -2524,7 +2524,7 @@ NormActAttnConvDownsampleBlock = partialclass(
 )
 
 
-# blocks designed for specifically for models such as UNet, AE, etc.
+# blocks designed for specific models such as UNet, AE, etc.
 BLOCK_MAP: dict[str, Callable] = {
     # U-Net blocks
     "DownBlock": DownBlock,
@@ -2563,8 +2563,8 @@ BLOCK_MAP: dict[str, Callable] = {
 }
 
 
-# blocks that consume `attn_args`; the rest ignore it
-ATTENTION_BLOCK_MAP: dict[str, Callable] = {
+# blocks of `BLOCK_MAP` that consume attention arguments
+ATTN_BLOCK_MAP: dict[str, Callable] = {
     "AttnDownBlock": AttnDownBlock,
     "AttnMidBlock": AttnMidBlock,
     "AttnUpBlock": AttnUpBlock,
@@ -2585,15 +2585,14 @@ ATTENTION_BLOCK_MAP: dict[str, Callable] = {
     "EfficientViTBlock": EfficientViTBlock,
 }
 
-# `attn_args` keys the blocks read within one block rather than across levels:
-# `norm_type` addresses sub-layers, the rest are payloads handed over whole
+# `attn_args` keys the blocks read within one block rather than across levels
 INTRA_BLOCK_ATTN_ARGS: frozenset[str] = frozenset(
     {"norm_type", "scales", "context_args", "local_args"}
 )
 
 
-# convolutional blocks that consume `attn_args`; the rest ignore it
-ATTENTION_CONV_BLOCK_MAP: dict[str, Callable] = {
+# attention + convolutional blocks (subset of `CONV_BLOCK_MAP` taking attention)
+ATTN_CONV_BLOCK_MAP: dict[str, Callable] = {
     "AttnConvDownBlock": AttnConvDownBlock,
     "AttnConvDownsampleBlock": AttnConvDownsampleBlock,
     "AttnConvBlock": AttnConvBlock,
@@ -2655,8 +2654,8 @@ RESIDUAL_BLOCK_MAP = {
 }
 
 
-# attention blocks (swap-out components in transformer blocks)
-ATTN_BLOCK_MAP: dict[str, Callable] = {
+# context extractors (swap-out attention components in transformer blocks)
+CONTEXT_BLOCK_MAP: dict[str, Callable] = {
     "LMAResBlock": LMAResBlock,
 }
 
