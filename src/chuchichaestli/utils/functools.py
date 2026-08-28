@@ -16,8 +16,8 @@ __all__ = [
     "nested_list_size",
     "prod",
     "map_nested",
-    "per_position",
-    "per_position_args",
+    "broadcast",
+    "broadcast_kwargs",
 ]
 
 
@@ -158,7 +158,7 @@ def prod(num_list: Iterable[int] | torch.Size) -> int:
     return result
 
 
-def per_position(
+def broadcast(
     value: Any,
     n: int,
     name: str = "value",
@@ -200,7 +200,7 @@ def per_position(
     )
 
 
-def per_position_args(
+def broadcast_kwargs(
     spec: dict[str, Any],
     n: int,
     mask: Sequence[bool] | None = None,
@@ -212,14 +212,12 @@ def per_position_args(
     Args:
         spec: Mapping of argument name to a single value or a per-position sequence.
         n: Number of positions.
-        mask: Marks the positions the values have an effect on (see `per_position`).
+        mask: Marks the positions the values have an effect on (see `broadcast`).
         opaque: Keys whose value is passed through untouched, however it is shaped.
         context: Description of the positions, used in error messages.
     """
     expanded = {
-        key: (value,) * n
-        if key in opaque
-        else per_position(value, n, key, mask, context)
+        key: (value,) * n if key in opaque else broadcast(value, n, key, mask, context)
         for key, value in spec.items()
     }
     return [{key: values[p] for key, values in expanded.items()} for p in range(n)]

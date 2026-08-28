@@ -17,7 +17,7 @@ from chuchichaestli.models.blocks import (
 )
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS, UpsampleTypes
-from chuchichaestli.utils import per_position, per_position_args, prod
+from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
 from collections.abc import Sequence
 
 
@@ -101,7 +101,7 @@ class Decoder(nn.Module):
                 )
 
         # One sampler entry per level; the last governs channel bookkeeping only
-        upsample_types = per_position(
+        upsample_types = broadcast(
             upsample_type, n_mults, "upsample_type", None, f"[{n_mults} level(s)]"
         )
         upsample_clss = [UPSAMPLE_FUNCTIONS[name] for name in upsample_types]
@@ -113,8 +113,8 @@ class Decoder(nn.Module):
             block_type in ATTN_BLOCK_MAP
             for block_type in (*mid_block_types, *up_block_types)
         ]
-        res_args = per_position_args(res_args, n_pos, context=path)
-        attn_args = per_position_args(
+        res_args = broadcast_kwargs(res_args, n_pos, context=path)
+        attn_args = broadcast_kwargs(
             attn_args,
             n_pos,
             mask=attn_mask,

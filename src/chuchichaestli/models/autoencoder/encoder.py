@@ -17,7 +17,7 @@ from chuchichaestli.models.blocks import (
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS, DownsampleTypes
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
-from chuchichaestli.utils import per_position, per_position_args, prod
+from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
 from collections.abc import Sequence
 
 
@@ -103,7 +103,7 @@ class Encoder(nn.Module):
                 )
 
         # One sampler entry per level; the last governs channel bookkeeping only
-        downsample_types = per_position(
+        downsample_types = broadcast(
             downsample_type,
             n_mults,
             "downsample_type",
@@ -119,8 +119,8 @@ class Encoder(nn.Module):
             block_type in ATTN_BLOCK_MAP
             for block_type in (*down_block_types, *mid_block_types)
         ]
-        res_args = per_position_args(res_args, n_pos, context=path)
-        attn_args = per_position_args(
+        res_args = broadcast_kwargs(res_args, n_pos, context=path)
+        attn_args = broadcast_kwargs(
             attn_args,
             n_pos,
             mask=attn_mask,

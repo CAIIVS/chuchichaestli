@@ -31,7 +31,7 @@ from chuchichaestli.models.upsampling import (
     UPSAMPLE_FUNCTIONS,
     UpsampleTypes,
 )
-from chuchichaestli.utils import per_position, per_position_args
+from chuchichaestli.utils import broadcast, broadcast_kwargs
 from typing import Literal
 from collections.abc import Callable, Sequence
 
@@ -78,11 +78,6 @@ class UNet(nn.Module):
     The decoder is built symmetrically to the encoder with (residual) transposed
     convolutional and upsampling blocks, each level linked via skip connections
     which ensure spatial information is passed through the network.
-
-    The `res_*` and `attn_*` arguments take either a single value, applied
-    everywhere, or one value per block position. Positions run in order of data
-    flow: the down levels, the mid block, then the up levels. The `attn_*`
-    arguments alternatively take one value per block that has attention.
     """
 
     def __init__(
@@ -232,10 +227,10 @@ class UNet(nn.Module):
 
         n_samplers = n_mults - 1
         samplers = f"[{n_samplers} sampling block(s)]"
-        downsample_types = per_position(
+        downsample_types = broadcast(
             downsample_type, n_samplers, "downsample_type", None, samplers
         )
-        upsample_types = per_position(
+        upsample_types = broadcast(
             upsample_type, n_samplers, "upsample_type", None, samplers
         )
         downsample_clss = [
@@ -254,7 +249,7 @@ class UNet(nn.Module):
             )
         widens.append(False)  # the last level has no sampler, so its blocks widen
 
-        skip_actions = per_position(
+        skip_actions = broadcast(
             skip_connection_action,
             n_mults,
             "skip_connection_action",
@@ -263,9 +258,9 @@ class UNet(nn.Module):
         )
 
         # Group normalization configuration
-        res_norm_types = per_position(res_norm_type, n_pos, "res_norm_type", None, path)
+        res_norm_types = broadcast(res_norm_type, n_pos, "res_norm_type", None, path)
         res_groups_per_pos = list(
-            per_position(res_groups, n_pos, "res_groups", None, path)
+            broadcast(res_groups, n_pos, "res_groups", None, path)
         )
         indivisible = [
             p
@@ -284,7 +279,7 @@ class UNet(nn.Module):
             groups = min(groups, n_channels)
 
         # Pre-compute argument dictionaries, one per block position
-        res_args = per_position_args(
+        res_args = broadcast_kwargs(
             {
                 "res_groups": tuple(res_groups_per_pos),
                 "res_act_fn": res_act_fn,
@@ -296,7 +291,7 @@ class UNet(nn.Module):
             context=path,
         )
 
-        attn_args = per_position_args(
+        attn_args = broadcast_kwargs(
             {
                 "n_heads": attn_n_heads,
                 "head_dim": attn_head_dim,

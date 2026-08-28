@@ -9,8 +9,8 @@ from chuchichaestli.utils.functools import (
     prod,
     nested_list_size,
     map_nested,
-    per_position,
-    per_position_args,
+    broadcast,
+    broadcast_kwargs,
 )
 from chuchichaestli.utils.formatting import metric_suffix
 from chuchichaestli.utils.modules import (
@@ -34,8 +34,8 @@ __all__ = [
     "prod",
     "nested_list_size",
     "map_nested",
-    "per_position",
-    "per_position_args",
+    "broadcast",
+    "broadcast_kwargs",
     "metric_suffix",
     "info_forward_pass",
     "layer_info",

@@ -13,7 +13,7 @@ from chuchichaestli.models.blocks import (
     ATTN_CONV_BLOCK_MAP,
     CONV_BLOCK_MAP,
 )
-from chuchichaestli.utils import per_position_args
+from chuchichaestli.utils import broadcast_kwargs
 
 
 __all__ = [
@@ -96,7 +96,7 @@ class BlockDiscriminator(nn.Sequential):
             "head_dim": attn_head_dim,
             "num_channels_inter": attn_gate_inter_channels,
         }
-        attn_args = per_position_args(
+        attn_args = broadcast_kwargs(
             attn_spec,
             n_blocks,
             mask=[t in ATTN_CONV_BLOCK_MAP for t in block_types],
