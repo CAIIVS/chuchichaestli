@@ -63,6 +63,69 @@ def test_block_types_follow_data_flow():
     ]
 
 
+PER_LEVEL_CONF = {
+    "n_channels": 16,
+    "res_groups": 4,
+    "down_block_types": ("DownBlock", "DownBlock", "AttnDownBlock"),
+    "mid_block_type": "AttnMidBlock",
+    "up_block_types": ("AttnUpBlock", "UpBlock", "UpBlock"),
+    "block_out_channel_mults": (1, 2, 4),
+}
+
+
+def res_dropouts(model):
+    """Collect the dropout probability of every residual block, in build order."""
+    blocks = [*model.down_blocks, model.mid_block, *model.up_blocks]
+    return [b.res_block.dropout.p for b in blocks if hasattr(b, "res_block")]
+
+
+def attn_heads(model):
+    """Collect the head count of every block that has attention, in build order."""
+    blocks = [*model.down_blocks, model.mid_block, *model.up_blocks]
+    return [b.attn.n_heads for b in blocks if getattr(b, "attn", None) is not None]
+
+
+def test_per_level_arguments_follow_the_block_path():
+    """Test that a per-level sequence is read as down levels, mid block, up levels."""
+    model = UNet(**PER_LEVEL_CONF, res_dropout=(0.1, 0.2, 0.3, 0.5, 0.4, 0.2, 0.1))
+    assert res_dropouts(model) == [0.1, 0.2, 0.3, 0.5, 0.4, 0.2, 0.1]
+
+
+def test_per_level_arguments_broadcast_a_single_value():
+    """Test that a single value still reaches every block position."""
+    model = UNet(**PER_LEVEL_CONF, res_dropout=0.25)
+    assert res_dropouts(model) == [0.25] * 7
+
+
+def test_attention_arguments_accept_both_lengths():
+    """Test that the block-path and attention-block spellings build the same model."""
+    by_path = UNet(**PER_LEVEL_CONF, attn_n_heads=(1, 1, 2, 4, 8, 1, 1))
+    by_attn = UNet(**PER_LEVEL_CONF, attn_n_heads=(2, 4, 8))
+    assert attn_heads(by_path) == attn_heads(by_attn) == [2, 4, 8]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"res_dropout": (0.1, 0.2)},
+        {"res_norm_type": ("group",) * 4},
+        {"attn_n_heads": (1, 2)},
+    ],
+    ids=["res_short", "res_wrong", "attn_wrong"],
+)
+def test_throws_error_on_wrong_per_level_length(kwargs):
+    """Test that a sequence matching no accepted position count is rejected."""
+    with pytest.raises(ValueError):
+        UNet(**PER_LEVEL_CONF, **kwargs)
+
+
+def test_group_divisibility_warns_once_for_a_single_value():
+    """Test that the group clamp reports one warning, not one per block position."""
+    with pytest.warns(UserWarning, match="Number of channels") as record:
+        UNet(n_channels=16, res_groups=32)
+    assert len(record) == 1
+
+
 @pytest.mark.parametrize(
     "dimensions,down_block_types,up_block_types,n_channels,block_out_channel_mults",
     [

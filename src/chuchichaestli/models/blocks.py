@@ -2563,6 +2563,31 @@ BLOCK_MAP: dict[str, Callable] = {
 }
 
 
+# blocks that consume `attn_args`; the rest ignore it
+ATTENTION_BLOCK_TYPES: frozenset[str] = frozenset(
+    {
+        "AttnDownBlock",
+        "AttnMidBlock",
+        "AttnUpBlock",
+        "AttnGateUpBlock",
+        "ConvAttnDownBlock",
+        "ConvAttnMidBlock",
+        "ConvAttnUpBlock",
+        "AttnAutoencoderDownBlock",
+        "AttnAutoencoderMidBlock",
+        "AttnAutoencoderUpBlock",
+        "ConvAttnAutoencoderDownBlock",
+        "ConvAttnAutoencoderMidBlock",
+        "ConvAttnAutoencoderUpBlock",
+        "AttnDCAutoencoderDownBlock",
+        "AttnDCAutoencoderUpBlock",
+        "ConvAttnDCAutoencoderDownBlock",
+        "ConvAttnDCAutoencoderUpBlock",
+        "EfficientViTBlock",
+    }
+)
+
+
 # general convolutional blocks
 CONV_BLOCK_MAP: dict[str, Callable] = {
     "MBConvBlock": MBConvBlock,

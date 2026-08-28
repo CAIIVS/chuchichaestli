@@ -9,6 +9,7 @@ from torch import nn
 
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
+    ATTENTION_BLOCK_TYPES,
     BLOCK_MAP,
     CONV_BLOCK_MAP,
     GaussianNoiseBlock,
@@ -34,6 +35,7 @@ from chuchichaestli.models.upsampling import (
     UpsampleInterpolate,
     UpsampleTypes,
 )
+from chuchichaestli.utils import per_position, per_position_args
 from typing import Literal
 from collections.abc import Sequence
 
@@ -54,6 +56,11 @@ class UNet(nn.Module):
     The decoder is built symmetrically to the encoder with (residual) transposed
     convolutional and upsampling blocks, each level linked via skip connections
     which ensure spatial information is passed through the network.
+
+    The `res_*` and `attn_*` arguments take either a single value, applied
+    everywhere, or one value per block position. Positions run in order of data
+    flow: the down levels, the mid block, then the up levels. The `attn_*`
+    arguments alternatively take one value per block that has attention.
     """
 
     def __init__(
@@ -96,17 +103,17 @@ class UNet(nn.Module):
         t_emb_act_fn: ActivationTypes = "silu",
         t_emb_post_act: bool = False,
         t_emb_condition_dim: int | None = None,
-        res_act_fn: ActivationTypes = "silu",
-        res_dropout: float = 0.1,
-        res_norm_type: NormTypes = "group",
-        res_groups: int = 32,
-        res_kernel_size: int = 3,
-        attn_head_dim: int = 32,
-        attn_n_heads: int = 1,
-        attn_dropout_p: float = 0.0,
-        attn_norm_type: NormTypes = "group",
-        attn_groups: int = 32,
-        attn_kernel_size: int = 1,
+        res_act_fn: ActivationTypes | Sequence[ActivationTypes] = "silu",
+        res_dropout: float | Sequence[float] = 0.1,
+        res_norm_type: NormTypes | Sequence[NormTypes] = "group",
+        res_groups: int | Sequence[int] = 32,
+        res_kernel_size: int | Sequence[int] = 3,
+        attn_head_dim: int | Sequence[int] = 32,
+        attn_n_heads: int | Sequence[int] = 1,
+        attn_dropout_p: float | Sequence[float] = 0.0,
+        attn_norm_type: NormTypes | Sequence[NormTypes] = "group",
+        attn_groups: int | Sequence[int] = 32,
+        attn_kernel_size: int | Sequence[int] = 1,
         attn_gate_inter_channels: int = 32,
         skip_connection_action: Literal["concat", "avg", "add"] | None = "concat",
         skip_connection_to_all_blocks: bool | None = None,
@@ -148,21 +155,24 @@ class UNet(nn.Module):
             t_emb_act_fn: Activation function for the time embedding.
             t_emb_post_act: Whether to use an activation at the end of the time embedding.
             t_emb_condition_dim: The condition dimension for the time embedding.
-            res_act_fn: Activation function for the residual blocks
-                (see `chuchichaestli.models.activations` for details).
-            res_dropout: Dropout rate for the residual blocks.
-            res_norm_type: Normalization type for the residual block
-                (see `chuchichaestli.models.norm` for details).
-            res_groups: Number of groups for the residual block normalization (if group norm).
-            res_kernel_size: Kernel size for the residual blocks.
-            attn_head_dim: Dimension of the attention heads.
-            attn_n_heads: Number of attention heads.
-            attn_dropout_p: Dropout probability of the scaled dot product attention.
-            attn_norm_type: Normalization type for the convolutional attention block
-                (see `chuchichaestli.models.norm` for details).
-            attn_groups: Number of groups for the convolutional attention block normalization
-                (if `attn_norm_type` is `"group"`).
-            attn_kernel_size: Kernel size for the convolutional attention block.
+            res_act_fn: Activation function for the residual blocks, per block
+                position (see `chuchichaestli.models.activations` for details).
+            res_dropout: Dropout rate for the residual blocks, per block position.
+            res_norm_type: Normalization type for the residual blocks, per block
+                position (see `chuchichaestli.models.norm` for details).
+            res_groups: Number of groups for the residual block normalization
+                (if group norm), per block position.
+            res_kernel_size: Kernel size for the residual blocks, per block position.
+            attn_head_dim: Dimension of the attention heads, per attention block.
+            attn_n_heads: Number of attention heads, per attention block.
+            attn_dropout_p: Dropout probability of the scaled dot product attention,
+                per attention block.
+            attn_norm_type: Normalization type for the convolutional attention block,
+                per attention block (see `chuchichaestli.models.norm` for details).
+            attn_groups: Number of groups for the convolutional attention block
+                normalization (if `attn_norm_type` is `"group"`), per attention block.
+            attn_kernel_size: Kernel size for the convolutional attention block,
+                per attention block.
             attn_gate_inter_channels: Number of intermediate channels for the attention gate
                 (if `up_block_types` contains `"AttnGateUpBlock"`).
             skip_connection_action: Action to take for the skip connection.
@@ -189,32 +199,62 @@ class UNet(nn.Module):
         self.num_blocks_per_level = num_blocks_per_level
         self.skip_connection_to_all_blocks = skip_connection_to_all_blocks
 
+        # Block positions in order of data flow: down levels, mid block, up levels
+        n_pos = 2 * n_mults + 1
+        path = f"[{n_mults} down level(s), mid block, {n_mults} up level(s)]"
+        attn_mask = [
+            block_type in ATTENTION_BLOCK_TYPES
+            for block_type in (*down_block_types, mid_block_type, *up_block_types)
+        ]
+
         # Group normalization configuration
-        if res_norm_type == "group" and n_channels % res_groups != 0:
-            warnings.warn(
-                f"Number of channels ({n_channels}) is not divisible by the number of groups ({res_groups}). Setting number of groups to n_channels."
+        res_norm_types = per_position(res_norm_type, n_pos, "res_norm_type", None, path)
+        res_groups_per_pos = list(
+            per_position(res_groups, n_pos, "res_groups", None, path)
+        )
+        indivisible = [
+            p
+            for p, (norm, grp) in enumerate(zip(res_norm_types, res_groups_per_pos))
+            if norm == "group" and n_channels % grp != 0
+        ]
+        if indivisible:
+            offenders = ", ".join(
+                str(g) for g in sorted({res_groups_per_pos[p] for p in indivisible})
             )
-            res_groups = n_channels
+            warnings.warn(
+                f"Number of channels ({n_channels}) is not divisible by the number of groups ({offenders}). Setting number of groups to n_channels."
+            )
+            for p in indivisible:
+                res_groups_per_pos[p] = n_channels
             groups = min(groups, n_channels)
 
-        # Pre-compute argument dictionaries to avoid repeated dict creation
-        res_args = {
-            "res_groups": res_groups,
-            "res_act_fn": res_act_fn,
-            "res_dropout": res_dropout,
-            "res_norm_type": res_norm_type,
-            "res_kernel_size": res_kernel_size,
-        }
+        # Pre-compute argument dictionaries, one per block position
+        res_args = per_position_args(
+            {
+                "res_groups": tuple(res_groups_per_pos),
+                "res_act_fn": res_act_fn,
+                "res_dropout": res_dropout,
+                "res_norm_type": tuple(res_norm_types),
+                "res_kernel_size": res_kernel_size,
+            },
+            n_pos,
+            context=path,
+        )
 
-        attn_args = {
-            "n_heads": attn_n_heads,
-            "head_dim": attn_head_dim,
-            "dropout_p": attn_dropout_p,
-            "norm_type": attn_norm_type,
-            "groups": attn_groups,
-            "kernel_size": attn_kernel_size,
-            "inter_channels": attn_gate_inter_channels,
-        }
+        attn_args = per_position_args(
+            {
+                "n_heads": attn_n_heads,
+                "head_dim": attn_head_dim,
+                "dropout_p": attn_dropout_p,
+                "norm_type": attn_norm_type,
+                "groups": attn_groups,
+                "kernel_size": attn_kernel_size,
+                "inter_channels": attn_gate_inter_channels,
+            },
+            n_pos,
+            mask=attn_mask,
+            context=path,
+        )
 
         # Input layer
         self.conv_in = conv_cls(
@@ -249,8 +289,8 @@ class UNet(nn.Module):
                     out_channels=outs,
                     time_embedding=self.time_emb is not None,
                     time_channels=time_channels,
-                    res_args=res_args,
-                    attn_args=attn_args,
+                    res_args=res_args[i],
+                    attn_args=attn_args[i],
                 )
                 self.down_blocks.append(down_block)
                 ins = outs
@@ -264,8 +304,8 @@ class UNet(nn.Module):
             channels=outs,
             time_embedding=self.time_emb is not None,
             time_channels=time_channels,
-            res_args=res_args,
-            attn_args=attn_args,
+            res_args=res_args[n_mults],
+            attn_args=attn_args[n_mults],
         )
 
         # Build decoder
@@ -284,8 +324,8 @@ class UNet(nn.Module):
                     out_channels=outs,
                     time_embedding=self.time_emb is not None,
                     time_channels=time_channels,
-                    res_args=res_args,
-                    attn_args=attn_args,
+                    res_args=res_args[n_mults + 1 + i],
+                    attn_args=attn_args[n_mults + 1 + i],
                     skip_connection_action=(
                         skip_connection_action
                         if j == 0 or skip_connection_to_all_blocks
