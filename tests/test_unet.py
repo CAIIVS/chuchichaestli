@@ -6,11 +6,9 @@
 import pytest
 import torch
 from chuchichaestli.models.unet import UNet
-from chuchichaestli.models.unet.unet import (
-    CHANNEL_CARRYING_SAMPLERS,
-    UNET_DOWNSAMPLE_MAP,
-    UNET_UPSAMPLE_MAP,
-)
+from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
+from chuchichaestli.models.unet.unet import CHANNEL_CARRYING_SAMPLERS
+from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
 
 
 def test_throws_error_on_invalid_dimension():
@@ -887,7 +885,7 @@ def test_throws_error_on_unsupported_sampling_type(kwargs):
         UNet(**PER_LEVEL_CONF, **kwargs)
 
 
-@pytest.mark.parametrize("downsample_type", sorted(UNET_DOWNSAMPLE_MAP))
+@pytest.mark.parametrize("downsample_type", sorted(DOWNSAMPLE_FUNCTIONS))
 def test_every_registered_downsampling_type_runs(downsample_type):
     """Test that every registered downsampling type builds and preserves the shape."""
     # the channel-carrying samplers have to be mirrored in the other half
@@ -904,7 +902,7 @@ def test_every_registered_downsampling_type_runs(downsample_type):
     assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
 
 
-@pytest.mark.parametrize("upsample_type", sorted(UNET_UPSAMPLE_MAP))
+@pytest.mark.parametrize("upsample_type", sorted(UPSAMPLE_FUNCTIONS))
 def test_every_registered_upsampling_type_runs(upsample_type):
     """Test that every registered upsampling type builds and preserves the shape."""
     downsample_type = (

@@ -36,30 +36,13 @@ from typing import Literal
 from collections.abc import Callable, Sequence
 
 
-UNET_DOWNSAMPLE_MAP: dict[str, Callable] = {
-    name: DOWNSAMPLE_FUNCTIONS[name]
-    for name in (
-        "Downsample",
-        "DownsampleInterpolate",
-        "DownsampleUnshuffle",
-        "MaxPool",
-        "AvgPool",
-        "AdaptiveMaxPool",
-        "AdaptiveAvgPool",
-    )
-}
-UNET_UPSAMPLE_MAP: dict[str, Callable] = {
-    name: UPSAMPLE_FUNCTIONS[name]
-    for name in ("Upsample", "UpsampleInterpolate", "UpsampleShuffle")
-}
-
 # samplers that spend the level's channel multiplier themselves, so that the blocks
 # of that level keep the channel count instead; they take `cls(dim, in_ch, out_ch)`
 CHANNEL_CARRYING_SAMPLERS: frozenset[str] = frozenset(
     {"DownsampleUnshuffle", "UpsampleShuffle"}
 )
-DOWNSAMPLE_BLOCKS: tuple[type, ...] = tuple(UNET_DOWNSAMPLE_MAP.values())
-UPSAMPLE_BLOCKS: tuple[type, ...] = tuple(UNET_UPSAMPLE_MAP.values())
+DOWNSAMPLE_BLOCKS: tuple[type, ...] = tuple(DOWNSAMPLE_FUNCTIONS.values())
+UPSAMPLE_BLOCKS: tuple[type, ...] = tuple(UPSAMPLE_FUNCTIONS.values())
 
 TIME_EMBEDDING_MAP = {
     "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
@@ -256,9 +239,9 @@ class UNet(nn.Module):
             upsample_type, n_samplers, "upsample_type", None, samplers
         )
         downsample_clss = [
-            _sampler_cls(n, UNET_DOWNSAMPLE_MAP) for n in downsample_types
+            _sampler_cls(n, DOWNSAMPLE_FUNCTIONS) for n in downsample_types
         ]
-        upsample_clss = [_sampler_cls(n, UNET_UPSAMPLE_MAP) for n in upsample_types]
+        upsample_clss = [_sampler_cls(n, UPSAMPLE_FUNCTIONS) for n in upsample_types]
         widens = [name in CHANNEL_CARRYING_SAMPLERS for name in downsample_types]
         up_widens = [name in CHANNEL_CARRYING_SAMPLERS for name in upsample_types]
         mismatched = [
