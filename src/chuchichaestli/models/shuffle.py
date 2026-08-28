@@ -1,12 +1,7 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Pixel shuffling modules for 1, 2, and 3D inputs.
-
-`torch.nn.PixelShuffle` and `torch.nn.PixelUnshuffle` only ever act on the last
-two axes. These operate on all spatial axes, and reduce to the torch modules for
-2D inputs.
-"""
+"""Pixel shuffling modules for 1, 2, and 3D inputs (unlike `torch.nn.PixelShuffle` and `torch.nn.PixelUnshuffle`)."""
 
 import torch
 from torch import nn
@@ -18,7 +13,7 @@ __all__ = ["PixelShuffleND", "PixelUnshuffleND"]
 class PixelUnshuffleND(nn.Module):
     """Move a factor of every spatial axis into the channel axis.
 
-    Rearranges `(N, C, s₁·r, …, s_d·r)` into `(N, C·r^d, s₁, …, s_d)`.
+    Rearranges `(N, C, s₁·r, …, sₙ·r)` into `(N, C·rⁿ, s₁, …, sₙ)`.
     """
 
     def __init__(self, dimensions: int, factor: int = 2):
@@ -47,7 +42,7 @@ class PixelUnshuffleND(nn.Module):
 class PixelShuffleND(nn.Module):
     """Move a factor out of the channel axis into every spatial axis.
 
-    Rearranges `(N, C·r^d, s₁, …, s_d)` into `(N, C, s₁·r, …, s_d·r)`; the
+    Rearranges `(N, C·rⁿ, s₁, …, sₙ)` into `(N, C, s₁·r, …, sₙ·r)`; the
     inverse of `PixelUnshuffleND`.
     """
 
