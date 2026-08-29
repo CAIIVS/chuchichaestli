@@ -1186,3 +1186,21 @@ def test_attention_gate_gates_the_skip_connection():
     decoder, skip = xh[:, : xh.shape[1] // 2], xh[:, xh.shape[1] // 2 :]
     assert not torch.allclose(decoder, torch.zeros_like(decoder))
     assert torch.allclose(skip, torch.zeros_like(skip), atol=1e-4)
+
+
+@pytest.mark.parametrize("subsample_factor, stride", [(1, 1), (2, 2)])
+def test_attn_gate_subsample_factor(subsample_factor: int, stride: int):
+    """Test that the attention gate subsample factor reaches the gate."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 2,
+        up_block_types=("AttnGateUpBlock",) * 2,
+        block_out_channel_mults=(1, 2),
+        res_groups=4,
+        attn_gate_subsample_factor=subsample_factor,
+    )
+    gates = [b.attn for b in model.up_blocks if getattr(b, "attn", None) is not None]
+    assert gates
+    assert all(g.W_x.stride == (stride, stride) for g in gates)
+    sample = torch.randn(1, 1, 16, 16)
+    assert model(sample).shape == sample.shape
