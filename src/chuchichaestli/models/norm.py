@@ -76,7 +76,8 @@ class Norm(nn.Module):
 class AdaNorm(nn.Module):
     """Normalization whose scale and shift are generated from an embedding.
 
-    This is AdaGN for `norm_type='group'` and AdaLN for `norm_type='layer'`:
+    This is AdaGN for `norm_type='group'` and AdaLN for `'layer'`/`'rms'`, but
+    any of `NormTypes` can be modulated:
     The normalization drops its own affine parameters; a linear projection of
     the embedding supplies them instead, one pair per sample:
 

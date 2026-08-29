@@ -5,6 +5,7 @@
 
 import pytest
 import torch
+from typing import get_args
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.models.blocks import (
     GaussianNoiseBlock,
@@ -15,7 +16,7 @@ from chuchichaestli.models.blocks import (
     ResidualBottleneck,
     UpBlock,
 )
-from chuchichaestli.models.norm import AdaNorm, Norm
+from chuchichaestli.models.norm import AdaNorm, Norm, NormTypes
 
 
 @pytest.fixture
@@ -304,3 +305,30 @@ def test_unknown_time_injection_raises_without_a_time_embedding():
     """Test that the mode is checked even where it would have no effect."""
     with pytest.raises(ValueError, match="Unknown time injection"):
         ResidualBlock(2, 16, 32, res_groups=8, res_time_injection="scale-shift")
+
+
+@pytest.mark.parametrize("res_norm_type", get_args(NormTypes))
+def test_scale_shift_supports_every_normalization_type(res_norm_type):
+    """Test that the adaptive path is not restricted to group and layer norms."""
+    block = ResidualBlock(
+        2,
+        16,
+        32,
+        time_embedding=True,
+        time_channels=24,
+        res_groups=8,
+        res_dropout=0.0,
+        res_norm_type=res_norm_type,
+        res_time_injection="scale_shift",
+    ).eval()
+    assert isinstance(block.norm2, AdaNorm)
+
+    x = torch.randn(4, 16, 8, 8)
+    t = torch.randn(4, 24)
+    unconditioned = block(x, torch.zeros_like(t))
+    torch.nn.init.normal_(block.norm2.proj.weight, std=0.5)
+    conditioned = block(x, t)
+
+    assert conditioned.shape == (4, 32, 8, 8)
+    assert torch.isfinite(conditioned).all()
+    assert not torch.allclose(unconditioned, conditioned, atol=1e-6)

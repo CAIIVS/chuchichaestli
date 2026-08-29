@@ -5,7 +5,9 @@
 
 import pytest
 import torch
-from chuchichaestli.models.norm import AdaNorm, AdaptiveBatchNorm, Norm
+from typing import get_args
+
+from chuchichaestli.models.norm import AdaNorm, AdaptiveBatchNorm, Norm, NormTypes
 
 
 def test_norm_keeps_the_wrapped_layer_defaults():
@@ -34,7 +36,7 @@ def test_norm_drops_the_elementwise_affine_parameters(norm_type):
 
 
 @pytest.mark.parametrize("dimensions", [1, 2, 3])
-@pytest.mark.parametrize("norm_type", ["group", "instance", "batch", "layer", "rms"])
+@pytest.mark.parametrize("norm_type", get_args(NormTypes))
 def test_adanorm_preserves_the_input_shape(dimensions, norm_type):
     """Test the AdaNorm forward pass across dimensions and normalization types."""
     norm = AdaNorm(dimensions, norm_type, 8, 4, 16)
