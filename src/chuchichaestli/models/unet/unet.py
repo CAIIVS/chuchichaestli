@@ -236,26 +236,13 @@ class UNet(nn.Module):
 
         # Group normalization configuration
         res_norm_types = broadcast(res_norm_type, n_pos, "res_norm_type", None, path)
-        res_groups_per_pos = list(
-            broadcast(res_groups, n_pos, "res_groups", None, path)
-        )
-        indivisible_groups = set()
-        for p, (norm, grp) in enumerate(zip(res_norm_types, res_groups_per_pos)):
-            if norm == "group" and n_channels % grp != 0:
-                indivisible_groups.add(grp)
-                res_groups_per_pos[p] = n_channels
-        if indivisible_groups:
-            # one warning for the model, not one per non-divisible block position
-            groups_str = ", ".join(str(g) for g in sorted(indivisible_groups))
-            warnings.warn(
-                f"Number of channels ({n_channels}) is not divisible by the number of groups ({groups_str}). Setting number of groups to n_channels."
-            )
-            groups = min(groups, n_channels)
+        res_groups_per_pos = broadcast(res_groups, n_pos, "res_groups", None, path)
+        replaced_groups: list[int | None] = []
 
         # Pre-compute argument dictionaries, one per block position
         res_args = broadcast_kwargs(
             {
-                "res_groups": tuple(res_groups_per_pos),
+                "res_groups": res_groups_per_pos,
                 "res_act_fn": res_act_fn,
                 "res_dropout": res_dropout,
                 "res_norm_type": res_norm_types,
@@ -305,6 +292,9 @@ class UNet(nn.Module):
         ins = n_channels
         for i in range(n_mults):
             outs = ins if down_changes_channels[i] else ins * block_out_channel_mults[i]
+            replaced_groups.append(
+                self._clamp_groups(res_args[i], res_norm_types[i], min(ins, outs))
+            )
 
             for j in range(num_blocks_per_level):
                 down_block = BLOCK_MAP[down_block_types[i]](
@@ -333,6 +323,9 @@ class UNet(nn.Module):
                 self.skip_sources.append(False)
 
         # Build middle block
+        replaced_groups.append(
+            self._clamp_groups(res_args[n_mults], res_norm_types[n_mults], outs)
+        )
         self.mid_block = BLOCK_MAP[mid_block_type](
             dimensions=dimensions,
             channels=outs,
@@ -354,6 +347,10 @@ class UNet(nn.Module):
                 ins
                 if down_changes_channels[level]
                 else ins // block_out_channel_mults[level]
+            )
+            pos = n_mults + 1 + i
+            replaced_groups.append(
+                self._clamp_groups(res_args[pos], res_norm_types[pos], min(ins, outs))
             )
 
             for j in range(num_blocks_per_level):
@@ -402,6 +399,17 @@ class UNet(nn.Module):
                 )
                 self.skip_sources.append(False)
 
+        indivisible_groups = {g for g in replaced_groups if g is not None}
+        if indivisible_groups:
+            # one warning for the model, not one per non-divisible block position
+            groups_str = ", ".join(str(g) for g in sorted(indivisible_groups))
+            warnings.warn(
+                f"Number of channels is not divisible by the number of groups"
+                f" ({groups_str}) at some block positions."
+                f" Setting those to the block's own channel count."
+            )
+            groups = min(groups, n_channels)
+
         # Output layer
         self.out_block = CONV_BLOCK_MAP["NormActConvBlock"](
             dimensions=dimensions,
@@ -414,6 +422,25 @@ class UNet(nn.Module):
             stride=1,
             padding="same",
         )
+
+    def _clamp_groups(
+        self, res_args: dict, norm_type: NormTypes, channels: int
+    ) -> int | None:
+        """Reduce a group count that does not divide the channels it normalizes.
+
+        Args:
+            res_args: Residual block arguments of one position, adjusted in place.
+            norm_type: Normalization type at that position.
+            channels: Narrowest channel count the position normalizes.
+
+        Returns:
+            The group count that had to be replaced, or `None` if it fits.
+        """
+        groups = res_args["res_groups"]
+        if norm_type != "group" or channels % groups == 0:
+            return None
+        res_args["res_groups"] = channels
+        return groups
 
     def _validate_inputs(
         self,

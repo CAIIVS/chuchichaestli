@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the UNet model."""
 
+import warnings
+
 import pytest
 import torch
 from chuchichaestli.models.unet import UNet
@@ -136,6 +138,23 @@ def test_throws_error_on_wrong_per_level_length(kwargs):
     """Test that a sequence matching no accepted position count is rejected."""
     with pytest.raises(ValueError):
         UNet(**PER_LEVEL_CONF, **kwargs)
+
+
+def test_group_divisibility_is_checked_per_block_position():
+    """Test that groups valid at a position's own width are kept."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        model = UNet(
+            n_channels=16,
+            down_block_types=("DownBlock",) * 3,
+            up_block_types=("UpBlock",) * 3,
+            block_out_channel_mults=(1, 2, 2),
+            res_groups=(8, 8, 32, 32, 32, 8, 8),
+            groups=8,
+        )
+    # the mid block carries 64 channels, so 32 groups divide it
+    assert model.mid_block.res_block.norm1.norm.num_channels == 64
+    assert model.mid_block.res_block.norm1.norm.num_groups == 32
 
 
 def test_group_divisibility_warns_once_for_a_single_value():
