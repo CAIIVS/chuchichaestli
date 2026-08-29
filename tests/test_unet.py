@@ -1366,3 +1366,9 @@ def test_adaptive_normalization_starts_out_ignoring_the_timestep():
         assert not torch.allclose(
             early, model(sample, torch.tensor([500, 900])), atol=1e-6
         )
+
+
+def test_unknown_time_injection_raises():
+    """Test that an invalid mode is rejected while the U-Net builds its blocks."""
+    with pytest.raises(ValueError, match="Unknown time injection"):
+        UNet(**TIME_CONF, res_time_injection="scale-shift")

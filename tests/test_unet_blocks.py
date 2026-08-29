@@ -282,3 +282,25 @@ def test_scale_shift_makes_the_output_depend_on_the_timestep():
 
     torch.nn.init.normal_(block.norm2.proj.weight, std=0.5)
     assert not torch.allclose(block(x, t), block(x, torch.zeros_like(t)), atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "res_block_cls", [ResidualBlock, ResidualBottleneck, LiteResidualBlock]
+)
+def test_unknown_time_injection_raises(res_block_cls):
+    """Test that a misspelled mode fails loudly instead of silently ignoring `t`."""
+    with pytest.raises(ValueError, match="Unknown time injection"):
+        res_block_cls(
+            2,
+            16,
+            32,
+            time_embedding=True,
+            res_groups=8,
+            res_time_injection="scale-shift",
+        )
+
+
+def test_unknown_time_injection_raises_without_a_time_embedding():
+    """Test that the mode is checked even where it would have no effect."""
+    with pytest.raises(ValueError, match="Unknown time injection"):
+        ResidualBlock(2, 16, 32, res_groups=8, res_time_injection="scale-shift")

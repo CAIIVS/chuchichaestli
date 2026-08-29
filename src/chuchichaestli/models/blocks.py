@@ -17,7 +17,7 @@ from chuchichaestli.models.norm import AdaNorm, Norm, NormTypes
 from chuchichaestli.utils import partialclass, alias_kwargs
 from math import gcd
 from collections.abc import Callable, Sequence
-from typing import Literal
+from typing import Literal, get_args
 
 
 __all__ = [
@@ -103,6 +103,21 @@ ResidualBlockTypes = Literal[
     "ResidualBlock", "ResidualBottleneck", "LiteResidualBlock", "GLUMBResBlock"
 ]
 TimeInjectionTypes = Literal["add", "scale_shift"]
+
+
+def _require_time_injection(time_injection: str) -> None:
+    """Raise if a residual block is given an unknown time injection mode.
+
+    Args:
+        time_injection: Mode to check against `TimeInjectionTypes`.
+    """
+    if time_injection not in get_args(TimeInjectionTypes):
+        raise ValueError(
+            f"Unknown time injection: {time_injection}."
+            f" Available: {get_args(TimeInjectionTypes)}"
+        )
+
+
 ConvBlockTypes = Literal[
     "GLUMBConvBlock",
     "GLUMBResBlock",
@@ -1014,6 +1029,7 @@ class ResidualBlock(nn.Module):
         conv_cls = DIM_TO_CONV_MAP[dimensions]
 
         self.dimensions = dimensions
+        _require_time_injection(res_time_injection)
         self.time_embedding = time_embedding
         self.time_injection = res_time_injection if time_embedding else None
 
@@ -1171,6 +1187,7 @@ class ResidualBottleneck(nn.Module):
         n_channels = out_channels // res_expansion
 
         self.dimensions = dimensions
+        _require_time_injection(res_time_injection)
         self.time_embedding = time_embedding
         self.time_injection = res_time_injection if time_embedding else None
 
@@ -1324,6 +1341,7 @@ class LiteResidualBlock(nn.Module):
         conv_cls = DIM_TO_CONV_MAP[dimensions]
 
         self.dimensions = dimensions
+        _require_time_injection(res_time_injection)
         self.time_embedding = time_embedding
         self.time_injection = res_time_injection if time_embedding else None
 
