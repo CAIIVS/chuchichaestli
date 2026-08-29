@@ -8,6 +8,7 @@ import warnings
 import pytest
 import torch
 from chuchichaestli.models.attention.attention_gate import AttentionGate
+from chuchichaestli.models.norm import AdaNorm
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
@@ -1277,3 +1278,91 @@ def test_gated_unet_trains_at_batch_one_down_to_a_single_pixel():
     out = model(sample)
     assert out.shape == sample.shape
     out.sum().backward()
+
+
+def time_injections(model):
+    """Collect the time injection mode of every residual block, in build order."""
+    blocks = [*model.down_blocks, model.mid_block, *model.up_blocks]
+    return [b.res_block.time_injection for b in blocks if hasattr(b, "res_block")]
+
+
+TIME_CONF = {
+    "dimensions": 2,
+    "n_channels": 16,
+    "res_groups": 4,
+    "groups": 4,
+    "down_block_types": ("DownBlock", "DownBlock"),
+    "up_block_types": ("UpBlock", "UpBlock"),
+    "block_out_channel_mults": (1, 2),
+    "time_embedding": "DeepSinusoidalTimeEmbedding",
+    "time_channels": 16,
+}
+
+
+@pytest.mark.parametrize("res_norm_type", ["group", "layer", "rms"])
+def test_forward_with_adaptive_normalization(res_norm_type):
+    """Test the forward and backward pass with time-modulated normalization."""
+    model = UNet(
+        **TIME_CONF, res_norm_type=res_norm_type, res_time_injection="scale_shift"
+    )
+    sample = torch.randn(2, 1, 32, 32)
+    output = model(sample, torch.tensor([3, 7]))
+    assert output.shape == sample.shape
+    assert torch.isfinite(output).all()
+
+    output.sum().backward()
+    projections = [m.proj for m in model.modules() if isinstance(m, AdaNorm)]
+    assert projections
+    assert all(p.weight.grad is not None for p in projections)
+
+
+def test_adaptive_normalization_replaces_the_additive_projection():
+    """Test that only the additive mode carries a time projection."""
+    added = UNet(**TIME_CONF, res_time_injection="add")
+    modulated = UNet(**TIME_CONF, res_time_injection="scale_shift")
+
+    assert any("time_proj" in key for key in added.state_dict())
+    assert not any(isinstance(m, AdaNorm) for m in added.modules())
+
+    assert not any("time_proj" in key for key in modulated.state_dict())
+    assert any("norm2.proj" in key for key in modulated.state_dict())
+
+
+def test_time_injection_is_per_block_position():
+    """Test that a per-position sequence is read as down levels, mid block, up levels."""
+    modes = ("add", "scale_shift", "add", "scale_shift", "add")
+    model = UNet(**TIME_CONF, res_time_injection=modes)
+    assert time_injections(model) == list(modes)
+    assert sum(isinstance(m, AdaNorm) for m in model.modules()) == 2
+
+
+def test_time_injection_broadcasts_a_single_value():
+    """Test that a single mode still reaches every block position."""
+    model = UNet(**TIME_CONF, res_time_injection="scale_shift")
+    assert time_injections(model) == ["scale_shift"] * 5
+
+
+def test_time_injection_without_a_time_embedding():
+    """Test that the mode is inert on a U-Net built without a time embedding."""
+    conf = {**TIME_CONF, "time_embedding": None}
+    model = UNet(**conf, res_time_injection="scale_shift")
+    assert time_injections(model) == [None] * 5
+    assert not any(isinstance(m, AdaNorm) for m in model.modules())
+
+
+def test_adaptive_normalization_starts_out_ignoring_the_timestep():
+    """Test that the zero-initialised projections leave the U-Net unconditioned."""
+    torch.manual_seed(0)
+    model = UNet(**TIME_CONF, res_time_injection="scale_shift").eval()
+    sample = torch.randn(2, 1, 32, 32)
+    with torch.no_grad():
+        early = model(sample, torch.tensor([0, 0]))
+        late = model(sample, torch.tensor([500, 900]))
+        assert torch.allclose(early, late, atol=1e-6)
+
+        for module in model.modules():
+            if isinstance(module, AdaNorm):
+                torch.nn.init.normal_(module.proj.weight, std=0.5)
+        assert not torch.allclose(
+            early, model(sample, torch.tensor([500, 900])), atol=1e-6
+        )

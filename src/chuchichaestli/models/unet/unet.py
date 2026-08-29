@@ -13,6 +13,7 @@ from chuchichaestli.models.blocks import (
     ATTN_BLOCK_MAP,
     BLOCK_MAP,
     CONV_BLOCK_MAP,
+    TimeInjectionTypes,
     UNetDownBlockTypes,
     UNetMidBlockTypes,
     UNetUpBlockTypes,
@@ -90,6 +91,7 @@ class UNet(nn.Module):
         res_norm_type: NormTypes | Sequence[NormTypes] = "group",
         res_groups: int | Sequence[int] = 32,
         res_kernel_size: int | Sequence[int] = 3,
+        res_time_injection: TimeInjectionTypes | Sequence[TimeInjectionTypes] = "add",
         attn_head_dim: int | Sequence[int] = 32,
         attn_n_heads: int | Sequence[int] = 1,
         attn_dropout_p: float | Sequence[float] = 0.0,
@@ -151,6 +153,8 @@ class UNet(nn.Module):
             res_groups: Number of groups for the residual block normalization
                 (if group norm), per block position.
             res_kernel_size: Kernel size for the residual blocks, per block position.
+            res_time_injection: Time embedding injection, per block position; added
+                to the features (`'add'`) or AdaGN/AdaLN (`'scale_shift'`).
             attn_head_dim: Dimension of the attention heads, per attention block.
             attn_n_heads: Number of attention heads, per attention block.
             attn_dropout_p: Dropout probability of the scaled dot product attention,
@@ -256,6 +260,7 @@ class UNet(nn.Module):
                 "res_dropout": res_dropout,
                 "res_norm_type": res_norm_types,
                 "res_kernel_size": res_kernel_size,
+                "res_time_injection": res_time_injection,
             },
             n_pos,
             context=path,
