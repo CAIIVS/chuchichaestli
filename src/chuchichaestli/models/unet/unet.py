@@ -9,10 +9,10 @@ from torch import nn
 
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
+    GaussianNoiseBlock,
     ATTN_BLOCK_MAP,
     BLOCK_MAP,
     CONV_BLOCK_MAP,
-    GaussianNoiseBlock,
     UNetDownBlockTypes,
     UNetMidBlockTypes,
     UNetUpBlockTypes,
@@ -26,6 +26,8 @@ from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.unet.time_embeddings import (
     SinusoidalTimeEmbedding,
     DeepSinusoidalTimeEmbedding,
+    TimeEmbeddingTypes,
+    TIME_EMBEDDING_MAP,
 )
 from chuchichaestli.models.upsampling import (
     UPSAMPLE_FUNCTIONS,
@@ -35,6 +37,7 @@ from chuchichaestli.utils import broadcast, broadcast_kwargs
 from typing import Literal
 from collections.abc import Callable, Sequence
 
+SkipConnectionTypes = Literal["concat", "avg", "add"]
 
 # samplers that trade spatial extent against channels (and back, on the up path)
 SPATIAL_TO_CHANNEL_SAMPLERS: frozenset[str] = frozenset(
@@ -42,12 +45,6 @@ SPATIAL_TO_CHANNEL_SAMPLERS: frozenset[str] = frozenset(
 )
 DOWNSAMPLE_BLOCKS: tuple[type, ...] = tuple(DOWNSAMPLE_FUNCTIONS.values())
 UPSAMPLE_BLOCKS: tuple[type, ...] = tuple(UPSAMPLE_FUNCTIONS.values())
-
-TIME_EMBEDDING_MAP = {
-    "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
-    "DeepSinusoidalTimeEmbedding": DeepSinusoidalTimeEmbedding,
-    True: SinusoidalTimeEmbedding,
-}
 
 
 def _require_sampling_cls(name: str, supported: dict[str, Callable]):
@@ -107,11 +104,7 @@ class UNet(nn.Module):
         groups: int = 8,
         in_kernel_size: int = 3,
         out_kernel_size: int = 3,
-        time_embedding: Literal[
-            "SinusoidalTimeEmbedding", "DeepSinusoidalTimeEmbedding"
-        ]
-        | bool
-        | None = None,
+        time_embedding: TimeEmbeddingTypes | bool | None = None,
         time_channels: int = 32,
         t_emb_dim: int = 32,
         t_emb_flip: bool = False,
@@ -131,9 +124,8 @@ class UNet(nn.Module):
         attn_groups: int | Sequence[int] = 32,
         attn_kernel_size: int | Sequence[int] = 1,
         attn_gate_inter_channels: int | Sequence[int] | None = None,
-        skip_connection_action: Literal["concat", "avg", "add"]
-        | None
-        | Sequence[Literal["concat", "avg", "add"] | None] = "concat",
+        skip_connection_action: SkipConnectionTypes | None
+        | Sequence[SkipConnectionTypes | None] = "concat",
         skip_connection_to_all_blocks: bool | None = None,
         add_noise: Literal["up", "down"] | None = None,
         noise_sigma: float = 0.1,

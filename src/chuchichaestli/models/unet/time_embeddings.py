@@ -17,7 +17,16 @@ __all__ = [
     "GaussianFourierProjection",
     "SinusoidalTimeEmbedding",
     "DeepSinusoidalTimeEmbedding",
+    "TIME_EMBEDDING_MAP",
 ]
+
+TimeEmbeddingTypes = Literal["SinusoidalTimeEmbedding", "DeepSinusoidalTimeEmbedding"]
+
+TIME_EMBEDDING_MAP = {
+    "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
+    "DeepSinusoidalTimeEmbedding": DeepSinusoidalTimeEmbedding,
+    True: SinusoidalTimeEmbedding,
+}
 
 
 class GaussianFourierProjection(nn.Module):
