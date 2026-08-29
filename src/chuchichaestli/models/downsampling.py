@@ -9,6 +9,7 @@ from torch.nn import functional as F
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP, DIM_TO_POOL_MAP, DOWNSAMPLE_MODE
 from chuchichaestli.models.shuffle import PixelUnshuffleND
 from chuchichaestli.utils import partialclass
+from collections.abc import Sequence
 from typing import Literal
 
 
@@ -37,6 +38,26 @@ DownsampleTypes = Literal[
 ]
 
 
+def _stride_factor(stride: int | Sequence[int]) -> int:
+    """Reduce a stride to the factor by which it scales every spatial axis.
+
+    Args:
+        stride: Stride, either shared by every axis or one entry per axis.
+
+    Raises:
+        ValueError: If the axes are not scaled by the same factor.
+    """
+    if isinstance(stride, int):
+        return stride
+    factors = set(stride)
+    if len(factors) != 1:
+        raise ValueError(
+            f"Sampling blocks scale every spatial axis by the same factor;"
+            f" got stride={tuple(stride)}."
+        )
+    return factors.pop()
+
+
 class Downsample(nn.Module):
     """Downsampling layer for 1D, 2D, and 3D inputs."""
 
@@ -49,7 +70,7 @@ class Downsample(nn.Module):
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 2)
         kwargs.setdefault("padding", 1)
-        self.factor = kwargs["stride"]
+        self.factor = _stride_factor(kwargs["stride"])
         self.conv = conv_cls(num_channels, num_channels, **kwargs)
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
@@ -183,10 +204,17 @@ class Pool(nn.Module):
         self.average = average
         self.adaptive = adaptive
         self.output_size = kwargs.pop("output_size", None)
+        if adaptive and (ignored := {"kernel_size", "padding"} & kwargs.keys()):
+            raise ValueError(
+                f"Adaptive pooling has no {', '.join(sorted(ignored))};"
+                f" size it with output_size or stride instead."
+            )
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 2)
         kwargs.setdefault("padding", 1)
-        self.factor = None if self.output_size is not None else kwargs["stride"]
+        self.factor = (
+            None if self.output_size is not None else _stride_factor(kwargs["stride"])
+        )
         if adaptive:
             self.pool = None
             return

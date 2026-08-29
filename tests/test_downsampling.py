@@ -149,6 +149,25 @@ def test_adaptive_pool_honours_an_explicit_output_size(dimensions):
     assert pool(torch.randn((2, 8) + (32,) * dimensions)).shape == (2, 8) + out_wh
 
 
+@pytest.mark.parametrize("stride", [2, (2, 2)], ids=["int", "per-axis"])
+def test_downsample_factor_is_per_axis(stride):
+    """Test that a stride given per axis reports the same factor as a shared one."""
+    assert Downsample(2, 8, stride=stride).factor == 2
+
+
+def test_downsample_rejects_a_non_uniform_stride():
+    """Test that a stride scaling the axes differently is rejected."""
+    with pytest.raises(ValueError, match="same factor"):
+        Downsample(2, 8, stride=(2, 4))
+
+
+@pytest.mark.parametrize("kwarg", ["kernel_size", "padding"])
+def test_adaptive_pool_rejects_unused_kernel_arguments(kwarg):
+    """Test that arguments an adaptive pool cannot honour are rejected."""
+    with pytest.raises(ValueError, match="Adaptive pooling"):
+        AdaptiveMaxPool(2, 8, **{kwarg: 7})
+
+
 def test_downsample_types_match_the_registry():
     """Test that the type alias cannot drift from the registered downsamplers."""
     assert set(get_args(DownsampleTypes)) == set(DOWNSAMPLE_FUNCTIONS)
