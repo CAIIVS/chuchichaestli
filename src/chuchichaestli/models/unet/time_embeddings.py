@@ -22,12 +22,6 @@ __all__ = [
 
 TimeEmbeddingTypes = Literal["SinusoidalTimeEmbedding", "DeepSinusoidalTimeEmbedding"]
 
-TIME_EMBEDDING_MAP = {
-    "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
-    "DeepSinusoidalTimeEmbedding": DeepSinusoidalTimeEmbedding,
-    True: SinusoidalTimeEmbedding,
-}
-
 
 class GaussianFourierProjection(nn.Module):
     """Gaussian Fourier embeddings for noise levels."""
@@ -275,3 +269,10 @@ class DeepSinusoidalTimeEmbedding(nn.Module):
         emb = self.sinusoidal_embedding(timesteps, scale=scale, max_period=max_period)
         emb = self.mlp(emb, condition=condition)
         return emb
+
+
+TIME_EMBEDDING_MAP = {
+    "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
+    "DeepSinusoidalTimeEmbedding": DeepSinusoidalTimeEmbedding,
+    True: SinusoidalTimeEmbedding,
+}
