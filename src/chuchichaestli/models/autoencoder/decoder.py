@@ -66,16 +66,14 @@ class Decoder(nn.Module):
             block_out_channel_mults: Multiplier for output channels of each block.
             num_layers_per_block: Number of blocks per level (blocks are repeated if `>1`).
             upsample_type: Type of upsampling block, per level (see
-                `chuchichaestli.models.upsampling` for details). The last entry has no
-                sampler and only selects whether that level changes the channel count.
+                `chuchichaestli.models.upsampling` for details).
             act_fn: Activation function for the output layers
                 (see `chuchichaestli.models.activations` for details).
             norm_type: Normalization type for the output layer.
             num_groups: Number of groups for normalization in the output layer.
             kernel_size: Kernel size for the output convolution.
             res_args: Arguments for residual blocks. Each value is either a
-                single value or one per block position, in order of data flow:
-                the mid blocks, then the levels.
+                single value or one per block position, in order of data flow.
             attn_args: Arguments for attention blocks, per block position or per
                 block that has attention. `norm_type`, `scales`, `context_args`
                 and `local_args` are passed through unchanged.

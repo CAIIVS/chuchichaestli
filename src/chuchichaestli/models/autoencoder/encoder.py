@@ -44,7 +44,7 @@ class Encoder(nn.Module):
         ),
         out_block_type: EncoderOutBlockTypes = "EncoderOutBlock",
         downsample_type: DownsampleTypes | Sequence[DownsampleTypes] = "Downsample",
-        act_fn: ActivationTypes = "silu",
+        act_fn: ActivationTypes = "silu", 
         norm_type: NormTypes = "group",
         num_groups: int = 8,
         kernel_size: int = 3,
@@ -66,16 +66,14 @@ class Encoder(nn.Module):
             mid_block_types: Type of blocks to use before the output.
             out_block_type: Type of block for output (latent space).
             downsample_type: Type of downsampling block, per level (see
-                `chuchichaestli.models.downsampling` for details). The last entry has
-                no sampler and only selects whether that level changes the channel count.
+                `chuchichaestli.models.downsampling` for details).
             act_fn: Activation function for the output layers
                 (see `chuchichaestli.models.activations` for details).
             norm_type: Normalization type for the output layer.
             num_groups: Number of groups for normalization in the output layer.
             kernel_size: Kernel size for the output convolution.
             res_args: Arguments for residual blocks. Each value is either a
-                single value or one per block position, in order of data flow:
-                the levels, then the mid blocks.
+                single value or one per block position, in order of data flow.
             attn_args: Arguments for attention blocks, per block position or per
                 block that has attention. `norm_type`, `scales`, `context_args`
                 and `local_args` are passed through unchanged.
