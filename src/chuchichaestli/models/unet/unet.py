@@ -194,21 +194,18 @@ class UNet(nn.Module):
         n_samplers = n_mults - 1
         smplr_err_ctx = f"[{n_samplers} sampling block(s)]"
         downsample_types = broadcast(
-            downsample_type, n_samplers, "downsample_type", None, smplr_err_ctx,
+            downsample_type, n_samplers, "downsample_type", None, smplr_err_ctx
         )
         upsample_types = broadcast(
-            upsample_type, n_samplers, "upsample_type", None, smplr_err_ctx,
+            upsample_type, n_samplers, "upsample_type", None, smplr_err_ctx
         )
         smplr_err_ctx = "sampling type for a U-Net"
         downsample_clss = [
-            require_cls(
-                n, DOWNSAMPLE_FUNCTIONS, smplr_err_ctx
-            ) for n in downsample_types
+            require_cls(n, DOWNSAMPLE_FUNCTIONS, smplr_err_ctx)
+            for n in downsample_types
         ]
         upsample_clss = [
-            require_cls(
-                n, UPSAMPLE_FUNCTIONS, smplr_err_ctx
-            ) for n in upsample_types
+            require_cls(n, UPSAMPLE_FUNCTIONS, smplr_err_ctx) for n in upsample_types
         ]
         down_changes_channels = [cls.changes_channels for cls in downsample_clss]
         up_changes_channels = [cls.changes_channels for cls in upsample_clss]
