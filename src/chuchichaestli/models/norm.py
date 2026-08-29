@@ -59,7 +59,11 @@ class Norm(nn.Module):
 
 
 class AdaptiveBatchNorm(nn.Module):
-    """Adaptive BN implementation with two additional parameters."""
+    """Adaptive BN implementation with two additional parameters.
+
+    A batch norm scale `b` and a skip path `a` around the normalization:
+        AdaptiveBatchNorm(x) = a * x + b * BatchNorm(x)
+    """
 
     def __init__(
         self,
@@ -69,7 +73,15 @@ class AdaptiveBatchNorm(nn.Module):
         momentum: float = 0.1,
         affine: bool = True,
     ):
-        """Constructor."""
+        """Constructor.
+
+        Args:
+            dimensions: Number of (spatial) dimensions.
+            channels: Number of channels to normalize.
+            eps: Offset of the batch normalization denominator.
+            momentum: Momentum of the batch normalization running statistics.
+            affine: Whether the batch normalization learns its own scale and shift.
+        """
         super().__init__()
         self.bn = Norm(
             dimensions,
@@ -80,13 +92,14 @@ class AdaptiveBatchNorm(nn.Module):
             momentum=momentum,
             affine=affine,
         )
-        self.a = nn.Parameter(torch.FloatTensor(1, 1, *((1,) * dimensions)))
-        self.b = nn.Parameter(torch.FloatTensor(1, 1, *((1,) * dimensions)))
+        # start out as plain batch normalization; training mixes in the input
+        self.a = nn.Parameter(torch.zeros(1, 1, *((1,) * dimensions)))
+        self.b = nn.Parameter(torch.ones(1, 1, *((1,) * dimensions)))
 
     def forward(self, x):
         """Adaptive BN with two additional parameters `a` and `b`.
 
-        Return:
-          a * x + b * bn(x)
+        Args:
+            x: Input tensor.
         """
         return self.a * x + self.b * self.bn(x)
