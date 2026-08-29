@@ -185,7 +185,7 @@ class UNet(nn.Module):
         # Block positions in order of data flow: down levels, mid block, up levels
         n_pos = 2 * n_mults + 1
         path = f"[{n_mults} down level(s), mid block, {n_mults} up level(s)]"
-        attn_mask = [
+        has_attention = [
             block_type in ATTN_BLOCK_MAP
             for block_type in (*down_block_types, mid_block_type, *up_block_types)
         ]
@@ -271,7 +271,7 @@ class UNet(nn.Module):
                 "num_channels_inter": attn_gate_inter_channels,
             },
             n_pos,
-            mask=attn_mask,
+            mask=has_attention,
             context=path,
         )
 

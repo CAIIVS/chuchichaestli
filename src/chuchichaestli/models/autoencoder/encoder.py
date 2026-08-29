@@ -118,7 +118,7 @@ class Encoder(nn.Module):
         # Block positions in order of data flow
         n_pos = n_mults + len(mid_block_types)
         path = f"[{n_mults} level(s), {len(mid_block_types)} mid block(s)]"
-        attn_mask = [
+        has_attention = [
             block_type in ATTN_BLOCK_MAP
             for block_type in (*down_block_types, *mid_block_types)
         ]
@@ -126,7 +126,7 @@ class Encoder(nn.Module):
         attn_args = broadcast_kwargs(
             attn_args,
             n_pos,
-            mask=attn_mask,
+            mask=has_attention,
             opaque=INTRA_BLOCK_ATTN_ARGS,
             context=path,
         )

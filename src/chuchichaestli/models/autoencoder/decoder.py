@@ -113,7 +113,7 @@ class Decoder(nn.Module):
         # Block positions in order of data flow
         n_pos = n_mults + len(mid_block_types)
         path = f"[{len(mid_block_types)} mid block(s), {n_mults} level(s)]"
-        attn_mask = [
+        has_attention = [
             block_type in ATTN_BLOCK_MAP
             for block_type in (*mid_block_types, *up_block_types)
         ]
@@ -121,7 +121,7 @@ class Decoder(nn.Module):
         attn_args = broadcast_kwargs(
             attn_args,
             n_pos,
-            mask=attn_mask,
+            mask=has_attention,
             opaque=INTRA_BLOCK_ATTN_ARGS,
             context=path,
         )
