@@ -260,7 +260,8 @@ def test_skip_sources_are_level_terminal():
     )
     sources = [i for i, is_source in enumerate(model.skip_sources) if is_source]
     assert sources == [1, 4, 7]
-    assert model.up_roles == ["first", "rest", "sample"] * 2 + ["first", "rest"]
+    assert model.up_samplers == [False, False, True] * 2 + [False, False]
+    assert model.up_level_starts == [True, False, False] * 2 + [True, False]
 
 
 @pytest.mark.parametrize(

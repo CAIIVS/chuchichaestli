@@ -358,7 +358,7 @@ class UNetAdapter:
         skip_to_all = getattr(model, "skip_connection_to_all_blocks", False)
         # the model records its own pairing; fall back to counting within a level
         is_skip_source = getattr(model, "skip_sources", None)
-        up_roles = getattr(model, "up_roles", None)
+        up_level_starts = getattr(model, "up_level_starts", None)
 
         if getattr(model, "time_emb", None) is not None:
             cond = b._child(root, "conditioning", NodeRole.COMPONENT, "Conditioning")
@@ -405,7 +405,7 @@ class UNetAdapter:
                     level = b._level(dec, dli)
                 continue
             block = b._block(level, f"block{i}", m, level_index=dli)
-            first = up_roles[i] == "first" if up_roles else in_level == 0
+            first = up_level_starts[i] if up_level_starts else in_level == 0
             in_level += 1
             src = None
             if first and skip_sources:

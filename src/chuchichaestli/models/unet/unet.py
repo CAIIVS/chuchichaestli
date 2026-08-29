@@ -344,7 +344,8 @@ class UNet(nn.Module):
 
         # Build decoder
         self.up_blocks = nn.ModuleList([])
-        self.up_roles: list[str] = []
+        self.up_samplers: list[bool] = []
+        self.up_level_starts: list[bool] = []
 
         for i, up_block_type in enumerate(up_block_types):
             level = n_mults - 1 - i
@@ -374,7 +375,8 @@ class UNet(nn.Module):
                 )
                 self.up_blocks.append(up_block)
                 # the first block in a level consumes the skip connection
-                self.up_roles.append("first" if j == 0 else "rest")
+                self.up_samplers.append(False)
+                self.up_level_starts.append(j == 0)
 
             if i < n_mults - 1:
                 mirrored = n_mults - 2 - i
@@ -384,14 +386,16 @@ class UNet(nn.Module):
                     outs = narrowed
                 else:
                     self.up_blocks.append(upsample_clss[i](dimensions, outs))
-                self.up_roles.append("sample")
+                self.up_samplers.append(True)
+                self.up_level_starts.append(False)
 
         match add_noise:
             case "up":
                 self.up_blocks.insert(
                     0, GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
                 )
-                self.up_roles.insert(0, "sample")
+                self.up_samplers.insert(0, True)
+                self.up_level_starts.insert(0, False)
             case "down":
                 self.down_blocks.append(
                     GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
@@ -456,15 +460,16 @@ class UNet(nn.Module):
         x = self.mid_block(x, t_emb)
 
         hs = None
-        for up_block, role in zip(self.up_blocks, self.up_roles, strict=True):
-            match role:
-                case "sample":
-                    x = up_block(x, t_emb)
-                case "first":
-                    hs = hh.pop()
-                    x = up_block(x, hs, t_emb)
-                case _:
-                    x = up_block(
-                        x, hs if self.skip_connection_to_all_blocks else None, t_emb
-                    )
+        for up_block, is_sampler, is_level_start in zip(
+            self.up_blocks, self.up_samplers, self.up_level_starts, strict=True
+        ):
+            if is_sampler:
+                x = up_block(x, t_emb)
+            elif is_level_start:
+                hs = hh.pop()
+                x = up_block(x, hs, t_emb)
+            else:
+                x = up_block(
+                    x, hs if self.skip_connection_to_all_blocks else None, t_emb
+                )
         return self.out_block(x)
