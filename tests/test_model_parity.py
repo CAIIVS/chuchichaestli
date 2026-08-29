@@ -77,7 +77,7 @@ def pixel_discriminator():
     "build,expected",
     [
         (unet_default, (128, 10436705, "a6a29a870bce2d2a")),
-        (unet_multiblock_attn, (184, 1075089, "108dfa3ea29aca67")),
+        (unet_multiblock_attn, (184, 1108593, "56c68ccb56e4c2b8")),
         (Autoencoder, (244, 53867309, "67f854b17a9e9175")),
         (VAE, (244, 53885797, "8944adbc4e0bd4a0")),
         (DCAE, (302, 357219041, "cbc0fadb90cab21e")),

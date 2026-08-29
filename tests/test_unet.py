@@ -7,8 +7,8 @@ import pytest
 import torch
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
-from chuchichaestli.models.unet.unet import SPATIAL_TO_CHANNEL_SAMPLERS
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
+from chuchichaestli.models.unet.unet import SPATIAL_TO_CHANNEL_SAMPLERS
 
 
 def test_throws_error_on_invalid_dimension():
@@ -243,6 +243,63 @@ def test_forward_with_2_layers_per_block(
     sample = torch.randn(*input_dims)  # Example input
     output = model(sample)
     assert output.shape == input_dims  # Check output shape
+
+
+def test_skip_sources_are_level_terminal():
+    """Test that a skip connection starts at the last block of each level."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=("UpBlock",) * 3,
+        block_out_channel_mults=(1, 2, 2),
+        num_blocks_per_level=2,
+        res_groups=8,
+    )
+    # [block, block, sampler] per level, the last level without a sampler
+    assert [type(b).__name__ for b in model.down_blocks] == (
+        ["DownBlock", "DownBlock", "Downsample"] * 2 + ["DownBlock"] * 2
+    )
+    sources = [i for i, is_source in enumerate(model.skip_sources) if is_source]
+    assert sources == [1, 4, 7]
+    assert model.up_roles == ["first", "rest", "sample"] * 2 + ["first", "rest"]
+
+
+@pytest.mark.parametrize(
+    "up_block_type", ["UpBlock", "AttnUpBlock", "AttnGateUpBlock", "ConvAttnUpBlock"]
+)
+@pytest.mark.parametrize("block_out_channel_mults", [(1, 1, 1), (1, 2, 2)])
+def test_forward_skip_to_all_blocks(up_block_type, block_out_channel_mults):
+    """Test the forward pass with a skip connection to every block in a level."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=(up_block_type,) * 3,
+        block_out_channel_mults=block_out_channel_mults,
+        num_blocks_per_level=2,
+        skip_connection_to_all_blocks=True,
+        res_groups=8,
+        attn_groups=8,
+        groups=8,
+    )
+    input_dims = (2, 1, 32, 32)
+    output = model(torch.randn(*input_dims))
+    assert output.shape == input_dims
+
+
+@pytest.mark.parametrize("skip_connection_action", ["avg", "add"])
+def test_skip_to_all_blocks_rejects_wider_skip(skip_connection_action):
+    """Test that a skip too wide to replicate onto the input is rejected."""
+    with pytest.raises(ValueError, match="channels that divides"):
+        UNet(
+            n_channels=8,
+            down_block_types=("DownBlock",) * 3,
+            up_block_types=("UpBlock",) * 3,
+            block_out_channel_mults=(1, 2, 2),
+            num_blocks_per_level=2,
+            skip_connection_to_all_blocks=True,
+            skip_connection_action=skip_connection_action,
+            res_groups=8,
+        )
 
 
 def test_info_conv_attn(

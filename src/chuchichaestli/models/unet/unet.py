@@ -285,7 +285,7 @@ class UNet(nn.Module):
                 "res_groups": tuple(res_groups_per_pos),
                 "res_act_fn": res_act_fn,
                 "res_dropout": res_dropout,
-                "res_norm_type": tuple(res_norm_types),
+                "res_norm_type": res_norm_types,
                 "res_kernel_size": res_kernel_size,
             },
             n_pos,
@@ -329,11 +329,12 @@ class UNet(nn.Module):
 
         # Build encoder
         self.down_blocks = nn.ModuleList([])
+        self.skip_sources: list[bool] = []
         ins = n_channels
         for i in range(n_mults):
             outs = ins if sample_widens[i] else ins * block_out_channel_mults[i]
 
-            for _ in range(num_blocks_per_level):
+            for j in range(num_blocks_per_level):
                 down_block = BLOCK_MAP[down_block_types[i]](
                     dimensions=dimensions,
                     in_channels=ins,
@@ -344,6 +345,8 @@ class UNet(nn.Module):
                     attn_args=attn_args[i],
                 )
                 self.down_blocks.append(down_block)
+                # only the last block in a level feeds a skip connection
+                self.skip_sources.append(j == num_blocks_per_level - 1)
                 ins = outs
 
             if i < n_mults - 1:
@@ -355,6 +358,7 @@ class UNet(nn.Module):
                     ins = outs = widened
                 else:
                     self.down_blocks.append(downsample_clss[i](dimensions, ins))
+                self.skip_sources.append(False)
 
         # Build middle block
         self.mid_block = BLOCK_MAP[mid_block_type](
@@ -368,6 +372,7 @@ class UNet(nn.Module):
 
         # Build decoder
         self.up_blocks = nn.ModuleList([])
+        self.up_roles: list[str] = []
 
         for i, up_block_type in enumerate(up_block_types):
             level = n_mults - 1 - i
@@ -385,6 +390,8 @@ class UNet(nn.Module):
                     time_channels=time_channels,
                     res_args=res_args[n_mults + 1 + i],
                     attn_args=attn_args[n_mults + 1 + i],
+                    # every block in a level is fed that level's skip connection
+                    skip_channels=ins,
                     skip_connection_action=(
                         skip_actions[i]
                         if j == 0 or skip_connection_to_all_blocks
@@ -392,6 +399,8 @@ class UNet(nn.Module):
                     ),
                 )
                 self.up_blocks.append(up_block)
+                # the first block in a level consumes the skip connection
+                self.up_roles.append("first" if j == 0 else "rest")
 
             if i < n_mults - 1:
                 mirrored = n_mults - 2 - i
@@ -401,16 +410,19 @@ class UNet(nn.Module):
                     outs = narrowed
                 else:
                     self.up_blocks.append(upsample_clss[i](dimensions, outs))
+                self.up_roles.append("sample")
 
         match add_noise:
             case "up":
                 self.up_blocks.insert(
                     0, GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
                 )
+                self.up_roles.insert(0, "sample")
             case "down":
                 self.down_blocks.append(
                     GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
                 )
+                self.skip_sources.append(False)
 
         # Output layer
         self.out_block = CONV_BLOCK_MAP["NormActConvBlock"](
@@ -445,41 +457,40 @@ class UNet(nn.Module):
     def forward(
         self, x: torch.Tensor, t: int | float | torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Forward pass - optimized but maintains exact original logic."""
+        """Forward pass.
+
+        Args:
+            x: Input tensor.
+            t: Time step, if the U-Net was built with a time embedding.
+        """
         t_emb = None
-        if t is not None:
+        if t is not None and self.time_emb is not None:
             if not torch.is_tensor(t):
                 t = torch.tensor(t, dtype=torch.long, device=x.device)
-            t = t.expand(x.shape[0])
-            t_emb = self.time_emb(t) if self.time_emb is not None else None
+            t_emb = self.time_emb(t.expand(x.shape[0]))
 
         x = self.conv_in(x)
 
         hh = []
-        for i, down_block in enumerate(self.down_blocks):
+        for down_block, is_skip_source in zip(
+            self.down_blocks, self.skip_sources, strict=True
+        ):
             x = down_block(x, t_emb)
-            if isinstance(down_block, DOWNSAMPLE_BLOCKS + (GaussianNoiseBlock,)):
-                continue
-            # Append skip connection for the last down_block in each layer
-            if (i + 1) % self.num_blocks_per_level == 0:
+            if is_skip_source:
                 hh.append(x)
 
         x = self.mid_block(x, t_emb)
 
-        no_count_block = 0
-        for i, up_block in enumerate(self.up_blocks):
-            if isinstance(up_block, UPSAMPLE_BLOCKS + (GaussianNoiseBlock,)):
-                x = up_block(x, t_emb)
-                no_count_block += 1
-                continue
-            # concat skip connection for the first upblock of each layer
-            if (i - no_count_block) % self.num_blocks_per_level == 0:
-                hs = hh.pop()
-                x = up_block(x, hs, t_emb)
-            elif self.skip_connection_to_all_blocks:
-                hs = hh[-1]
-                x = up_block(x, hs, t_emb)
-            else:
-                x = up_block(x=x, h=None, t=t_emb)
-        x = self.out_block(x)
-        return x
+        hs = None
+        for up_block, role in zip(self.up_blocks, self.up_roles, strict=True):
+            match role:
+                case "sample":
+                    x = up_block(x, t_emb)
+                case "first":
+                    hs = hh.pop()
+                    x = up_block(x, hs, t_emb)
+                case _:
+                    x = up_block(
+                        x, hs if self.skip_connection_to_all_blocks else None, t_emb
+                    )
+        return self.out_block(x)
