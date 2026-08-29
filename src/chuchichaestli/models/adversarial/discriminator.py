@@ -9,6 +9,7 @@ from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.pooling import _AvgPoolNd, _MaxPoolNd
 from collections.abc import Sequence
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
+from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.blocks import (
     ATTN_CONV_BLOCK_MAP,
     CONV_BLOCK_MAP,
@@ -49,6 +50,10 @@ class BlockDiscriminator(nn.Sequential):
         attn_n_heads: int | Sequence[int] = 1,
         attn_head_dim: int | Sequence[int] = 16,
         attn_gate_inter_channels: int | Sequence[int] | None = None,
+        attn_gate_subsample_factor: int | Sequence[int] = 1,
+        attn_gate_out_norm_type: NormTypes
+        | None
+        | Sequence[NormTypes | None] = "batch",
         **kwargs,
     ):
         """Construct a discriminator.
@@ -65,6 +70,11 @@ class BlockDiscriminator(nn.Sequential):
           attn_gate_inter_channels: Number of intermediate channels for the attention
             gate, per block or per attention block; halves the block's channels by
             default.
+          attn_gate_subsample_factor: Stride at which an attention gate samples its
+            input, per block or per attention block; the attention coefficients are
+            computed on a grid coarser than the input by this factor.
+          attn_gate_out_norm_type: Normalization after an attention gate's output
+            transform, per block or per attention block; `"batch"` as in the reference.
           kwargs: Additional arguments for the blocks.
         """
         if dimensions not in DIM_TO_CONV_MAP:
@@ -97,6 +107,8 @@ class BlockDiscriminator(nn.Sequential):
                 "n_heads": attn_n_heads,
                 "head_dim": attn_head_dim,
                 "num_channels_inter": attn_gate_inter_channels,
+                "subsample_factor": attn_gate_subsample_factor,
+                "out_norm_type": attn_gate_out_norm_type,
             }
         attn_args = broadcast_kwargs(
             attn_spec,

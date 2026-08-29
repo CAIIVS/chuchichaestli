@@ -7,6 +7,7 @@ import warnings
 
 import pytest
 import torch
+from chuchichaestli.models.attention.attention_gate import AttentionGate
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
@@ -259,6 +260,21 @@ def test_forward_pass(
         (1, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
         (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
         (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+        # only the first block in a level is handed a skip connection to gate
+        (
+            2,
+            ("DownBlock", "DownBlock"),
+            ("AttnGateUpBlock", "AttnGateUpBlock"),
+            32,
+            (1, 2),
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock"),
+            ("AttnGateUpBlock", "AttnGateUpBlock"),
+            32,
+            (1, 2),
+        ),
     ],
 )
 def test_forward_with_2_layers_per_block(
@@ -1138,3 +1154,126 @@ def test_attention_gate_inter_channels_can_vary_per_level():
     """Test that the gate width is a per-level argument like the other attn_ ones."""
     gates = attention_gates(UNet(**GATE_CONF, attn_gate_inter_channels=(8, 16, 32)))
     assert [inter for _, inter in gates] == [8, 16, 32]
+
+
+def test_attention_gate_gates_the_skip_connection():
+    """Test that an attention gate prunes the skip connection, not the decoder."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 2,
+        up_block_types=("AttnGateUpBlock",) * 2,
+        block_out_channel_mults=(1, 2),
+        res_groups=4,
+    )
+    up_block = next(b for b in model.up_blocks if getattr(b, "attn", None) is not None)
+    gate = up_block.attn
+    channels = gate.W_out.in_channels
+    with torch.no_grad():
+        gate.psi.weight.zero_()
+        gate.psi.bias.fill_(-50.0)  # alpha -> 0, so the gate prunes all of it
+        # the identity output transform lets the pruned skip stay at zero
+        gate.W_out.weight.copy_(torch.eye(channels).reshape(channels, channels, 1, 1))
+        gate.W_out.bias.zero_()
+    model.eval()
+
+    captured = {}
+    up_block.res_block.register_forward_pre_hook(
+        lambda module, args: captured.update(xh=args[0])
+    )
+    model(torch.randn(1, 1, 16, 16))
+
+    # concatenation puts the decoder features first and the gated skip behind them
+    xh = captured["xh"]
+    decoder, skip = xh[:, : xh.shape[1] // 2], xh[:, xh.shape[1] // 2 :]
+    assert not torch.allclose(decoder, torch.zeros_like(decoder))
+    assert torch.allclose(skip, torch.zeros_like(skip), atol=1e-4)
+
+
+@pytest.mark.parametrize("subsample_factor, stride", [(1, 1), (2, 2)])
+def test_attn_gate_subsample_factor(subsample_factor: int, stride: int):
+    """Test that the attention gate subsample factor reaches the gate."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 2,
+        up_block_types=("AttnGateUpBlock",) * 2,
+        block_out_channel_mults=(1, 2),
+        res_groups=4,
+        attn_gate_subsample_factor=subsample_factor,
+    )
+    gates = [b.attn for b in model.up_blocks if getattr(b, "attn", None) is not None]
+    assert gates
+    assert all(g.W_x.stride == (stride, stride) for g in gates)
+    sample = torch.randn(1, 1, 16, 16)
+    assert model(sample).shape == sample.shape
+
+
+def test_attention_gate_not_built_where_the_skip_is_unused():
+    """Test that a level dropping its skip connection carries no attention gate."""
+    args = {
+        "n_channels": 8,
+        "down_block_types": ("DownBlock",) * 2,
+        "up_block_types": ("AttnGateUpBlock",) * 2,
+        "block_out_channel_mults": (1, 2),
+        "res_groups": 4,
+    }
+    gated = UNet(**args)
+    ungated = UNet(**args, skip_connection_action=None)
+
+    def gates(model):
+        return [m for m in model.modules() if isinstance(m, AttentionGate)]
+
+    assert len(gates(gated)) == 2
+    assert not gates(ungated)  # a gate here would only ever be dead weight
+    assert sum(p.numel() for p in ungated.parameters()) < sum(
+        p.numel() for p in gated.parameters()
+    )
+    sample = torch.randn(1, 1, 16, 16)
+    assert ungated(sample).shape == sample.shape
+
+
+def test_attention_gate_only_on_blocks_that_take_a_skip():
+    """Test that only the skip-consuming block of a level carries a gate."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 2,
+        up_block_types=("AttnGateUpBlock",) * 2,
+        block_out_channel_mults=(1, 2),
+        res_groups=4,
+        num_blocks_per_level=2,
+    )
+    carries_gate = [
+        getattr(b, "attn", None) is not None
+        for b in model.up_blocks
+        if hasattr(b, "skip_connection_action")
+    ]
+    consumes_skip = [
+        b.skip_connection_action is not None
+        for b in model.up_blocks
+        if hasattr(b, "skip_connection_action")
+    ]
+    assert carries_gate == consumes_skip
+    assert any(carries_gate) and not all(carries_gate)
+
+
+def test_gated_unet_trains_at_batch_one_down_to_a_single_pixel():
+    """Test that a single-pixel gated level trains once its output norm allows it."""
+    args = {
+        "n_channels": 8,
+        "down_block_types": ("DownBlock",) * 5,
+        "up_block_types": ("AttnGateUpBlock",) * 5,
+        "block_out_channel_mults": (1,) * 5,
+        "res_groups": 4,
+    }
+    sample = torch.randn(1, 1, 16, 16)  # 16 -> a single pixel at the bottleneck
+
+    # the reference default cannot normalize one sample over one pixel
+    default = UNet(**args)
+    default.train()
+    with pytest.raises(ValueError, match="more than 1 value per channel"):
+        default(sample)
+
+    model = UNet(**args, attn_gate_out_norm_type=None)
+    model.train()
+    out = model(sample)
+    assert out.shape == sample.shape
+    out.sum().backward()
