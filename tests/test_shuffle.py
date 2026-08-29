@@ -56,3 +56,23 @@ def test_layer_type_is_still_recognised_as_shuffling():
 
     assert get_layer_type(PixelShuffleND(2)) == get_layer_type(nn.PixelShuffle(2))
     assert get_layer_type(PixelUnshuffleND(2)) == get_layer_type(nn.PixelUnshuffle(2))
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+def test_unshuffle_rejects_indivisible_spatial_sizes(dimensions):
+    """Test that a spatial axis the factor cannot divide is named in the error."""
+    with pytest.raises(ValueError, match="divisible by the factor"):
+        PixelUnshuffleND(dimensions, 2)(torch.randn((1, 3) + (7,) * dimensions))
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+def test_shuffle_rejects_an_indivisible_channel_count(dimensions):
+    """Test that a channel count the factor cannot divide is named in the error."""
+    with pytest.raises(ValueError, match="channel dimension must be divisible"):
+        PixelShuffleND(dimensions, 2)(torch.randn((1, 5) + (4,) * dimensions))
+
+
+def test_shuffle_rejects_a_rank_that_does_not_match_the_dimensions():
+    """Test that an input of the wrong rank is rejected rather than reshaped."""
+    with pytest.raises(ValueError, match="3-dimensional input"):
+        PixelShuffleND(1, 2)(torch.randn(1, 8, 4, 4))

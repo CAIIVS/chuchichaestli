@@ -10,6 +10,23 @@ from torch import nn
 __all__ = ["PixelShuffleND", "PixelUnshuffleND"]
 
 
+def _check_rank(x: torch.Tensor, dimensions: int) -> None:
+    """Check that a tensor carries a batch and channel axis plus the spatial ones.
+
+    Args:
+        x: Input tensor.
+        dimensions: Number of spatial dimensions.
+
+    Raises:
+        ValueError: If the tensor rank does not match `dimensions`.
+    """
+    if x.dim() != dimensions + 2:
+        raise ValueError(
+            f"Expected a {dimensions + 2}-dimensional input for {dimensions} spatial"
+            f" dimension(s); got an input of shape {tuple(x.shape)}."
+        )
+
+
 class PixelUnshuffleND(nn.Module):
     """Move a factor of every spatial axis into the channel axis.
 
@@ -28,8 +45,18 @@ class PixelUnshuffleND(nn.Module):
         self.factor = factor
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
-        """Forward pass through the unshuffling layer."""
+        """Forward pass through the unshuffling layer.
+
+        Raises:
+            ValueError: If the input rank or its spatial sizes do not fit the layer.
+        """
         d, r = self.dimensions, self.factor
+        _check_rank(x, d)
+        if any(s % r for s in x.shape[2:]):
+            raise ValueError(
+                f"Every spatial axis must be divisible by the factor {r};"
+                f" got an input of shape {tuple(x.shape)}."
+            )
         n, c = x.shape[:2]
         spatial = [s // r for s in x.shape[2:]]
         x = x.reshape(n, c, *[axis for s in spatial for axis in (s, r)])
@@ -58,8 +85,18 @@ class PixelShuffleND(nn.Module):
         self.factor = factor
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
-        """Forward pass through the shuffling layer."""
+        """Forward pass through the shuffling layer.
+
+        Raises:
+            ValueError: If the input rank or its channel count do not fit the layer.
+        """
         d, r = self.dimensions, self.factor
+        _check_rank(x, d)
+        if x.shape[1] % r**d:
+            raise ValueError(
+                f"The channel dimension must be divisible by {r}**{d} = {r**d};"
+                f" got an input of shape {tuple(x.shape)}."
+            )
         n = x.shape[0]
         channels = x.shape[1] // r**d
         spatial = list(x.shape[2:])
