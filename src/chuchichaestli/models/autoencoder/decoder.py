@@ -7,15 +7,18 @@ import torch
 from torch import nn
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
+    ATTN_BLOCK_MAP,
+    INTRA_BLOCK_ATTN_ARGS,
     BLOCK_MAP,
     NormActConvBlock,
     AutoencoderUpBlockTypes,
     AutoencoderMidBlockTypes,
     DecoderInBlockTypes,
 )
+from chuchichaestli.models.maps import require_cls
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS, UpsampleTypes
-from chuchichaestli.utils import prod
+from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
 from collections.abc import Sequence
 
 
@@ -41,7 +44,7 @@ class Decoder(nn.Module):
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 2),
         num_layers_per_block: int | Sequence[int] = 3,
-        upsample_type: UpsampleTypes = "UpsampleInterpolate",
+        upsample_type: UpsampleTypes | Sequence[UpsampleTypes] = "UpsampleInterpolate",
         act_fn: ActivationTypes = "silu",
         norm_type: NormTypes = "group",
         num_groups: int = 8,
@@ -62,19 +65,23 @@ class Decoder(nn.Module):
             up_block_types: Type of up blocks to use for each level.
             block_out_channel_mults: Multiplier for output channels of each block.
             num_layers_per_block: Number of blocks per level (blocks are repeated if `>1`).
-            upsample_type: Type of upsampling block (see `chuchichaestli.models.upsampling` for details).
+            upsample_type: Type of upsampling block, per level (see
+                `chuchichaestli.models.upsampling` for details).
             act_fn: Activation function for the output layers
                 (see `chuchichaestli.models.activations` for details).
             norm_type: Normalization type for the output layer.
             num_groups: Number of groups for normalization in the output layer.
             kernel_size: Kernel size for the output convolution.
-            res_args: Arguments for residual blocks.
-            attn_args: Arguments for attention blocks.
+            res_args: Arguments for residual blocks. Each value is either a
+                single value or one per block position, in order of data flow.
+            attn_args: Arguments for attention blocks, per block position or per
+                block that has attention. `norm_type`, `scales`, `context_args`
+                and `local_args` are passed through unchanged.
             in_shortcut: Whether to use a shortcut for the input block.
         """
         super().__init__()
 
-        upsample_cls = UPSAMPLE_FUNCTIONS[upsample_type]
+        block_out_channel_mults = tuple(block_out_channel_mults)
         if len(block_out_channel_mults) < len(up_block_types):
             block_out_channel_mults += (1,) * (
                 len(up_block_types) - len(block_out_channel_mults)
@@ -85,10 +92,37 @@ class Decoder(nn.Module):
         self.channel_mults = prod(block_out_channel_mults)
         if isinstance(num_layers_per_block, int):
             num_layers_per_block = (num_layers_per_block,) * n_mults
-        elif len(num_layers_per_block) < len(up_block_types):
-            num_layers_per_block += (num_layers_per_block[-1],) * (
-                len(up_block_types) - len(num_layers_per_block)
-            )
+        else:
+            num_layers_per_block = tuple(num_layers_per_block)
+            if len(num_layers_per_block) < len(up_block_types):
+                num_layers_per_block += (num_layers_per_block[-1],) * (
+                    len(up_block_types) - len(num_layers_per_block)
+                )
+
+        # One sampler entry per level; the last governs channel bookkeeping only
+        upsample_types = broadcast(
+            upsample_type, n_mults, "upsample_type", None, f"[{n_mults} level(s)]"
+        )
+        upsample_clss = [
+            require_cls(name, UPSAMPLE_FUNCTIONS, "upsampling type")
+            for name in upsample_types
+        ]
+
+        # Block positions in order of data flow
+        n_pos = n_mults + len(mid_block_types)
+        path = f"[{len(mid_block_types)} mid block(s), {n_mults} level(s)]"
+        has_attention = [
+            block_type in ATTN_BLOCK_MAP
+            for block_type in (*mid_block_types, *up_block_types)
+        ]
+        res_args = broadcast_kwargs(res_args, n_pos, context=path)
+        attn_args = broadcast_kwargs(
+            attn_args,
+            n_pos,
+            mask=has_attention,
+            opaque=INTRA_BLOCK_ATTN_ARGS,
+            context=path,
+        )
 
         self.in_block = BLOCK_MAP[in_block_type](
             dimensions=dimensions,
@@ -98,12 +132,12 @@ class Decoder(nn.Module):
         )
 
         self.mid_blocks = nn.ModuleList([])
-        for mid_block_type in mid_block_types:
+        for j, mid_block_type in enumerate(mid_block_types):
             mid_block = BLOCK_MAP[mid_block_type](
                 dimensions=dimensions,
                 channels=n_channels,
-                res_args=res_args,
-                attn_args=attn_args,
+                res_args=res_args[j],
+                attn_args=attn_args[j],
             )
             self.mid_blocks.append(mid_block)
 
@@ -111,7 +145,7 @@ class Decoder(nn.Module):
         ins = n_channels
         for i in range(n_mults):
             outs = ins
-            if upsample_type != "UpsampleShuffle":
+            if not upsample_clss[i].changes_channels:
                 outs = int(ins // block_out_channel_mults[i])
             stage = nn.Sequential()
             for _ in range(num_layers_per_block[i]):
@@ -119,19 +153,19 @@ class Decoder(nn.Module):
                     dimensions=dimensions,
                     in_channels=ins,
                     out_channels=outs,
-                    res_args=res_args,
-                    attn_args=attn_args,
+                    res_args=res_args[len(mid_block_types) + i],
+                    attn_args=attn_args[len(mid_block_types) + i],
                 )
                 stage.append(up_block)
                 ins = outs
             self.up_blocks.append(stage)
 
             if i < n_mults - 1:
-                if upsample_type != "UpsampleShuffle":
-                    self.up_blocks.append(upsample_cls(dimensions, outs))
+                if not upsample_clss[i].changes_channels:
+                    self.up_blocks.append(upsample_clss[i](dimensions, outs))
                 else:
                     self.up_blocks.append(
-                        upsample_cls(
+                        upsample_clss[i](
                             dimensions,
                             ins,
                             outs := int(ins // block_out_channel_mults[i]),
@@ -155,8 +189,18 @@ class Decoder(nn.Module):
 
     @property
     def f(self) -> int:
-        """Expansion factor of the decoder."""
-        return 2 ** max(self.levels - 1, 0)
+        """Expansion factor of the decoder.
+
+        Raises:
+            ValueError: If a sampling block does not scale by a constant factor.
+        """
+        factors = [b.factor for b in self.up_blocks if hasattr(b, "factor")]
+        if any(factor is None for factor in factors):
+            raise ValueError(
+                "A sampling block pools to a fixed size rather than by a factor,"
+                " so the model has no constant scaling factor."
+            )
+        return prod(factors)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         """Decoding forward pass."""

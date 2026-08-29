@@ -6,6 +6,27 @@
 from torch import nn
 
 
+def require_cls(
+    name: str,
+    registry: dict[str, type[nn.Module]],
+    context: str = "",
+) -> type:
+    """Look up a class in a registry, raising if the name is not registered.
+
+    Args:
+        name: Name of the class to look up.
+        registry: Classes accepted at this position.
+        context: Description of the position, used in the error message.
+
+    Raises:
+        ValueError: If `name` is not one of the registered classes.
+    """
+    if name not in registry:
+        what = f" {context}" if context else ""
+        raise ValueError(f"Unsupported{what}: {name!r}. Use one of {sorted(registry)}.")
+    return registry[name]
+
+
 DIM_TO_CONV_MAP = {
     1: nn.Conv1d,
     2: nn.Conv2d,

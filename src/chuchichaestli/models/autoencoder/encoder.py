@@ -7,15 +7,17 @@ from torch import nn
 
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
+    ATTN_BLOCK_MAP,
+    INTRA_BLOCK_ATTN_ARGS,
     BLOCK_MAP,
     AutoencoderDownBlockTypes,
     AutoencoderMidBlockTypes,
     EncoderOutBlockTypes,
 )
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS, DownsampleTypes
-from chuchichaestli.models.maps import DIM_TO_CONV_MAP
+from chuchichaestli.models.maps import DIM_TO_CONV_MAP, require_cls
 from chuchichaestli.models.norm import NormTypes
-from chuchichaestli.utils import prod
+from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
 from collections.abc import Sequence
 
 
@@ -41,7 +43,7 @@ class Encoder(nn.Module):
             "AttnAutoencoderMidBlock",
         ),
         out_block_type: EncoderOutBlockTypes = "EncoderOutBlock",
-        downsample_type: DownsampleTypes = "Downsample",
+        downsample_type: DownsampleTypes | Sequence[DownsampleTypes] = "Downsample",
         act_fn: ActivationTypes = "silu",
         norm_type: NormTypes = "group",
         num_groups: int = 8,
@@ -63,21 +65,24 @@ class Encoder(nn.Module):
             num_layers_per_block: Number of blocks per level (blocks are repeated if `>1`).
             mid_block_types: Type of blocks to use before the output.
             out_block_type: Type of block for output (latent space).
-            downsample_type: Type of downsampling block
-                (see `chuchichaestli.models.downsampling` for details).
+            downsample_type: Type of downsampling block, per level (see
+                `chuchichaestli.models.downsampling` for details).
             act_fn: Activation function for the output layers
                 (see `chuchichaestli.models.activations` for details).
             norm_type: Normalization type for the output layer.
             num_groups: Number of groups for normalization in the output layer.
             kernel_size: Kernel size for the output convolution.
-            res_args: Arguments for residual blocks.
-            attn_args: Arguments for attention blocks.
+            res_args: Arguments for residual blocks. Each value is either a
+                single value or one per block position, in order of data flow.
+            attn_args: Arguments for attention blocks, per block position or per
+                block that has attention. `norm_type`, `scales`, `context_args`
+                and `local_args` are passed through unchanged.
             double_z: Whether to double the latent space.
             out_shortcut: Whether to use a shortcut for the output block.
         """
         super().__init__()
 
-        downsample_cls = DOWNSAMPLE_FUNCTIONS[downsample_type]
+        block_out_channel_mults = tuple(block_out_channel_mults)
         if len(block_out_channel_mults) < len(down_block_types):
             block_out_channel_mults += (1,) * (
                 len(down_block_types) - len(block_out_channel_mults)
@@ -88,10 +93,41 @@ class Encoder(nn.Module):
         self.channel_mults = prod(block_out_channel_mults)
         if isinstance(num_layers_per_block, int):
             num_layers_per_block = (num_layers_per_block,) * n_mults
-        elif len(num_layers_per_block) < len(down_block_types):
-            num_layers_per_block += (num_layers_per_block[-1],) * (
-                len(down_block_types) - len(num_layers_per_block)
-            )
+        else:
+            num_layers_per_block = tuple(num_layers_per_block)
+            if len(num_layers_per_block) < len(down_block_types):
+                num_layers_per_block += (num_layers_per_block[-1],) * (
+                    len(down_block_types) - len(num_layers_per_block)
+                )
+
+        # One sampler entry per level; the last governs channel bookkeeping only
+        downsample_types = broadcast(
+            downsample_type,
+            n_mults,
+            "downsample_type",
+            None,
+            f"[{n_mults} level(s)]",
+        )
+        downsample_clss = [
+            require_cls(name, DOWNSAMPLE_FUNCTIONS, "downsampling type")
+            for name in downsample_types
+        ]
+
+        # Block positions in order of data flow
+        n_pos = n_mults + len(mid_block_types)
+        path = f"[{n_mults} level(s), {len(mid_block_types)} mid block(s)]"
+        has_attention = [
+            block_type in ATTN_BLOCK_MAP
+            for block_type in (*down_block_types, *mid_block_types)
+        ]
+        res_args = broadcast_kwargs(res_args, n_pos, context=path)
+        attn_args = broadcast_kwargs(
+            attn_args,
+            n_pos,
+            mask=has_attention,
+            opaque=INTRA_BLOCK_ATTN_ARGS,
+            context=path,
+        )
 
         self.conv_in = DIM_TO_CONV_MAP[dimensions](
             in_channels,
@@ -105,7 +141,7 @@ class Encoder(nn.Module):
         ins = n_channels
         for i in range(n_mults):
             outs = ins
-            if downsample_type != "DownsampleUnshuffle":
+            if not downsample_clss[i].changes_channels:
                 outs = int(ins * block_out_channel_mults[i])
             stage = nn.Sequential()
             for _ in range(num_layers_per_block[i]):
@@ -113,19 +149,19 @@ class Encoder(nn.Module):
                     dimensions=dimensions,
                     in_channels=ins,
                     out_channels=outs,
-                    res_args=res_args,
-                    attn_args=attn_args,
+                    res_args=res_args[i],
+                    attn_args=attn_args[i],
                 )
                 stage.append(down_block)
                 ins = outs
             self.down_blocks.append(stage)
 
             if i < n_mults - 1:
-                if downsample_type != "DownsampleUnshuffle":
-                    self.down_blocks.append(downsample_cls(dimensions, ins))
+                if not downsample_clss[i].changes_channels:
+                    self.down_blocks.append(downsample_clss[i](dimensions, ins))
                 else:
                     self.down_blocks.append(
-                        downsample_cls(
+                        downsample_clss[i](
                             dimensions,
                             ins,
                             outs := int(ins * block_out_channel_mults[i]),
@@ -134,12 +170,12 @@ class Encoder(nn.Module):
                     ins = outs
 
         self.mid_blocks = nn.ModuleList([])
-        for mid_block_type in mid_block_types:
+        for j, mid_block_type in enumerate(mid_block_types):
             mid_block = BLOCK_MAP[mid_block_type](
                 dimensions=dimensions,
                 channels=outs,
-                res_args=res_args,
-                attn_args=attn_args,
+                res_args=res_args[n_mults + j],
+                attn_args=attn_args[n_mults + j],
             )
             self.mid_blocks.append(mid_block)
 
@@ -161,8 +197,18 @@ class Encoder(nn.Module):
 
     @property
     def f(self) -> int:
-        """Compression factor of the encoder."""
-        return 2 ** max(self.levels - 1, 0)
+        """Compression factor of the encoder.
+
+        Raises:
+            ValueError: If a sampling block does not scale by a constant factor.
+        """
+        factors = [b.factor for b in self.down_blocks if hasattr(b, "factor")]
+        if any(factor is None for factor in factors):
+            raise ValueError(
+                "A sampling block pools to a fixed size rather than by a factor,"
+                " so the model has no constant scaling factor."
+            )
+        return prod(factors)
 
     def forward(self, x):
         """Forward pass."""

@@ -53,16 +53,8 @@ def _classes() -> SimpleNamespace:
         LiteResidualBlock,
         GaussianNoiseBlock,
     )
-    from chuchichaestli.models.downsampling import (
-        Downsample,
-        DownsampleInterpolate,
-        DownsampleUnshuffle,
-    )
-    from chuchichaestli.models.upsampling import (
-        Upsample,
-        UpsampleInterpolate,
-        UpsampleShuffle,
-    )
+    from chuchichaestli.models.downsampling import DOWNSAMPLE_BLOCKS
+    from chuchichaestli.models.upsampling import UPSAMPLE_BLOCKS
     from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
     from chuchichaestli.models.autoencoder.vae import VAE
     from chuchichaestli.models.autoencoder.vqvae import VQVAE
@@ -85,8 +77,8 @@ def _classes() -> SimpleNamespace:
         GaussianNoiseBlock=GaussianNoiseBlock,
         RESIDUAL=residual,
         RECURSE=containers + blocks,
-        DOWNSAMPLE=(Downsample, DownsampleInterpolate, DownsampleUnshuffle),
-        UPSAMPLE=(Upsample, UpsampleInterpolate, UpsampleShuffle),
+        DOWNSAMPLE=DOWNSAMPLE_BLOCKS,
+        UPSAMPLE=UPSAMPLE_BLOCKS,
     )
     return _CLASSES
 
@@ -364,6 +356,9 @@ class UNetAdapter:
         root = b._root()
         nbpl = getattr(model, "num_blocks_per_level", 1)
         skip_to_all = getattr(model, "skip_connection_to_all_blocks", False)
+        # the model records its own pairing; fall back to counting within a level
+        is_skip_source = getattr(model, "skip_sources", None)
+        up_level_starts = getattr(model, "up_level_starts", None)
 
         if getattr(model, "time_emb", None) is not None:
             cond = b._child(root, "conditioning", NodeRole.COMPONENT, "Conditioning")
@@ -375,17 +370,21 @@ class UNetAdapter:
         level = b._level(enc, li)
         b._block(level, "conv_in", model.conv_in, level_index=li)
         skip_sources: list[str] = []
+        in_level = 0
         for i, m in enumerate(model.down_blocks):
             if isinstance(m, c.DOWNSAMPLE):
                 b._block(level, f"downsample{li}", m, level_index=li, is_down=True)
                 li += 1
+                in_level = 0
                 level = b._level(enc, li)
                 continue
             if isinstance(m, c.GaussianNoiseBlock):
                 b._block(level, f"noise{i}", m, level_index=li)
                 continue
             block = b._block(level, f"block{i}", m, level_index=li)
-            if (i + 1) % nbpl == 0:
+            in_level += 1
+            terminal = is_skip_source[i] if is_skip_source else in_level == nbpl
+            if terminal:
                 skip_sources.append(block.id)
 
         bottleneck = b._child(root, "bottleneck", NodeRole.COMPONENT, "Bottleneck")
@@ -394,22 +393,25 @@ class UNetAdapter:
         dec = b._child(root, "decoder", NodeRole.COMPONENT, "Decoder")
         dli = 0
         level = b._level(dec, dli)
-        no_count = 0
+        in_level = 0
+        held: str | None = None
         for i, m in enumerate(model.up_blocks):
             if isinstance(m, (*c.UPSAMPLE, c.GaussianNoiseBlock)):
                 is_up = isinstance(m, c.UPSAMPLE)
                 b._block(level, f"sample{i}", m, level_index=dli, is_up=is_up)
-                no_count += 1
                 if is_up:
                     dli += 1
+                    in_level = 0
                     level = b._level(dec, dli)
                 continue
             block = b._block(level, f"block{i}", m, level_index=dli)
+            first = up_level_starts[i] if up_level_starts else in_level == 0
+            in_level += 1
             src = None
-            if (i - no_count) % nbpl == 0 and skip_sources:
-                src = skip_sources.pop()
-            elif skip_to_all and skip_sources:
-                src = skip_sources[-1]
+            if first and skip_sources:
+                held = src = skip_sources.pop()
+            elif skip_to_all:
+                src = held
             action = getattr(m, "skip_connection_action", None)
             if src is not None and action is not None:
                 b.edges.append(IREdge(src, block.id, EdgeKind.SKIP, str(action)))
@@ -603,7 +605,9 @@ class GenericAdapter:
         b = _Builder(model, info_by_id)
         roles = [NodeRole.MODEL, NodeRole.COMPONENT, NodeRole.LEVEL, NodeRole.BLOCK]
 
-        def rec(module: nn.Module, parent: IRNode | None, name: str, depth: int) -> IRNode:
+        def rec(
+            module: nn.Module, parent: IRNode | None, name: str, depth: int
+        ) -> IRNode:
             if parent is None:
                 node = b._root()
             else:

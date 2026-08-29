@@ -920,7 +920,7 @@ class EfficientViTBlock(nn.Module):
             **(attn_args["local_args"] if "local_args" in attn_args else {}),
         }
 
-        self.context_block = ATTN_BLOCK_MAP[context_block_type](
+        self.context_block = CONTEXT_BLOCK_MAP[context_block_type](
             dimensions, in_channels, in_channels, **context_args
         )
         self.local_block = CONV_BLOCK_MAP[local_block_type](
@@ -1541,15 +1541,26 @@ class UpBlock(nn.Module):
         attention: AttentionTypes | None = None,
         attn_args: dict = {},
         skip_connection_action: Literal["concat", "avg", "add"] | None = None,
+        skip_channels: int | None = None,
         res_block_type: ResidualBlockTypes = "ResidualBlock",
     ):
         """Initialize the up block."""
         super().__init__()
         self.skip_connection_action = skip_connection_action
+        # the skip carries as many channels as the input unless stated otherwise
+        skip_channels = in_channels if skip_channels is None else skip_channels
+        if skip_connection_action in ("avg", "add") and (
+            skip_channels > in_channels or in_channels % skip_channels
+        ):
+            raise ValueError(
+                f"Cannot {skip_connection_action} a skip connection of {skip_channels}"
+                f" channels onto {in_channels} channels: the skip must have a number of"
+                f" channels that divides the input's."
+            )
         if skip_connection_action == "concat":
             self.res_block = RESIDUAL_BLOCK_MAP[res_block_type](
                 dimensions,
-                in_channels + in_channels,
+                in_channels + skip_channels,
                 out_channels,
                 time_embedding,
                 time_channels,
@@ -1576,7 +1587,7 @@ class UpBlock(nn.Module):
                 )
             case "attention_gate":
                 self.attn = ATTENTION_MAP[attention](
-                    dimensions, in_channels, in_channels, **attn_args
+                    dimensions, in_channels, skip_channels, **attn_args
                 )
             case _:
                 self.attn = None
@@ -2524,7 +2535,7 @@ NormActAttnConvDownsampleBlock = partialclass(
 )
 
 
-# blocks designed for specifically for models such as UNet, AE, etc.
+# blocks designed for specific models such as UNet, AE, etc.
 BLOCK_MAP: dict[str, Callable] = {
     # U-Net blocks
     "DownBlock": DownBlock,
@@ -2560,6 +2571,51 @@ BLOCK_MAP: dict[str, Callable] = {
     "VAEDecoderInBlock": VAEDecoderInBlock,
     "DCDecoderInBlock": DCDecoderInBlock,
     "EfficientViTBlock": EfficientViTBlock,
+}
+
+
+# blocks of `BLOCK_MAP` that consume attention arguments
+ATTN_BLOCK_MAP: dict[str, Callable] = {
+    "AttnDownBlock": AttnDownBlock,
+    "AttnMidBlock": AttnMidBlock,
+    "AttnUpBlock": AttnUpBlock,
+    "AttnGateUpBlock": AttnGateUpBlock,
+    "ConvAttnDownBlock": ConvAttnDownBlock,
+    "ConvAttnMidBlock": ConvAttnMidBlock,
+    "ConvAttnUpBlock": ConvAttnUpBlock,
+    "AttnAutoencoderDownBlock": AttnAutoencoderDownBlock,
+    "AttnAutoencoderMidBlock": AttnAutoencoderMidBlock,
+    "AttnAutoencoderUpBlock": AttnAutoencoderUpBlock,
+    "ConvAttnAutoencoderDownBlock": ConvAttnAutoencoderDownBlock,
+    "ConvAttnAutoencoderMidBlock": ConvAttnAutoencoderMidBlock,
+    "ConvAttnAutoencoderUpBlock": ConvAttnAutoencoderUpBlock,
+    "AttnDCAutoencoderDownBlock": AttnDCAutoencoderDownBlock,
+    "AttnDCAutoencoderUpBlock": AttnDCAutoencoderUpBlock,
+    "ConvAttnDCAutoencoderDownBlock": ConvAttnDCAutoencoderDownBlock,
+    "ConvAttnDCAutoencoderUpBlock": ConvAttnDCAutoencoderUpBlock,
+    "EfficientViTBlock": EfficientViTBlock,
+}
+
+# `attn_args` keys the blocks read within one block rather than across levels
+INTRA_BLOCK_ATTN_ARGS: frozenset[str] = frozenset(
+    {"norm_type", "scales", "context_args", "local_args"}
+)
+
+
+# attention + convolutional blocks (subset of `CONV_BLOCK_MAP` taking attention)
+ATTN_CONV_BLOCK_MAP: dict[str, Callable] = {
+    "AttnConvDownBlock": AttnConvDownBlock,
+    "AttnConvDownsampleBlock": AttnConvDownsampleBlock,
+    "AttnConvBlock": AttnConvBlock,
+    "NormAttnConvBlock": NormAttnConvBlock,
+    "NormAttnConvDownBlock": NormAttnConvDownBlock,
+    "NormAttnConvDownsampleBlock": NormAttnConvDownsampleBlock,
+    "ActAttnConvBlock": ActAttnConvBlock,
+    "ActAttnConvDownBlock": ActAttnConvDownBlock,
+    "ActAttnConvDownsampleBlock": ActAttnConvDownsampleBlock,
+    "NormActAttnConvBlock": NormActAttnConvBlock,
+    "NormActAttnConvDownBlock": NormActAttnConvDownBlock,
+    "NormActAttnConvDownsampleBlock": NormActAttnConvDownsampleBlock,
 }
 
 
@@ -2609,8 +2665,8 @@ RESIDUAL_BLOCK_MAP = {
 }
 
 
-# attention blocks (swap-out components in transformer blocks)
-ATTN_BLOCK_MAP: dict[str, Callable] = {
+# context extractors (swap-out attention components in transformer blocks)
+CONTEXT_BLOCK_MAP: dict[str, Callable] = {
     "LMAResBlock": LMAResBlock,
 }
 

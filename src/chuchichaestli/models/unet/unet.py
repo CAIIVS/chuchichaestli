@@ -9,40 +9,33 @@ from torch import nn
 
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.blocks import (
+    GaussianNoiseBlock,
+    ATTN_BLOCK_MAP,
     BLOCK_MAP,
     CONV_BLOCK_MAP,
-    GaussianNoiseBlock,
     UNetDownBlockTypes,
     UNetMidBlockTypes,
     UNetUpBlockTypes,
 )
 from chuchichaestli.models.downsampling import (
     DOWNSAMPLE_FUNCTIONS,
-    Downsample,
-    DownsampleInterpolate,
     DownsampleTypes,
 )
-from chuchichaestli.models.maps import DIM_TO_CONV_MAP
+from chuchichaestli.models.maps import DIM_TO_CONV_MAP, require_cls
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.unet.time_embeddings import (
-    SinusoidalTimeEmbedding,
-    DeepSinusoidalTimeEmbedding,
+    TimeEmbeddingTypes,
+    TIME_EMBEDDING_MAP,
 )
 from chuchichaestli.models.upsampling import (
     UPSAMPLE_FUNCTIONS,
-    Upsample,
-    UpsampleInterpolate,
     UpsampleTypes,
 )
+from chuchichaestli.utils import broadcast, broadcast_kwargs
 from typing import Literal
 from collections.abc import Sequence
 
-
-TIME_EMBEDDING_MAP = {
-    "SinusoidalTimeEmbedding": SinusoidalTimeEmbedding,
-    "DeepSinusoidalTimeEmbedding": DeepSinusoidalTimeEmbedding,
-    True: SinusoidalTimeEmbedding,
-}
+SkipConnectionTypes = Literal["concat", "avg", "add"]
 
 
 class UNet(nn.Module):
@@ -77,18 +70,14 @@ class UNet(nn.Module):
         ),
         block_out_channel_mults: Sequence[int] = (1, 2, 2, 4),
         num_blocks_per_level: int = 1,
-        upsample_type: UpsampleTypes = "Upsample",
-        downsample_type: DownsampleTypes = "Downsample",
+        upsample_type: UpsampleTypes | Sequence[UpsampleTypes] = "Upsample",
+        downsample_type: DownsampleTypes | Sequence[DownsampleTypes] = "Downsample",
         act_fn: ActivationTypes = "silu",
         norm_type: NormTypes = "group",
         groups: int = 8,
         in_kernel_size: int = 3,
         out_kernel_size: int = 3,
-        time_embedding: Literal[
-            "SinusoidalTimeEmbedding", "DeepSinusoidalTimeEmbedding"
-        ]
-        | bool
-        | None = None,
+        time_embedding: TimeEmbeddingTypes | bool | None = None,
         time_channels: int = 32,
         t_emb_dim: int = 32,
         t_emb_flip: bool = False,
@@ -96,19 +85,21 @@ class UNet(nn.Module):
         t_emb_act_fn: ActivationTypes = "silu",
         t_emb_post_act: bool = False,
         t_emb_condition_dim: int | None = None,
-        res_act_fn: ActivationTypes = "silu",
-        res_dropout: float = 0.1,
-        res_norm_type: NormTypes = "group",
-        res_groups: int = 32,
-        res_kernel_size: int = 3,
-        attn_head_dim: int = 32,
-        attn_n_heads: int = 1,
-        attn_dropout_p: float = 0.0,
-        attn_norm_type: NormTypes = "group",
-        attn_groups: int = 32,
-        attn_kernel_size: int = 1,
-        attn_gate_inter_channels: int = 32,
-        skip_connection_action: Literal["concat", "avg", "add"] | None = "concat",
+        res_act_fn: ActivationTypes | Sequence[ActivationTypes] = "silu",
+        res_dropout: float | Sequence[float] = 0.1,
+        res_norm_type: NormTypes | Sequence[NormTypes] = "group",
+        res_groups: int | Sequence[int] = 32,
+        res_kernel_size: int | Sequence[int] = 3,
+        attn_head_dim: int | Sequence[int] = 32,
+        attn_n_heads: int | Sequence[int] = 1,
+        attn_dropout_p: float | Sequence[float] = 0.0,
+        attn_norm_type: NormTypes | Sequence[NormTypes] = "group",
+        attn_groups: int | Sequence[int] = 32,
+        attn_kernel_size: int | Sequence[int] = 1,
+        attn_gate_inter_channels: int | Sequence[int] | None = None,
+        skip_connection_action: SkipConnectionTypes
+        | None
+        | Sequence[SkipConnectionTypes | None] = "concat",
         skip_connection_to_all_blocks: bool | None = None,
         add_noise: Literal["up", "down"] | None = None,
         noise_sigma: float = 0.1,
@@ -129,9 +120,9 @@ class UNet(nn.Module):
             block_out_channel_mults: Output channel multipliers for each block.
             num_blocks_per_level: Number of blocks per level
                 (blocks are repeated if `>1`).
-            upsample_type: Type of upsampling block
+            upsample_type: Type of upsampling block, per level transition
                 (see `chuchichaestli.models.upsampling` for details).
-            downsample_type: Type of downsampling block
+            downsample_type: Type of downsampling block, per level transition
                 (see `chuchichaestli.models.downsampling` for details).
             act_fn: Activation function for the output layer
                 (see `chuchichaestli.models.activations` for details).
@@ -148,25 +139,29 @@ class UNet(nn.Module):
             t_emb_act_fn: Activation function for the time embedding.
             t_emb_post_act: Whether to use an activation at the end of the time embedding.
             t_emb_condition_dim: The condition dimension for the time embedding.
-            res_act_fn: Activation function for the residual blocks
-                (see `chuchichaestli.models.activations` for details).
-            res_dropout: Dropout rate for the residual blocks.
-            res_norm_type: Normalization type for the residual block
-                (see `chuchichaestli.models.norm` for details).
-            res_groups: Number of groups for the residual block normalization (if group norm).
-            res_kernel_size: Kernel size for the residual blocks.
-            attn_head_dim: Dimension of the attention heads.
-            attn_n_heads: Number of attention heads.
-            attn_dropout_p: Dropout probability of the scaled dot product attention.
-            attn_norm_type: Normalization type for the convolutional attention block
-                (see `chuchichaestli.models.norm` for details).
-            attn_groups: Number of groups for the convolutional attention block normalization
-                (if `attn_norm_type` is `"group"`).
-            attn_kernel_size: Kernel size for the convolutional attention block.
-            attn_gate_inter_channels: Number of intermediate channels for the attention gate
-                (if `up_block_types` contains `"AttnGateUpBlock"`).
-            skip_connection_action: Action to take for the skip connection.
-                If `None`, no skip connections are used.
+            res_act_fn: Activation function for the residual blocks, per block
+                position (see `chuchichaestli.models.activations` for details).
+            res_dropout: Dropout rate for the residual blocks, per block position.
+            res_norm_type: Normalization type for the residual blocks, per block
+                position (see `chuchichaestli.models.norm` for details).
+            res_groups: Number of groups for the residual block normalization
+                (if group norm), per block position.
+            res_kernel_size: Kernel size for the residual blocks, per block position.
+            attn_head_dim: Dimension of the attention heads, per attention block.
+            attn_n_heads: Number of attention heads, per attention block.
+            attn_dropout_p: Dropout probability of the scaled dot product attention,
+                per attention block.
+            attn_norm_type: Normalization type for the convolutional attention block,
+                per attention block (see `chuchichaestli.models.norm` for details).
+            attn_groups: Number of groups for the convolutional attention block
+                normalization (if `attn_norm_type` is `"group"`), per attention block.
+            attn_kernel_size: Kernel size for the convolutional attention block,
+                per attention block.
+            attn_gate_inter_channels: Number of intermediate channels for the attention
+                gate (if `up_block_types` contains `"AttnGateUpBlock"`), per attention
+                block; halves the block's channels by default.
+            skip_connection_action: Action to take for the skip connection, per up
+                level. If `None`, no skip connection is used at that level.
             skip_connection_to_all_blocks: If `True`, the U-Net builds skip connections
                 to all blocks in a level, otherwise only to the first block in a level.
             add_noise: Add a Gaussian noise regularizer block in the bottleneck (before or after).
@@ -178,50 +173,105 @@ class UNet(nn.Module):
         super().__init__()
 
         self._validate_inputs(
-            dimensions, down_block_types, up_block_types, block_out_channel_mults
+            dimensions,
+            down_block_types,
+            up_block_types,
+            block_out_channel_mults,
+            num_blocks_per_level,
         )
 
         # Cache commonly used values
         conv_cls = DIM_TO_CONV_MAP[dimensions]
-        upsample_cls = UPSAMPLE_FUNCTIONS[upsample_type]
-        downsample_cls = DOWNSAMPLE_FUNCTIONS[downsample_type]
         n_mults = len(block_out_channel_mults)
         self.num_blocks_per_level = num_blocks_per_level
         self.skip_connection_to_all_blocks = skip_connection_to_all_blocks
 
-        # Group normalization configuration
-        if res_norm_type == "group" and n_channels % res_groups != 0:
-            warnings.warn(
-                f"Number of channels ({n_channels}) is not divisible by the number of groups ({res_groups}). Setting number of groups to n_channels."
+        # Block positions in order of data flow: down levels, mid block, up levels
+        n_pos = 2 * n_mults + 1
+        path = f"[{n_mults} down level(s), mid block, {n_mults} up level(s)]"
+        has_attention = [
+            block_type in ATTN_BLOCK_MAP
+            for block_type in (*down_block_types, mid_block_type, *up_block_types)
+        ]
+
+        # Up-/Downsampling block broadcasting
+        n_samplers = n_mults - 1
+        smplr_err_ctx = f"[{n_samplers} sampling block(s)]"
+        downsample_types = broadcast(
+            downsample_type, n_samplers, "downsample_type", None, smplr_err_ctx
+        )
+        upsample_types = broadcast(
+            upsample_type, n_samplers, "upsample_type", None, smplr_err_ctx
+        )
+        downsample_clss = [
+            require_cls(n, DOWNSAMPLE_FUNCTIONS, "sampling type for a U-Net")
+            for n in downsample_types
+        ]
+        upsample_clss = [
+            require_cls(n, UPSAMPLE_FUNCTIONS, "sampling type for a U-Net")
+            for n in upsample_types
+        ]
+        down_changes_channels = [cls.changes_channels for cls in downsample_clss]
+        up_changes_channels = [cls.changes_channels for cls in upsample_clss]
+        mismatched = [
+            i
+            for i in range(n_samplers)
+            if down_changes_channels[i] != up_changes_channels[n_samplers - 1 - i]
+        ]
+        if mismatched:
+            raise ValueError(
+                f"The down and up sampling types must agree on which levels change the"
+                f" channel count; they differ at level(s) {mismatched}."
             )
-            res_groups = n_channels
-            groups = min(groups, n_channels)
+        # the last level has no sampler, so its blocks apply the multiplier
+        down_changes_channels.append(False)
 
-        # Pre-compute argument dictionaries to avoid repeated dict creation
-        res_args = {
-            "res_groups": res_groups,
-            "res_act_fn": res_act_fn,
-            "res_dropout": res_dropout,
-            "res_norm_type": res_norm_type,
-            "res_kernel_size": res_kernel_size,
-        }
+        skip_actions = broadcast(
+            skip_connection_action,
+            n_mults,
+            "skip_connection_action",
+            None,
+            f"[{n_mults} up level(s)]",
+        )
 
-        attn_args = {
-            "n_heads": attn_n_heads,
-            "head_dim": attn_head_dim,
-            "dropout_p": attn_dropout_p,
-            "norm_type": attn_norm_type,
-            "groups": attn_groups,
-            "kernel_size": attn_kernel_size,
-            "inter_channels": attn_gate_inter_channels,
-        }
+        # Group normalization configuration
+        res_norm_types = broadcast(res_norm_type, n_pos, "res_norm_type", None, path)
+        res_groups_per_pos = broadcast(res_groups, n_pos, "res_groups", None, path)
+        replaced_groups: list[int | None] = []
+
+        # Pre-compute argument dictionaries, one per block position
+        res_args = broadcast_kwargs(
+            {
+                "res_groups": res_groups_per_pos,
+                "res_act_fn": res_act_fn,
+                "res_dropout": res_dropout,
+                "res_norm_type": res_norm_types,
+                "res_kernel_size": res_kernel_size,
+            },
+            n_pos,
+            context=path,
+        )
+
+        attn_args = broadcast_kwargs(
+            {
+                "n_heads": attn_n_heads,
+                "head_dim": attn_head_dim,
+                "dropout_p": attn_dropout_p,
+                "norm_type": attn_norm_type,
+                "groups": attn_groups,
+                "kernel_size": attn_kernel_size,
+                "num_channels_inter": attn_gate_inter_channels,
+            },
+            n_pos,
+            mask=has_attention,
+            context=path,
+        )
 
         # Input layer
         self.conv_in = conv_cls(
             in_channels, n_channels, kernel_size=in_kernel_size, padding="same"
         )
 
-        self.time_channels = time_channels
         self.time_emb = (
             TIME_EMBEDDING_MAP[time_embedding](
                 num_channels=time_channels,
@@ -238,44 +288,70 @@ class UNet(nn.Module):
 
         # Build encoder
         self.down_blocks = nn.ModuleList([])
+        self.skip_sources: list[bool] = []
         ins = n_channels
         for i in range(n_mults):
-            outs = ins * block_out_channel_mults[i]
+            outs = ins if down_changes_channels[i] else ins * block_out_channel_mults[i]
+            replaced_groups.append(
+                self._clamp_groups(res_args[i], res_norm_types[i], min(ins, outs))
+            )
 
-            for _ in range(num_blocks_per_level):
+            for j in range(num_blocks_per_level):
                 down_block = BLOCK_MAP[down_block_types[i]](
                     dimensions=dimensions,
                     in_channels=ins,
                     out_channels=outs,
                     time_embedding=self.time_emb is not None,
                     time_channels=time_channels,
-                    res_args=res_args,
-                    attn_args=attn_args,
+                    res_args=res_args[i],
+                    attn_args=attn_args[i],
                 )
                 self.down_blocks.append(down_block)
+                # only the last block in a level feeds a skip connection
+                self.skip_sources.append(j == num_blocks_per_level - 1)
                 ins = outs
 
             if i < n_mults - 1:
-                self.down_blocks.append(downsample_cls(dimensions, ins))
+                if down_changes_channels[i]:
+                    widened = ins * block_out_channel_mults[i]
+                    self.down_blocks.append(
+                        downsample_clss[i](dimensions, ins, widened)
+                    )
+                    ins = outs = widened
+                else:
+                    self.down_blocks.append(downsample_clss[i](dimensions, ins))
+                self.skip_sources.append(False)
 
         # Build middle block
+        replaced_groups.append(
+            self._clamp_groups(res_args[n_mults], res_norm_types[n_mults], outs)
+        )
         self.mid_block = BLOCK_MAP[mid_block_type](
             dimensions=dimensions,
             channels=outs,
             time_embedding=self.time_emb is not None,
             time_channels=time_channels,
-            res_args=res_args,
-            attn_args=attn_args,
+            res_args=res_args[n_mults],
+            attn_args=attn_args[n_mults],
         )
 
         # Build decoder
         self.up_blocks = nn.ModuleList([])
+        self.up_samplers: list[bool] = []
+        self.up_level_starts: list[bool] = []
 
-        for i, (up_block_type, mult) in enumerate(
-            zip(up_block_types, reversed(block_out_channel_mults))
-        ):
+        for i, up_block_type in enumerate(up_block_types):
+            level = n_mults - 1 - i
             ins = outs
-            outs = ins // mult
+            outs = (
+                ins
+                if down_changes_channels[level]
+                else ins // block_out_channel_mults[level]
+            )
+            pos = n_mults + 1 + i
+            replaced_groups.append(
+                self._clamp_groups(res_args[pos], res_norm_types[pos], min(ins, outs))
+            )
 
             for j in range(num_blocks_per_level):
                 up_block = BLOCK_MAP[up_block_type](
@@ -284,28 +360,55 @@ class UNet(nn.Module):
                     out_channels=outs,
                     time_embedding=self.time_emb is not None,
                     time_channels=time_channels,
-                    res_args=res_args,
-                    attn_args=attn_args,
+                    res_args=res_args[n_mults + 1 + i],
+                    attn_args=attn_args[n_mults + 1 + i],
+                    # every block in a level is fed that level's skip connection
+                    skip_channels=ins,
                     skip_connection_action=(
-                        skip_connection_action
+                        skip_actions[i]
                         if j == 0 or skip_connection_to_all_blocks
                         else None
                     ),
                 )
                 self.up_blocks.append(up_block)
+                # the first block in a level consumes the skip connection
+                self.up_samplers.append(False)
+                self.up_level_starts.append(j == 0)
 
             if i < n_mults - 1:
-                self.up_blocks.append(upsample_cls(dimensions, outs))
+                mirrored = n_mults - 2 - i
+                if down_changes_channels[mirrored]:
+                    narrowed = outs // block_out_channel_mults[mirrored]
+                    self.up_blocks.append(upsample_clss[i](dimensions, outs, narrowed))
+                    outs = narrowed
+                else:
+                    self.up_blocks.append(upsample_clss[i](dimensions, outs))
+                self.up_samplers.append(True)
+                self.up_level_starts.append(False)
 
         match add_noise:
             case "up":
                 self.up_blocks.insert(
                     0, GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
                 )
+                self.up_samplers.insert(0, True)
+                self.up_level_starts.insert(0, False)
             case "down":
                 self.down_blocks.append(
                     GaussianNoiseBlock(sigma=noise_sigma, detached=noise_detached)
                 )
+                self.skip_sources.append(False)
+
+        indivisible_groups = {g for g in replaced_groups if g is not None}
+        if indivisible_groups:
+            # one warning for the model, not one per non-divisible block position
+            groups_str = ", ".join(str(g) for g in sorted(indivisible_groups))
+            warnings.warn(
+                f"Number of channels is not divisible by the number of groups"
+                f" ({groups_str}) at some block positions."
+                f" Setting those to the block's own channel count."
+            )
+            groups = min(groups, n_channels)
 
         # Output layer
         self.out_block = CONV_BLOCK_MAP["NormActConvBlock"](
@@ -320,8 +423,32 @@ class UNet(nn.Module):
             padding="same",
         )
 
+    def _clamp_groups(
+        self, res_args: dict, norm_type: NormTypes, channels: int
+    ) -> int | None:
+        """Reduce a group count that does not divide the channels it normalizes.
+
+        Args:
+            res_args: Residual block arguments of one position, adjusted in place.
+            norm_type: Normalization type at that position.
+            channels: Narrowest channel count the position normalizes.
+
+        Returns:
+            The group count that had to be replaced, or `None` if it fits.
+        """
+        groups = res_args["res_groups"]
+        if norm_type != "group" or channels % groups == 0:
+            return None
+        res_args["res_groups"] = channels
+        return groups
+
     def _validate_inputs(
-        self, dimensions, down_block_types, up_block_types, block_out_channel_mults
+        self,
+        dimensions,
+        down_block_types,
+        up_block_types,
+        block_out_channel_mults,
+        num_blocks_per_level,
     ):
         """Validate constructor inputs."""
         if dimensions not in DIM_TO_CONV_MAP:
@@ -337,48 +464,47 @@ class UNet(nn.Module):
                 "The number of down block types and output channel multipliers must be equal."
             )
 
+        if num_blocks_per_level < 1:
+            raise ValueError(
+                f"Each level needs at least one block;"
+                f" got num_blocks_per_level={num_blocks_per_level}."
+            )
+
     def forward(
         self, x: torch.Tensor, t: int | float | torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Forward pass - optimized but maintains exact original logic."""
+        """Forward pass.
+
+        Args:
+            x: Input tensor.
+            t: Time step, if the U-Net was built with a time embedding.
+        """
         t_emb = None
-        if t is not None:
+        if t is not None and self.time_emb is not None:
             if not torch.is_tensor(t):
                 t = torch.tensor(t, dtype=torch.long, device=x.device)
-            t = t.expand(x.shape[0])
-            t_emb = self.time_emb(t) if self.time_emb is not None else None
+            t_emb = self.time_emb(t.expand(x.shape[0]))
 
         x = self.conv_in(x)
 
         hh = []
-        for i, down_block in enumerate(self.down_blocks):
+        for down_block, is_skip_source in zip(
+            self.down_blocks, self.skip_sources, strict=True
+        ):
             x = down_block(x, t_emb)
-            if isinstance(
-                down_block, Downsample | DownsampleInterpolate | GaussianNoiseBlock
-            ):
-                continue
-            # Append skip connection for the last down_block in each layer
-            if (i + 1) % self.num_blocks_per_level == 0:
+            if is_skip_source:
                 hh.append(x)
 
         x = self.mid_block(x, t_emb)
 
-        no_count_block = 0
-        for i, up_block in enumerate(self.up_blocks):
-            if isinstance(
-                up_block, Upsample | UpsampleInterpolate | GaussianNoiseBlock
-            ):
+        hs = None
+        for up_block, is_sampler, is_level_start in zip(
+            self.up_blocks, self.up_samplers, self.up_level_starts, strict=True
+        ):
+            if is_sampler:
                 x = up_block(x, t_emb)
-                no_count_block += 1
                 continue
-            # concat skip connection for the first upblock of each layer
-            if (i - no_count_block) % self.num_blocks_per_level == 0:
+            if is_level_start:
                 hs = hh.pop()
-                x = up_block(x, hs, t_emb)
-            elif self.skip_connection_to_all_blocks:
-                hs = hh[-1]
-                x = up_block(x, hs, t_emb)
-            else:
-                x = up_block(x=x, h=None, t=t_emb)
-        x = self.out_block(x)
-        return x
+            x = up_block(x, hs, t_emb)
+        return self.out_block(x)

@@ -10,7 +10,15 @@ import numpy as np
 from typing import Any
 from collections.abc import Sequence, Iterable, Callable
 
-__all__ = ["partialclass", "alias_kwargs", "nested_list_size", "prod", "map_nested"]
+__all__ = [
+    "partialclass",
+    "alias_kwargs",
+    "nested_list_size",
+    "prod",
+    "map_nested",
+    "broadcast",
+    "broadcast_kwargs",
+]
 
 
 def partialclass(name: str, cls: type[object], *args, **kwargs):
@@ -148,3 +156,73 @@ def prod(num_list: Iterable[int] | torch.Size) -> int:
         for item in num_list:
             result *= prod(item) if isinstance(item, Iterable) else item
     return result
+
+
+def broadcast(
+    value: Any,
+    n: int,
+    name: str = "value",
+    mask: Sequence[bool] | None = None,
+    context: str = "",
+) -> tuple:
+    """Broadcast a single value, or validate a sequence with one entry per position.
+
+    Only lists and tuples are read as per-position; strings, `None`, and numbers
+    are single values and are broadcast to every position.
+
+    Args:
+        value: A single value, or a list/tuple with one entry per position.
+        n: Number of positions.
+        name: Argument name, used in the error message.
+        mask: Marks the positions the value has an effect on. A sequence as long
+            as the marked positions is scattered onto them, and the remaining
+            entries are filled with its first element.
+        context: Description of the positions, used in the error message.
+
+    Raises:
+        ValueError: If `value` is a sequence whose length matches no accepted count.
+    """
+    if not isinstance(value, (list, tuple)):
+        return (value,) * n
+    if len(value) == n:
+        return tuple(value)
+    n_masked = sum(mask) if mask is not None else 0
+    if n_masked and len(value) == n_masked:
+        out, it = [value[0]] * n, iter(value)
+        for p, marked in enumerate(mask):
+            if marked:
+                out[p] = next(it)
+        return tuple(out)
+    where = f" for {context}" if context else ""
+    if n == 0:
+        raise ValueError(
+            f"{name}: takes a single value or no values at all{where};"
+            f" got {len(value)}."
+        )
+    alt = f", or {n_masked} for the blocks it applies to" if n_masked else ""
+    raise ValueError(
+        f"{name}: expected a single value or {n} values{where}{alt}; got {len(value)}."
+    )
+
+
+def broadcast_kwargs(
+    spec: dict[str, Any],
+    n: int,
+    mask: Sequence[bool] | None = None,
+    opaque: Sequence[str] = (),
+    context: str = "",
+) -> list[dict[str, Any]]:
+    """Expand a mapping of single-or-per-position values into one dict per position.
+
+    Args:
+        spec: Mapping of argument name to a single value or a per-position sequence.
+        n: Number of positions.
+        mask: Marks the positions the values have an effect on (see `broadcast`).
+        opaque: Keys whose value is passed through untouched, however it is shaped.
+        context: Description of the positions, used in error messages.
+    """
+    expanded = {
+        key: (value,) * n if key in opaque else broadcast(value, n, key, mask, context)
+        for key, value in spec.items()
+    }
+    return [{key: values[p] for key, values in expanded.items()} for p in range(n)]

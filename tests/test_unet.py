@@ -3,15 +3,36 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the UNet model."""
 
+import warnings
+
 import pytest
 import torch
 from chuchichaestli.models.unet import UNet
+from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
+from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
 
 
 def test_throws_error_on_invalid_dimension():
     """Test that the UNet model throws an error when an invalid dimension is passed."""
     with pytest.raises(ValueError):
         UNet(dimensions=4)
+
+
+def test_throws_error_on_empty_levels():
+    """Test that the UNet model throws an error when a level would hold no blocks."""
+    with pytest.raises(ValueError, match="at least one block"):
+        UNet(num_blocks_per_level=0)
+
+
+def test_throws_error_on_sampler_sequence_without_level_transitions():
+    """Test that a per-level sampler sequence is rejected when there is no transition."""
+    with pytest.raises(ValueError, match="no values at all"):
+        UNet(
+            down_block_types=("DownBlock",),
+            up_block_types=("UpBlock",),
+            block_out_channel_mults=(1,),
+            downsample_type=("Downsample",),
+        )
 
 
 def test_throws_error_on_mismatched_lengths():
@@ -61,6 +82,86 @@ def test_block_types_follow_data_flow():
         "Upsample",
         "UpBlock",
     ]
+
+
+PER_LEVEL_CONF = {
+    "n_channels": 16,
+    "res_groups": 4,
+    "down_block_types": ("DownBlock", "DownBlock", "AttnDownBlock"),
+    "mid_block_type": "AttnMidBlock",
+    "up_block_types": ("AttnUpBlock", "UpBlock", "UpBlock"),
+    "block_out_channel_mults": (1, 2, 4),
+}
+
+
+def res_dropouts(model):
+    """Collect the dropout probability of every residual block, in build order."""
+    blocks = [*model.down_blocks, model.mid_block, *model.up_blocks]
+    return [b.res_block.dropout.p for b in blocks if hasattr(b, "res_block")]
+
+
+def attn_heads(model):
+    """Collect the head count of every block that has attention, in build order."""
+    blocks = [*model.down_blocks, model.mid_block, *model.up_blocks]
+    return [b.attn.n_heads for b in blocks if getattr(b, "attn", None) is not None]
+
+
+def test_per_level_arguments_follow_the_block_path():
+    """Test that a per-level sequence is read as down levels, mid block, up levels."""
+    model = UNet(**PER_LEVEL_CONF, res_dropout=(0.1, 0.2, 0.3, 0.5, 0.4, 0.2, 0.1))
+    assert res_dropouts(model) == [0.1, 0.2, 0.3, 0.5, 0.4, 0.2, 0.1]
+
+
+def test_per_level_arguments_broadcast_a_single_value():
+    """Test that a single value still reaches every block position."""
+    model = UNet(**PER_LEVEL_CONF, res_dropout=0.25)
+    assert res_dropouts(model) == [0.25] * 7
+
+
+def test_attention_arguments_accept_both_lengths():
+    """Test that the block-path and attention-block spellings build the same model."""
+    by_path = UNet(**PER_LEVEL_CONF, attn_n_heads=(1, 1, 2, 4, 8, 1, 1))
+    by_attn = UNet(**PER_LEVEL_CONF, attn_n_heads=(2, 4, 8))
+    assert attn_heads(by_path) == attn_heads(by_attn) == [2, 4, 8]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"res_dropout": (0.1, 0.2)},
+        {"res_norm_type": ("group",) * 4},
+        {"attn_n_heads": (1, 2)},
+    ],
+    ids=["res_short", "res_wrong", "attn_wrong"],
+)
+def test_throws_error_on_wrong_per_level_length(kwargs):
+    """Test that a sequence matching no accepted position count is rejected."""
+    with pytest.raises(ValueError):
+        UNet(**PER_LEVEL_CONF, **kwargs)
+
+
+def test_group_divisibility_is_checked_per_block_position():
+    """Test that groups valid at a position's own width are kept."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        model = UNet(
+            n_channels=16,
+            down_block_types=("DownBlock",) * 3,
+            up_block_types=("UpBlock",) * 3,
+            block_out_channel_mults=(1, 2, 2),
+            res_groups=(8, 8, 32, 32, 32, 8, 8),
+            groups=8,
+        )
+    # the mid block carries 64 channels, so 32 groups divide it
+    assert model.mid_block.res_block.norm1.norm.num_channels == 64
+    assert model.mid_block.res_block.norm1.norm.num_groups == 32
+
+
+def test_group_divisibility_warns_once_for_a_single_value():
+    """Test that the group clamp reports one warning, not one per block position."""
+    with pytest.warns(UserWarning, match="Number of channels") as record:
+        UNet(n_channels=16, res_groups=32)
+    assert len(record) == 1
 
 
 @pytest.mark.parametrize(
@@ -177,6 +278,83 @@ def test_forward_with_2_layers_per_block(
     sample = torch.randn(*input_dims)  # Example input
     output = model(sample)
     assert output.shape == input_dims  # Check output shape
+
+
+def test_skip_sources_are_level_terminal():
+    """Test that a skip connection starts at the last block of each level."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=("UpBlock",) * 3,
+        block_out_channel_mults=(1, 2, 2),
+        num_blocks_per_level=2,
+        res_groups=8,
+    )
+    # [block, block, sampler] per level, the last level without a sampler
+    assert [type(b).__name__ for b in model.down_blocks] == (
+        ["DownBlock", "DownBlock", "Downsample"] * 2 + ["DownBlock"] * 2
+    )
+    sources = [i for i, is_source in enumerate(model.skip_sources) if is_source]
+    assert sources == [1, 4, 7]
+    assert model.up_samplers == [False, False, True] * 2 + [False, False]
+    assert model.up_level_starts == [True, False, False] * 2 + [True, False]
+
+
+@pytest.mark.parametrize(
+    "up_block_type", ["UpBlock", "AttnUpBlock", "AttnGateUpBlock", "ConvAttnUpBlock"]
+)
+def test_forward_multiblock_levels_without_skips_to_all(up_block_type):
+    """Test that later blocks in a level still run when they merge no skip."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=(up_block_type,) * 3,
+        block_out_channel_mults=(1, 2, 2),
+        num_blocks_per_level=2,
+        res_groups=8,
+        attn_groups=8,
+        groups=8,
+    )
+    input_dims = (2, 1, 32, 32)
+    assert model(torch.randn(*input_dims)).shape == input_dims
+
+
+@pytest.mark.parametrize(
+    "up_block_type", ["UpBlock", "AttnUpBlock", "AttnGateUpBlock", "ConvAttnUpBlock"]
+)
+@pytest.mark.parametrize("block_out_channel_mults", [(1, 1, 1), (1, 2, 2)])
+def test_forward_skip_to_all_blocks(up_block_type, block_out_channel_mults):
+    """Test the forward pass with a skip connection to every block in a level."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=(up_block_type,) * 3,
+        block_out_channel_mults=block_out_channel_mults,
+        num_blocks_per_level=2,
+        skip_connection_to_all_blocks=True,
+        res_groups=8,
+        attn_groups=8,
+        groups=8,
+    )
+    input_dims = (2, 1, 32, 32)
+    output = model(torch.randn(*input_dims))
+    assert output.shape == input_dims
+
+
+@pytest.mark.parametrize("skip_connection_action", ["avg", "add"])
+def test_skip_to_all_blocks_rejects_wider_skip(skip_connection_action):
+    """Test that a skip too wide to replicate onto the input is rejected."""
+    with pytest.raises(ValueError, match="channels that divides"):
+        UNet(
+            n_channels=8,
+            down_block_types=("DownBlock",) * 3,
+            up_block_types=("UpBlock",) * 3,
+            block_out_channel_mults=(1, 2, 2),
+            num_blocks_per_level=2,
+            skip_connection_to_all_blocks=True,
+            skip_connection_action=skip_connection_action,
+            res_groups=8,
+        )
 
 
 def test_info_conv_attn(
@@ -776,3 +954,187 @@ def test_forward_pass_with_noise_at_inference(
     output2 = model(sample, timestep)
     assert output1.shape == input_dims  # Check output shape
     assert torch.equal(output1, output2)
+
+
+def test_per_level_sampling_types():
+    """Test that each level transition can use a different sampling block."""
+    model = UNet(
+        **PER_LEVEL_CONF,
+        downsample_type=("Downsample", "DownsampleInterpolate"),
+        upsample_type=("UpsampleInterpolate", "Upsample"),
+    )
+    assert [type(b).__name__ for b in model.down_blocks][1::2] == [
+        "Downsample",
+        "DownsampleInterpolate",
+    ]
+    assert [type(b).__name__ for b in model.up_blocks][1::2] == [
+        "UpsampleInterpolate",
+        "Upsample",
+    ]
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+def test_per_level_skip_connection_actions():
+    """Test that each up level can merge its skip connection differently."""
+    model = UNet(**PER_LEVEL_CONF, skip_connection_action=("concat", "add", None))
+    actions = [
+        b.skip_connection_action
+        for b in model.up_blocks
+        if hasattr(b, "skip_connection_action")
+    ]
+    assert actions == ["concat", "add", None]
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"downsample_type": "NotASampler"}, {"upsample_type": "NotASampler"}],
+    ids=["down", "up"],
+)
+def test_throws_error_on_unsupported_sampling_type(kwargs):
+    """Test that a sampling type the UNet cannot build is rejected up front."""
+    with pytest.raises(ValueError, match="Unsupported sampling type"):
+        UNet(**PER_LEVEL_CONF, **kwargs)
+
+
+@pytest.mark.parametrize("downsample_type", sorted(DOWNSAMPLE_FUNCTIONS))
+def test_every_registered_downsampling_type_runs(downsample_type):
+    """Test that every registered downsampling type builds and preserves the shape."""
+    # a sampler that changes the channel count has to be mirrored in the other half
+    upsample_type = (
+        "UpsampleShuffle"
+        if DOWNSAMPLE_FUNCTIONS[downsample_type].changes_channels
+        else "Upsample"
+    )
+    model = UNet(
+        **PER_LEVEL_CONF,
+        downsample_type=downsample_type,
+        upsample_type=upsample_type,
+    )
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+@pytest.mark.parametrize("upsample_type", sorted(UPSAMPLE_FUNCTIONS))
+def test_every_registered_upsampling_type_runs(upsample_type):
+    """Test that every registered upsampling type builds and preserves the shape."""
+    downsample_type = (
+        "DownsampleUnshuffle"
+        if UPSAMPLE_FUNCTIONS[upsample_type].changes_channels
+        else "Downsample"
+    )
+    model = UNet(
+        **PER_LEVEL_CONF,
+        downsample_type=downsample_type,
+        upsample_type=upsample_type,
+    )
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+def test_shuffle_sampling_types_at_every_rank(dimensions):
+    """Test that the spatial-to-channel samplers keep the skip connections aligned."""
+    model = UNet(
+        dimensions=dimensions,
+        n_channels=16,
+        res_groups=4,
+        block_out_channel_mults=(1, 2, 4),
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=("UpBlock",) * 3,
+        downsample_type="DownsampleUnshuffle",
+        upsample_type="UpsampleShuffle",
+    )
+    shape = (1, 1) + (32,) * dimensions
+    out = model(torch.randn(shape))
+    assert out.shape == shape
+    out.sum().backward()
+
+
+def test_shuffle_and_conv_sampling_types_can_be_mixed():
+    """Test that a level may spend its multiplier in the sampler and the next in blocks."""
+    model = UNet(
+        **PER_LEVEL_CONF,
+        downsample_type=("Downsample", "DownsampleUnshuffle"),
+        upsample_type=("UpsampleShuffle", "Upsample"),
+    )
+    assert [type(b).__name__ for b in model.down_blocks][1::2] == [
+        "Downsample",
+        "DownsampleUnshuffle",
+    ]
+    assert [type(b).__name__ for b in model.up_blocks][1::2] == [
+        "UpsampleShuffle",
+        "Upsample",
+    ]
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
+def test_throws_error_on_mirrored_sampling_type_mismatch():
+    """Test that the halves must agree on which levels spend the channel multiplier."""
+    with pytest.raises(ValueError, match="must agree"):
+        UNet(**PER_LEVEL_CONF, upsample_type=("Upsample", "UpsampleShuffle"))
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+@pytest.mark.parametrize("pool", ["AdaptiveMaxPool", "AdaptiveAvgPool"])
+def test_adaptive_pooling_downsamples_a_unet(dimensions, pool):
+    """Test that adaptive pooling halves each level rather than collapsing it."""
+    model = UNet(
+        dimensions=dimensions,
+        n_channels=16,
+        res_groups=4,
+        block_out_channel_mults=(1, 2, 4),
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=("UpBlock",) * 3,
+        downsample_type=pool,
+    )
+    shape = (1, 1) + (32,) * dimensions
+    assert model(torch.randn(shape)).shape == shape
+
+
+def test_adaptive_pooling_tolerates_indivisible_input_sizes():
+    """Test that adaptive pooling accepts a size the strided samplers cannot halve."""
+    model = UNet(
+        n_channels=16,
+        res_groups=4,
+        block_out_channel_mults=(1, 2),
+        down_block_types=("DownBlock",) * 2,
+        up_block_types=("UpBlock",) * 2,
+        downsample_type="AdaptiveMaxPool",
+    )
+    assert model(torch.randn(1, 1, 30, 30)).shape == (1, 1, 30, 30)
+
+
+GATE_CONF = {
+    "n_channels": 16,
+    "res_groups": 4,
+    "block_out_channel_mults": (1, 2, 4),
+    "down_block_types": ("DownBlock",) * 3,
+    "up_block_types": ("AttnGateUpBlock",) * 3,
+}
+
+
+def attention_gates(model):
+    """Collect the (input, intermediate) channel counts of every attention gate."""
+    return [
+        (b.attn.W_g.in_channels, b.attn.W_g.out_channels)
+        for b in model.up_blocks
+        if getattr(b, "attn", None) is not None
+    ]
+
+
+def test_attention_gate_halves_the_channels_by_default():
+    """Test that the gate derives its intermediate width from the block's channels."""
+    gates = attention_gates(UNet(**GATE_CONF))
+    assert gates == [(channels, channels // 2) for channels, _ in gates]
+    assert [inter for _, inter in gates] == [64, 16, 8]
+
+
+def test_attention_gate_inter_channels_reaches_the_gate():
+    """Test that an explicit intermediate width is applied rather than ignored."""
+    gates = attention_gates(UNet(**GATE_CONF, attn_gate_inter_channels=64))
+    assert [inter for _, inter in gates] == [64, 64, 64]
+
+
+def test_attention_gate_inter_channels_can_vary_per_level():
+    """Test that the gate width is a per-level argument like the other attn_ ones."""
+    gates = attention_gates(UNet(**GATE_CONF, attn_gate_inter_channels=(8, 16, 32)))
+    assert [inter for _, inter in gates] == [8, 16, 32]

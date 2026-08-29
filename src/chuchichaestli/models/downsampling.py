@@ -7,7 +7,9 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP, DIM_TO_POOL_MAP, DOWNSAMPLE_MODE
+from chuchichaestli.models.shuffle import PixelUnshuffleND
 from chuchichaestli.utils import partialclass
+from collections.abc import Sequence
 from typing import Literal
 
 
@@ -21,14 +23,45 @@ __all__ = [
     "AvgPool",
     "AdaptiveAvgPool",
     "DOWNSAMPLE_FUNCTIONS",
+    "DOWNSAMPLE_BLOCKS",
 ]
 
 
-DownsampleTypes = Literal["Downsample", "DownsampleInterpolate", "DownsampleUnshuffle"]
+DownsampleTypes = Literal[
+    "Downsample",
+    "DownsampleInterpolate",
+    "DownsampleUnshuffle",
+    "MaxPool",
+    "AdaptiveMaxPool",
+    "AvgPool",
+    "AdaptiveAvgPool",
+]
+
+
+def _stride_factor(stride: int | Sequence[int]) -> int:
+    """Reduce a stride to the factor by which it scales every spatial axis.
+
+    Args:
+        stride: Stride, either shared by every axis or one entry per axis.
+
+    Raises:
+        ValueError: If the axes are not scaled by the same factor.
+    """
+    if isinstance(stride, int):
+        return stride
+    factors = set(stride)
+    if len(factors) != 1:
+        raise ValueError(
+            f"Sampling blocks scale every spatial axis by the same factor;"
+            f" got stride={tuple(stride)}."
+        )
+    return factors.pop()
 
 
 class Downsample(nn.Module):
     """Downsampling layer for 1D, 2D, and 3D inputs."""
+
+    changes_channels = False
 
     def __init__(self, dimensions: int, num_channels: int, **kwargs):
         """Initialize the downsampling layer."""
@@ -37,6 +70,7 @@ class Downsample(nn.Module):
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 2)
         kwargs.setdefault("padding", 1)
+        self.factor = _stride_factor(kwargs["stride"])
         self.conv = conv_cls(num_channels, num_channels, **kwargs)
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
@@ -49,6 +83,8 @@ class DownsampleInterpolate(nn.Module):
 
     Note: In the U-Net architecture, downsampling by interpolation is not commonly used.
     """
+
+    changes_channels = False
 
     def __init__(
         self,
@@ -97,6 +133,8 @@ class DownsampleInterpolate(nn.Module):
 class DownsampleUnshuffle(nn.Module):
     """Downsampling layer for 1D, 2D, and 3D inputs implemented with pixel shuffling."""
 
+    changes_channels = True
+
     def __init__(
         self,
         dimensions: int,
@@ -110,13 +148,19 @@ class DownsampleUnshuffle(nn.Module):
         conv_cls = DIM_TO_CONV_MAP[dimensions]
         self.dimensions = dimensions
         self.factor = factor if factor is not None else 2
-        r2 = self.factor**2
-        self.group_size = in_channels * r2 // out_channels
+        rd = self.factor**dimensions
+        if out_channels % rd or in_channels * rd % out_channels:
+            raise ValueError(
+                f"Cannot unshuffle {in_channels} into {out_channels} channels by a factor"
+                f" of {self.factor} over {dimensions} dimension(s): out_channels must be"
+                f" divisible by {rd}, and {rd} * in_channels by out_channels."
+            )
+        self.group_size = in_channels * rd // out_channels
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 1)
         kwargs.setdefault("padding", "same")
-        self.conv = conv_cls(in_channels, out_channels // r2, **kwargs)
-        self.pixel_unshuffle = nn.PixelUnshuffle(self.factor)
+        self.conv = conv_cls(in_channels, out_channels // rd, **kwargs)
+        self.pixel_unshuffle = PixelUnshuffleND(dimensions, self.factor)
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the downsampling layer."""
@@ -126,8 +170,20 @@ class DownsampleUnshuffle(nn.Module):
         return h + shortcut
 
 
+ADAPTIVE_POOL_FUNCTIONS = {
+    (1, False): F.adaptive_max_pool1d,
+    (2, False): F.adaptive_max_pool2d,
+    (3, False): F.adaptive_max_pool3d,
+    (1, True): F.adaptive_avg_pool1d,
+    (2, True): F.adaptive_avg_pool2d,
+    (3, True): F.adaptive_avg_pool3d,
+}
+
+
 class Pool(nn.Module):
     """Max/avg (optionally adaptive) pooling layer for 1D, 2D, and 3D inputs."""
+
+    changes_channels = False
 
     def __init__(
         self,
@@ -137,24 +193,40 @@ class Pool(nn.Module):
         adaptive: bool = False,
         **kwargs,
     ):
-        """Initialize the pooling layer (default: max pooling)."""
+        """Initialize the pooling layer (default: max pooling).
+
+        An adaptive layer without an explicit `output_size` pools down by `stride`,
+        computing the output size from each input; give `output_size` to pool to a
+        fixed size instead.
+        """
         super().__init__()
-        pool_type = "MaxPool"
+        self.dimensions = dimensions
+        self.average = average
+        self.adaptive = adaptive
+        self.output_size = kwargs.pop("output_size", None)
+        if adaptive and (ignored := {"kernel_size", "padding"} & kwargs.keys()):
+            raise ValueError(
+                f"Adaptive pooling has no {', '.join(sorted(ignored))};"
+                f" size it with output_size or stride instead."
+            )
         kwargs.setdefault("kernel_size", 3)
         kwargs.setdefault("stride", 2)
         kwargs.setdefault("padding", 1)
-        if average:
-            pool_type = "AvgPool"
+        self.factor = (
+            None if self.output_size is not None else _stride_factor(kwargs["stride"])
+        )
         if adaptive:
-            pool_type = "Adaptive" + pool_type
-            out = kwargs.get("output_size", None)
-            kwargs = {"output_size": out if out is not None else (1,) * dimensions}
-        pool_cls = DIM_TO_POOL_MAP[dimensions][pool_type]
+            self.pool = None
+            return
+        pool_cls = DIM_TO_POOL_MAP[dimensions]["AvgPool" if average else "MaxPool"]
         self.pool = pool_cls(**kwargs)
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the pooling layer."""
-        return self.pool(x)
+        if not self.adaptive:
+            return self.pool(x)
+        size = self.output_size or [s // self.factor for s in x.shape[2:]]
+        return ADAPTIVE_POOL_FUNCTIONS[(self.dimensions, self.average)](x, size)
 
 
 MaxPool = partialclass("MaxPool", Pool, average=False, adaptive=False)
@@ -172,3 +244,5 @@ DOWNSAMPLE_FUNCTIONS = {
     "AvgPool": AvgPool,
     "AdaptiveAvgPool": AdaptiveAvgPool,
 }
+
+DOWNSAMPLE_BLOCKS: tuple[type, ...] = tuple(DOWNSAMPLE_FUNCTIONS.values())

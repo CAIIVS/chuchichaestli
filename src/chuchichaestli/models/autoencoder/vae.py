@@ -89,10 +89,14 @@ class VAE(Autoencoder):
         encoder_norm_type: NormTypes = "group",
         encoder_groups: int = 8,
         encoder_kernel_size: int = 3,
+        encoder_res_args: dict = {},
+        encoder_attn_args: dict = {},
         decoder_act_fn: ActivationTypes = "silu",
         decoder_norm_type: NormTypes = "group",
         decoder_groups: int = 8,
         decoder_kernel_size: int = 3,
+        decoder_res_args: dict = {},
+        decoder_attn_args: dict = {},
     ):
         """Initializes the VAE model with the given parameters.
 
@@ -141,12 +145,20 @@ class VAE(Autoencoder):
                 (see `chuchichaestli.models.norm` for details).
             encoder_groups: Number of groups for normalization in the output layer of the encoder.
             encoder_kernel_size: Kernel size for the output convolution in the encoder.
+            encoder_res_args: Encoder residual block arguments, overriding the shared
+                `res_*` values. Each entry is a single value or one per block position.
+            encoder_attn_args: Encoder attention block arguments, overriding the shared
+                `attn_*` values.
             decoder_act_fn: Activation function for the input/output layers in the decoder
                 (see `chuchichaestli.models.activations` for details).
             decoder_norm_type: Normalization type for the decoder's output block
                 (see `chuchichaestli.models.norm` for details).
             decoder_groups: Number of groups for normalization in the input/output layer of the decoder.
             decoder_kernel_size: Kernel size for the output convolution in the decoder.
+            decoder_res_args: Decoder residual block arguments, overriding the shared
+                `res_*` values. Each entry is a single value or one per block position.
+            decoder_attn_args: Decoder attention block arguments, overriding the shared
+                `attn_*` values.
             double_z: Whether to double the latent space.
         """
         super().__init__(
@@ -184,10 +196,14 @@ class VAE(Autoencoder):
             encoder_norm_type=encoder_norm_type,
             encoder_groups=encoder_groups,
             encoder_kernel_size=encoder_kernel_size,
+            encoder_res_args=encoder_res_args,
+            encoder_attn_args=encoder_attn_args,
             decoder_act_fn=decoder_act_fn,
             decoder_norm_type=decoder_norm_type,
             decoder_groups=decoder_groups,
             decoder_kernel_size=decoder_kernel_size,
+            decoder_res_args=decoder_res_args,
+            decoder_attn_args=decoder_attn_args,
             double_z=True,
         )
         self.softplus = nn.Softplus()

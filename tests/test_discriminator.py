@@ -580,3 +580,64 @@ def test_AntialiasingPatchDiscriminator_info(
         assert out.shape[1] == 1
         print(model)
     print()
+
+
+ATTN_BLOCK_TYPES = (
+    "ConvDownBlock",
+    "AttnConvDownBlock",
+    "NormActAttnConvDownBlock",
+    "NormActConvBlock",
+)
+
+
+def attention_heads(model):
+    """Collect the head count of every block that has attention, in build order."""
+    return [b.attn.n_heads for b in model if getattr(b, "attn", None) is not None]
+
+
+def test_attention_arguments_accept_both_lengths():
+    """Test that the block-path and attention-block spellings build the same model."""
+    by_path = BlockDiscriminator(
+        2, 3, 32, block_types=ATTN_BLOCK_TYPES, attn_n_heads=(1, 2, 4, 1)
+    )
+    by_attn = BlockDiscriminator(
+        2, 3, 32, block_types=ATTN_BLOCK_TYPES, attn_n_heads=(2, 4)
+    )
+    assert attention_heads(by_path) == attention_heads(by_attn) == [2, 4]
+
+
+def test_attention_arguments_broadcast_a_single_value():
+    """Test that a single value still reaches every attention block."""
+    model = BlockDiscriminator(2, 3, 32, block_types=ATTN_BLOCK_TYPES, attn_n_heads=8)
+    assert attention_heads(model) == [8, 8]
+    assert model(torch.randn(1, 3, 64, 64)).shape[:2] == (1, 1)
+
+
+def test_throws_error_on_wrong_per_block_length():
+    """Test that a sequence matching no accepted position count is rejected."""
+    with pytest.raises(ValueError):
+        BlockDiscriminator(
+            2, 3, 32, block_types=ATTN_BLOCK_TYPES, attn_n_heads=(1, 2, 3)
+        )
+
+
+def test_explicit_empty_attn_args_is_not_replaced_by_the_defaults():
+    """Test that an explicitly empty attn_args leaves the attention block at its defaults."""
+    from chuchichaestli.models.attention.self_attention import SelfAttention
+
+    block_types = ("ConvDownBlock", "AttnConvDownBlock", "NormActConvBlock")
+    common = dict(
+        block_types=block_types,
+        channel_mults=(2,),
+        norm_type="group",
+        out_channels=1,
+        attn_n_heads=8,
+    )
+    inherited = BlockDiscriminator(2, 1, 32, **common)
+    explicit = BlockDiscriminator(2, 1, 32, attn_args={}, **common)
+
+    def heads(model):
+        return [a.n_heads for a in model.modules() if isinstance(a, SelfAttention)]
+
+    assert heads(inherited) == [8]
+    assert heads(explicit) == [1]

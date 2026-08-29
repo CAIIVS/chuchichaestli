@@ -22,15 +22,27 @@ class AttentionGate(nn.Module):
         dimension: int = 2,
         num_channels_x: int = 1,
         num_channels_g: int = 1,
-        num_channels_inter: int = 1,
+        num_channels_inter: int | None = None,
         subsample_factor: int | tuple[int, ...] = 2,
         **kwargs,
     ):
-        """Initialize the AttentionGate."""
+        """Initialize the AttentionGate.
+
+        Args:
+            dimension: Number of spatial dimensions.
+            num_channels_x: Number of channels of the input features.
+            num_channels_g: Number of channels of the gating signal.
+            num_channels_inter: Number of intermediate channels; halves the input
+                features by default, as in the reference implementations.
+            subsample_factor: Stride at which the input features are sampled.
+            kwargs: Ignored, for compatibility with the other attention modules.
+        """
         super().__init__()
 
         if dimension not in DIM_TO_CONV_MAP:
             raise ValueError(f"Invalid dimension: {dimension}")
+        if num_channels_inter is None:
+            num_channels_inter = max(num_channels_x // 2, 1)
         conv_cls = DIM_TO_CONV_MAP[dimension]
         self.upsample_mode = UPSAMPLE_MODE[dimension]
 

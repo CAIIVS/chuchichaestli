@@ -73,11 +73,15 @@ class DCAE(Autoencoder):
         encoder_groups: int = 8,
         encoder_kernel_size: int = 3,
         encoder_out_shortcut: bool = True,
+        encoder_res_args: dict = {},
+        encoder_attn_args: dict = {},
         decoder_act_fn: ActivationTypes = "relu",
         decoder_norm_type: NormTypes = "rms",
         decoder_groups: int = 8,
         decoder_kernel_size: int = 3,
         decoder_in_shortcut: bool = True,
+        decoder_res_args: dict = {},
+        decoder_attn_args: dict = {},
     ):
         """Initializes the VAE model with the given parameters.
 
@@ -127,6 +131,10 @@ class DCAE(Autoencoder):
             encoder_groups: Number of groups for normalization in the output layer of the encoder.
             encoder_kernel_size: Kernel size for the output convolution in the encoder.
             encoder_out_shortcut: Whether to use an encoder shortcut.
+            encoder_res_args: Encoder residual block arguments, overriding the shared
+                `res_*` values. Each entry is a single value or one per block position.
+            encoder_attn_args: Encoder attention block arguments, overriding the shared
+                `attn_*` values.
             decoder_act_fn: Activation function for the input/output layers in the decoder
                 (see `chuchichaestli.models.activations` for details).
             decoder_norm_type: Normalization type for the decoder's output block
@@ -134,6 +142,10 @@ class DCAE(Autoencoder):
             decoder_groups: Number of groups for normalization in the input/output layer of the decoder.
             decoder_kernel_size: Kernel size for the output convolution in the decoder.
             decoder_in_shortcut: Whether to use a decoder shortcut.
+            decoder_res_args: Decoder residual block arguments, overriding the shared
+                `res_*` values. Each entry is a single value or one per block position.
+            decoder_attn_args: Decoder attention block arguments, overriding the shared
+                `attn_*` values.
         """
         super().__init__(
             dimensions=dimensions,
@@ -174,10 +186,14 @@ class DCAE(Autoencoder):
             encoder_groups=encoder_groups,
             encoder_kernel_size=encoder_kernel_size,
             encoder_out_shortcut=encoder_out_shortcut,
+            encoder_res_args=encoder_res_args,
+            encoder_attn_args=encoder_attn_args,
             decoder_act_fn=decoder_act_fn,
             decoder_norm_type=decoder_norm_type,
             decoder_groups=decoder_groups,
             decoder_kernel_size=decoder_kernel_size,
             decoder_in_shortcut=decoder_in_shortcut,
+            decoder_res_args=decoder_res_args,
+            decoder_attn_args=decoder_attn_args,
             double_z=False,
         )
