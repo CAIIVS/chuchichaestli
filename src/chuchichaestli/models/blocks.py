@@ -297,7 +297,7 @@ class BaseConvBlock(nn.Module):
                 )
             case "attention_gate":
                 self.attn = ATTENTION_MAP[attention](
-                    in_channels, out_channels, **attn_args
+                    dimensions, in_channels, in_channels, **attn_args
                 )
             case _:
                 self.attn = None
@@ -1659,11 +1659,8 @@ class AutoencoderUpBlock(nn.Module):
                 self.attn = ATTENTION_MAP[attention](
                     dimensions, in_channels, **attn_args
                 )
-            case "attention_gate":
-                self.attn = ATTENTION_MAP[attention](
-                    in_channels, out_channels, **attn_args
-                )
             case _:
+                # attention gate needs a gating signal with skip connection
                 self.attn = None
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
