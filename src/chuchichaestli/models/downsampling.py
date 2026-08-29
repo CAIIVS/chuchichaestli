@@ -22,6 +22,7 @@ __all__ = [
     "AvgPool",
     "AdaptiveAvgPool",
     "DOWNSAMPLE_FUNCTIONS",
+    "DOWNSAMPLE_BLOCKS",
 ]
 
 
@@ -38,6 +39,8 @@ DownsampleTypes = Literal[
 
 class Downsample(nn.Module):
     """Downsampling layer for 1D, 2D, and 3D inputs."""
+
+    changes_channels = False
 
     def __init__(self, dimensions: int, num_channels: int, **kwargs):
         """Initialize the downsampling layer."""
@@ -59,6 +62,8 @@ class DownsampleInterpolate(nn.Module):
 
     Note: In the U-Net architecture, downsampling by interpolation is not commonly used.
     """
+
+    changes_channels = False
 
     def __init__(
         self,
@@ -107,6 +112,8 @@ class DownsampleInterpolate(nn.Module):
 class DownsampleUnshuffle(nn.Module):
     """Downsampling layer for 1D, 2D, and 3D inputs implemented with pixel shuffling."""
 
+    changes_channels = True
+
     def __init__(
         self,
         dimensions: int,
@@ -154,6 +161,8 @@ ADAPTIVE_POOL_FUNCTIONS = {
 
 class Pool(nn.Module):
     """Max/avg (optionally adaptive) pooling layer for 1D, 2D, and 3D inputs."""
+
+    changes_channels = False
 
     def __init__(
         self,
@@ -207,3 +216,5 @@ DOWNSAMPLE_FUNCTIONS = {
     "AvgPool": AvgPool,
     "AdaptiveAvgPool": AdaptiveAvgPool,
 }
+
+DOWNSAMPLE_BLOCKS: tuple[type, ...] = tuple(DOWNSAMPLE_FUNCTIONS.values())

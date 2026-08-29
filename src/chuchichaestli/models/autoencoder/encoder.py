@@ -15,7 +15,7 @@ from chuchichaestli.models.blocks import (
     EncoderOutBlockTypes,
 )
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS, DownsampleTypes
-from chuchichaestli.models.maps import DIM_TO_CONV_MAP
+from chuchichaestli.models.maps import DIM_TO_CONV_MAP, require_cls
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
 from collections.abc import Sequence
@@ -67,7 +67,7 @@ class Encoder(nn.Module):
             out_block_type: Type of block for output (latent space).
             downsample_type: Type of downsampling block, per level (see
                 `chuchichaestli.models.downsampling` for details). The last entry has
-                no sampler and only selects how that level spends its multiplier.
+                no sampler and only selects whether that level changes the channel count.
             act_fn: Activation function for the output layers
                 (see `chuchichaestli.models.activations` for details).
             norm_type: Normalization type for the output layer.
@@ -110,7 +110,10 @@ class Encoder(nn.Module):
             None,
             f"[{n_mults} level(s)]",
         )
-        downsample_clss = [DOWNSAMPLE_FUNCTIONS[name] for name in downsample_types]
+        downsample_clss = [
+            require_cls(name, DOWNSAMPLE_FUNCTIONS, "downsampling type")
+            for name in downsample_types
+        ]
 
         # Block positions in order of data flow
         n_pos = n_mults + len(mid_block_types)
@@ -140,7 +143,7 @@ class Encoder(nn.Module):
         ins = n_channels
         for i in range(n_mults):
             outs = ins
-            if downsample_types[i] != "DownsampleUnshuffle":
+            if not downsample_clss[i].changes_channels:
                 outs = int(ins * block_out_channel_mults[i])
             stage = nn.Sequential()
             for _ in range(num_layers_per_block[i]):
@@ -156,7 +159,7 @@ class Encoder(nn.Module):
             self.down_blocks.append(stage)
 
             if i < n_mults - 1:
-                if downsample_types[i] != "DownsampleUnshuffle":
+                if not downsample_clss[i].changes_channels:
                     self.down_blocks.append(downsample_clss[i](dimensions, ins))
                 else:
                     self.down_blocks.append(

@@ -15,6 +15,7 @@ from chuchichaestli.models.blocks import (
     AutoencoderMidBlockTypes,
     DecoderInBlockTypes,
 )
+from chuchichaestli.models.maps import require_cls
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS, UpsampleTypes
 from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
@@ -66,7 +67,7 @@ class Decoder(nn.Module):
             num_layers_per_block: Number of blocks per level (blocks are repeated if `>1`).
             upsample_type: Type of upsampling block, per level (see
                 `chuchichaestli.models.upsampling` for details). The last entry has no
-                sampler and only selects how that level spends its multiplier.
+                sampler and only selects whether that level changes the channel count.
             act_fn: Activation function for the output layers
                 (see `chuchichaestli.models.activations` for details).
             norm_type: Normalization type for the output layer.
@@ -104,7 +105,10 @@ class Decoder(nn.Module):
         upsample_types = broadcast(
             upsample_type, n_mults, "upsample_type", None, f"[{n_mults} level(s)]"
         )
-        upsample_clss = [UPSAMPLE_FUNCTIONS[name] for name in upsample_types]
+        upsample_clss = [
+            require_cls(name, UPSAMPLE_FUNCTIONS, "upsampling type")
+            for name in upsample_types
+        ]
 
         # Block positions in order of data flow
         n_pos = n_mults + len(mid_block_types)
@@ -143,7 +147,7 @@ class Decoder(nn.Module):
         ins = n_channels
         for i in range(n_mults):
             outs = ins
-            if upsample_types[i] != "UpsampleShuffle":
+            if not upsample_clss[i].changes_channels:
                 outs = int(ins // block_out_channel_mults[i])
             stage = nn.Sequential()
             for _ in range(num_layers_per_block[i]):
@@ -159,7 +163,7 @@ class Decoder(nn.Module):
             self.up_blocks.append(stage)
 
             if i < n_mults - 1:
-                if upsample_types[i] != "UpsampleShuffle":
+                if not upsample_clss[i].changes_channels:
                     self.up_blocks.append(upsample_clss[i](dimensions, outs))
                 else:
                     self.up_blocks.append(

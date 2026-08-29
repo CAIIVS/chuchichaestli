@@ -8,7 +8,6 @@ import torch
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
-from chuchichaestli.models.unet.unet import SPATIAL_TO_CHANNEL_SAMPLERS
 
 
 def test_throws_error_on_invalid_dimension():
@@ -945,10 +944,10 @@ def test_throws_error_on_unsupported_sampling_type(kwargs):
 @pytest.mark.parametrize("downsample_type", sorted(DOWNSAMPLE_FUNCTIONS))
 def test_every_registered_downsampling_type_runs(downsample_type):
     """Test that every registered downsampling type builds and preserves the shape."""
-    # the spatial-to-channel samplers have to be mirrored in the other half
+    # a sampler that changes the channel count has to be mirrored in the other half
     upsample_type = (
         "UpsampleShuffle"
-        if downsample_type in SPATIAL_TO_CHANNEL_SAMPLERS
+        if DOWNSAMPLE_FUNCTIONS[downsample_type].changes_channels
         else "Upsample"
     )
     model = UNet(
@@ -964,7 +963,7 @@ def test_every_registered_upsampling_type_runs(upsample_type):
     """Test that every registered upsampling type builds and preserves the shape."""
     downsample_type = (
         "DownsampleUnshuffle"
-        if upsample_type in SPATIAL_TO_CHANNEL_SAMPLERS
+        if UPSAMPLE_FUNCTIONS[upsample_type].changes_channels
         else "Downsample"
     )
     model = UNet(

@@ -21,11 +21,9 @@ from chuchichaestli.models.downsampling import (
     DOWNSAMPLE_FUNCTIONS,
     DownsampleTypes,
 )
-from chuchichaestli.models.maps import DIM_TO_CONV_MAP
+from chuchichaestli.models.maps import DIM_TO_CONV_MAP, require_cls
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.unet.time_embeddings import (
-    SinusoidalTimeEmbedding,
-    DeepSinusoidalTimeEmbedding,
     TimeEmbeddingTypes,
     TIME_EMBEDDING_MAP,
 )
@@ -35,34 +33,9 @@ from chuchichaestli.models.upsampling import (
 )
 from chuchichaestli.utils import broadcast, broadcast_kwargs
 from typing import Literal
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 SkipConnectionTypes = Literal["concat", "avg", "add"]
-
-# samplers that trade spatial extent against channels (and back, on the up path)
-SPATIAL_TO_CHANNEL_SAMPLERS: frozenset[str] = frozenset(
-    {"DownsampleUnshuffle", "UpsampleShuffle"}
-)
-DOWNSAMPLE_BLOCKS: tuple[type, ...] = tuple(DOWNSAMPLE_FUNCTIONS.values())
-UPSAMPLE_BLOCKS: tuple[type, ...] = tuple(UPSAMPLE_FUNCTIONS.values())
-
-
-def _require_sampling_cls(name: str, supported: dict[str, Callable]):
-    """Look up a sampling block class, raising if the name is not registered.
-
-    Args:
-        name: Name of the sampling block type.
-        supported: Sampling block types accepted at this position.
-
-    Raises:
-        ValueError: If `name` is not one of the supported types.
-    """
-    if name not in supported:
-        raise ValueError(
-            f"Unsupported sampling type for a U-Net: {name!r}."
-            f" Use one of {sorted(supported)}."
-        )
-    return supported[name]
 
 
 class UNet(nn.Module):
@@ -225,30 +198,27 @@ class UNet(nn.Module):
         upsample_types = broadcast(
             upsample_type, n_samplers, "upsample_type", None, samplers
         )
+        what = "sampling type for a U-Net"
         downsample_clss = [
-            _require_sampling_cls(n, DOWNSAMPLE_FUNCTIONS) for n in downsample_types
+            require_cls(n, DOWNSAMPLE_FUNCTIONS, what) for n in downsample_types
         ]
         upsample_clss = [
-            _require_sampling_cls(n, UPSAMPLE_FUNCTIONS) for n in upsample_types
+            require_cls(n, UPSAMPLE_FUNCTIONS, what) for n in upsample_types
         ]
-        sample_widens = [
-            name in SPATIAL_TO_CHANNEL_SAMPLERS for name in downsample_types
-        ]
-        up_sample_widens = [
-            name in SPATIAL_TO_CHANNEL_SAMPLERS for name in upsample_types
-        ]
+        down_changes_channels = [cls.changes_channels for cls in downsample_clss]
+        up_changes_channels = [cls.changes_channels for cls in upsample_clss]
         mismatched = [
             i
             for i in range(n_samplers)
-            if sample_widens[i] != up_sample_widens[n_samplers - 1 - i]
+            if down_changes_channels[i] != up_changes_channels[n_samplers - 1 - i]
         ]
         if mismatched:
             raise ValueError(
-                f"The down and up sampling types must agree on which levels spend the"
-                f" channel multiplier; they differ at level(s) {mismatched}."
+                f"The down and up sampling types must agree on which levels change the"
+                f" channel count; they differ at level(s) {mismatched}."
             )
-        # the last level has no sampler, so its blocks widen
-        sample_widens.append(False)
+        # the last level has no sampler, so its blocks apply the multiplier
+        down_changes_channels.append(False)
 
         skip_actions = broadcast(
             skip_connection_action,
@@ -332,7 +302,7 @@ class UNet(nn.Module):
         self.skip_sources: list[bool] = []
         ins = n_channels
         for i in range(n_mults):
-            outs = ins if sample_widens[i] else ins * block_out_channel_mults[i]
+            outs = ins if down_changes_channels[i] else ins * block_out_channel_mults[i]
 
             for j in range(num_blocks_per_level):
                 down_block = BLOCK_MAP[down_block_types[i]](
@@ -350,7 +320,7 @@ class UNet(nn.Module):
                 ins = outs
 
             if i < n_mults - 1:
-                if sample_widens[i]:
+                if down_changes_channels[i]:
                     widened = ins * block_out_channel_mults[i]
                     self.down_blocks.append(
                         downsample_clss[i](dimensions, ins, widened)
@@ -378,7 +348,7 @@ class UNet(nn.Module):
             level = n_mults - 1 - i
             ins = outs
             outs = (
-                ins if sample_widens[level] else ins // block_out_channel_mults[level]
+                ins if down_changes_channels[level] else ins // block_out_channel_mults[level]
             )
 
             for j in range(num_blocks_per_level):
@@ -404,7 +374,7 @@ class UNet(nn.Module):
 
             if i < n_mults - 1:
                 mirrored = n_mults - 2 - i
-                if sample_widens[mirrored]:
+                if down_changes_channels[mirrored]:
                     narrowed = outs // block_out_channel_mults[mirrored]
                     self.up_blocks.append(upsample_clss[i](dimensions, outs, narrowed))
                     outs = narrowed

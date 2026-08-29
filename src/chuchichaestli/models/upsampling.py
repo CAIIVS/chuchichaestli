@@ -15,6 +15,8 @@ __all__ = [
     "Upsample",
     "UpsampleInterpolate",
     "UpsampleShuffle",
+    "UPSAMPLE_FUNCTIONS",
+    "UPSAMPLE_BLOCKS",
 ]
 
 UpsampleTypes = Literal["Upsample", "UpsampleInterpolate", "UpsampleShuffle"]
@@ -22,6 +24,8 @@ UpsampleTypes = Literal["Upsample", "UpsampleInterpolate", "UpsampleShuffle"]
 
 class Upsample(nn.Module):
     """Upsampling layer for 1D, 2D, and 3D inputs."""
+
+    changes_channels = False
 
     def __init__(self, dimensions: int, num_channels: int):
         """Initialize the upsampling layer."""
@@ -39,6 +43,8 @@ class Upsample(nn.Module):
 
 class UpsampleInterpolate(nn.Module):
     """Upsampling layer for 1D, 2D, and 3D inputs implemented with interpolation."""
+
+    changes_channels = False
 
     def __init__(
         self,
@@ -87,6 +93,8 @@ class UpsampleInterpolate(nn.Module):
 class UpsampleShuffle(nn.Module):
     """Upsampling layer for 1D, 2D, and 3D inputs implemented with pixel shuffling."""
 
+    changes_channels = True
+
     def __init__(
         self,
         dimensions: int,
@@ -129,3 +137,5 @@ UPSAMPLE_FUNCTIONS = {
     "UpsampleInterpolate": UpsampleInterpolate,
     "UpsampleShuffle": UpsampleShuffle,
 }
+
+UPSAMPLE_BLOCKS: tuple[type, ...] = tuple(UPSAMPLE_FUNCTIONS.values())

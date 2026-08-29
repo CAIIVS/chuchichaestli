@@ -53,17 +53,8 @@ def _classes() -> SimpleNamespace:
         LiteResidualBlock,
         GaussianNoiseBlock,
     )
-    from chuchichaestli.models.downsampling import (
-        Downsample,
-        DownsampleInterpolate,
-        DownsampleUnshuffle,
-        Pool,
-    )
-    from chuchichaestli.models.upsampling import (
-        Upsample,
-        UpsampleInterpolate,
-        UpsampleShuffle,
-    )
+    from chuchichaestli.models.downsampling import DOWNSAMPLE_BLOCKS
+    from chuchichaestli.models.upsampling import UPSAMPLE_BLOCKS
     from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
     from chuchichaestli.models.autoencoder.vae import VAE
     from chuchichaestli.models.autoencoder.vqvae import VQVAE
@@ -86,8 +77,8 @@ def _classes() -> SimpleNamespace:
         GaussianNoiseBlock=GaussianNoiseBlock,
         RESIDUAL=residual,
         RECURSE=containers + blocks,
-        DOWNSAMPLE=(Downsample, DownsampleInterpolate, DownsampleUnshuffle, Pool),
-        UPSAMPLE=(Upsample, UpsampleInterpolate, UpsampleShuffle),
+        DOWNSAMPLE=DOWNSAMPLE_BLOCKS,
+        UPSAMPLE=UPSAMPLE_BLOCKS,
     )
     return _CLASSES
 
