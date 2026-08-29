@@ -1602,7 +1602,7 @@ class UpBlock(nn.Module):
         if self.attn is not None:
             if not self.attn_gates_skip:
                 x = self.attn(x)
-            elif h is not None:
+            elif h is not None and self.skip_connection_action is not None:
                 h = self.attn(h, x)
         if self.skip_connection_action == "avg":
             replication_factor = x.shape[1] // h.shape[1]

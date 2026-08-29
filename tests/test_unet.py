@@ -1204,3 +1204,23 @@ def test_attn_gate_subsample_factor(subsample_factor: int, stride: int):
     assert all(g.W_x.stride == (stride, stride) for g in gates)
     sample = torch.randn(1, 1, 16, 16)
     assert model(sample).shape == sample.shape
+
+
+def test_attention_gate_skipped_when_the_skip_is_unused():
+    """Test that no attention gate runs where a level drops its skip connection."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 2,
+        up_block_types=("AttnGateUpBlock",) * 2,
+        block_out_channel_mults=(1, 2),
+        res_groups=4,
+        skip_connection_action=None,
+    )
+    calls = []
+    for block in model.up_blocks:
+        if getattr(block, "attn", None) is not None:
+            block.attn.register_forward_hook(lambda *_: calls.append(1))
+
+    sample = torch.randn(1, 1, 16, 16)
+    assert model(sample).shape == sample.shape
+    assert not calls  # the gated skip would only be discarded
