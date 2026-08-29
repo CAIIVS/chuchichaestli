@@ -233,20 +233,17 @@ class UNet(nn.Module):
         res_groups_per_pos = list(
             broadcast(res_groups, n_pos, "res_groups", None, path)
         )
-        indivisible = [
-            p
-            for p, (norm, grp) in enumerate(zip(res_norm_types, res_groups_per_pos))
-            if norm == "group" and n_channels % grp != 0
-        ]
-        if indivisible:
-            offenders = ", ".join(
-                str(g) for g in sorted({res_groups_per_pos[p] for p in indivisible})
-            )
-            warnings.warn(
-                f"Number of channels ({n_channels}) is not divisible by the number of groups ({offenders}). Setting number of groups to n_channels."
-            )
-            for p in indivisible:
+        indivisible_groups = set()
+        for p, (norm, grp) in enumerate(zip(res_norm_types, res_groups_per_pos)):
+            if norm == "group" and n_channels % grp != 0:
+                indivisible_groups.add(grp)
                 res_groups_per_pos[p] = n_channels
+        if indivisible_groups:
+            # one warning for the model, not one per non-divisible block position
+            groups_str = ", ".join(str(g) for g in sorted(indivisible_groups))
+            warnings.warn(
+                f"Number of channels ({n_channels}) is not divisible by the number of groups ({groups_str}). Setting number of groups to n_channels."
+            )
             groups = min(groups, n_channels)
 
         # Pre-compute argument dictionaries, one per block position
@@ -348,7 +345,9 @@ class UNet(nn.Module):
             level = n_mults - 1 - i
             ins = outs
             outs = (
-                ins if down_changes_channels[level] else ins // block_out_channel_mults[level]
+                ins
+                if down_changes_channels[level]
+                else ins // block_out_channel_mults[level]
             )
 
             for j in range(num_blocks_per_level):
