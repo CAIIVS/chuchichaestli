@@ -619,3 +619,25 @@ def test_throws_error_on_wrong_per_block_length():
         BlockDiscriminator(
             2, 3, 32, block_types=ATTN_BLOCK_TYPES, attn_n_heads=(1, 2, 3)
         )
+
+
+def test_explicit_empty_attn_args_is_not_replaced_by_the_defaults():
+    """Test that an explicitly empty attn_args leaves the attention block at its defaults."""
+    from chuchichaestli.models.attention.self_attention import SelfAttention
+
+    block_types = ("ConvDownBlock", "AttnConvDownBlock", "NormActConvBlock")
+    common = dict(
+        block_types=block_types,
+        channel_mults=(2,),
+        norm_type="group",
+        out_channels=1,
+        attn_n_heads=8,
+    )
+    inherited = BlockDiscriminator(2, 1, 32, **common)
+    explicit = BlockDiscriminator(2, 1, 32, attn_args={}, **common)
+
+    def heads(model):
+        return [a.n_heads for a in model.modules() if isinstance(a, SelfAttention)]
+
+    assert heads(inherited) == [8]
+    assert heads(explicit) == [1]

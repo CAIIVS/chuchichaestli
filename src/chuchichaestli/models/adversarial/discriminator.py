@@ -91,11 +91,13 @@ class BlockDiscriminator(nn.Sequential):
                 f"Not enough channel multipliers. Must be at least len(block_types)-2 = {n_blocks - 2}."
             )
 
-        attn_spec = kwargs.pop("attn_args", None) or {
-            "n_heads": attn_n_heads,
-            "head_dim": attn_head_dim,
-            "num_channels_inter": attn_gate_inter_channels,
-        }
+        attn_spec = kwargs.pop("attn_args", None)
+        if attn_spec is None:
+            attn_spec = {
+                "n_heads": attn_n_heads,
+                "head_dim": attn_head_dim,
+                "num_channels_inter": attn_gate_inter_channels,
+            }
         attn_args = broadcast_kwargs(
             attn_spec,
             n_blocks,
