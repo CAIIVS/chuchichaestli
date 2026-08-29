@@ -13,7 +13,7 @@ from chuchichaestli.models.attention import (
     LiteMultiscaleAttention,
 )
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
-from chuchichaestli.models.norm import Norm, NormTypes
+from chuchichaestli.models.norm import AdaNorm, Norm, NormTypes
 from chuchichaestli.utils import partialclass, alias_kwargs
 from math import gcd
 from collections.abc import Callable, Sequence
@@ -102,6 +102,7 @@ __all__ = [
 ResidualBlockTypes = Literal[
     "ResidualBlock", "ResidualBottleneck", "LiteResidualBlock", "GLUMBResBlock"
 ]
+TimeInjectionTypes = Literal["add", "scale_shift"]
 ConvBlockTypes = Literal[
     "GLUMBConvBlock",
     "GLUMBResBlock",
@@ -958,6 +959,7 @@ class ResidualBlock(nn.Module):
             "res_kernel_size": "kernel_size",
             "res_stride": "stride",
             "res_bias": "bias",
+            "res_time_injection": "time_injection",
         }
     )
     def __init__(
@@ -974,6 +976,7 @@ class ResidualBlock(nn.Module):
         res_kernel_size: int = 3,
         res_stride: int = 1,
         res_bias: bool = True,
+        res_time_injection: TimeInjectionTypes = "add",
         **kwargs,
     ):
         """Initialize the residual block.
@@ -992,6 +995,8 @@ class ResidualBlock(nn.Module):
             res_kernel_size: Kernel size for the residual block.
             res_stride: Stride of the residual block.
             res_bias: Bias for convolutional layers.
+            res_time_injection: Time embedding injection; added to the features
+                (`'add'`) or modulating the normalization (`'scale_shift'`).
             num_groups: Number of groups; alternative input for `res_groups`.
             act_fn: Activation function; alternative input for `res_act_fn`.
             norm_type: Normalization type; alternative input for `res_norm_type`.
@@ -1000,6 +1005,7 @@ class ResidualBlock(nn.Module):
                 alternative input for `res_kernel_size`.
             stride: Stride of the residual block; alternative input for `res_stride`.
             bias: Bias for convolutions; alternative input for `res_bias`.
+            time_injection: Injection mode; alternative input for `res_time_injection`.
             kwargs: Additional or alternative keyword arguments.
         """
         super().__init__()
@@ -1008,6 +1014,8 @@ class ResidualBlock(nn.Module):
         conv_cls = DIM_TO_CONV_MAP[dimensions]
 
         self.dimensions = dimensions
+        self.time_embedding = time_embedding
+        self.time_injection = res_time_injection if time_embedding else None
 
         self.norm1 = Norm(dimensions, res_norm_type, in_channels, res_groups)
         self.act1 = act_cls()
@@ -1020,7 +1028,18 @@ class ResidualBlock(nn.Module):
             bias=res_bias,
         )
 
-        self.norm2 = Norm(dimensions, res_norm_type, out_channels, res_groups)
+        self.norm2 = (
+            AdaNorm(
+                dimensions,
+                res_norm_type,
+                out_channels,
+                res_groups,
+                time_channels,
+                act_fn=res_act_fn,
+            )
+            if self.time_injection == "scale_shift"
+            else Norm(dimensions, res_norm_type, out_channels, res_groups)
+        )
         self.act2 = act_cls()
         self.conv2 = conv_cls(
             out_channels,
@@ -1042,8 +1061,7 @@ class ResidualBlock(nn.Module):
             else nn.Identity()
         )
 
-        self.time_embedding = time_embedding
-        if time_embedding:
+        if self.time_injection == "add":
             self.time_proj = nn.Linear(time_channels, out_channels)
             self.time_act = act_cls()
 
@@ -1052,10 +1070,14 @@ class ResidualBlock(nn.Module):
     def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the residual block."""
         hh = self.conv1(self.act1(self.norm1(x)))
-        idx = [slice(None), slice(None)] + [None] * self.dimensions
-        if self.time_embedding:
+        if self.time_injection == "add":
+            idx = [slice(None), slice(None)] + [None] * self.dimensions
             hh += self.time_proj(self.time_act(t))[tuple(idx)]
-        hh = self.act2(self.norm2(hh))
+        hh = self.act2(
+            self.norm2(hh, t)
+            if self.time_injection == "scale_shift"
+            else self.norm2(hh)
+        )
         hh = self.dropout(hh) if self.dropout is not None else hh
         hh = self.conv2(hh)
 
@@ -1090,6 +1112,7 @@ class ResidualBottleneck(nn.Module):
             "res_stride": "stride",
             "res_bias": "bias",
             "res_expansion": "expansion",
+            "res_time_injection": "time_injection",
         }
     )
     def __init__(
@@ -1107,6 +1130,7 @@ class ResidualBottleneck(nn.Module):
         res_stride: int = 1,
         res_bias: bool = True,
         res_expansion: int = 4,
+        res_time_injection: TimeInjectionTypes = "add",
         **kwargs,
     ):
         """Initialize the residual block.
@@ -1126,6 +1150,8 @@ class ResidualBottleneck(nn.Module):
             res_stride: Stride of the residual block (applied in the mid-layer).
             res_bias: Bias for convolutional layers.
             res_expansion: Factor for the channel number increase from the mid-layer.
+            res_time_injection: Time embedding injection; added to the features
+                (`'add'`) or modulating the normalization (`'scale_shift'`).
             num_groups: Number of groups; alternative input for `res_groups`.
             act_fn: Activation function; alternative input for `res_act_fn`.
             norm_type: Normalization type; alternative input for `res_norm_type`.
@@ -1136,6 +1162,7 @@ class ResidualBottleneck(nn.Module):
             bias: Bias for convolutional layers; alternative input for `res_bias`.
             expansion: Factor for the channel number increase from the mid-layer;
                 alternative input for `res_expansion`.
+            time_injection: Injection mode; alternative input for `res_time_injection`.
             kwargs: Additional or alternative keyword arguments.
         """
         super().__init__()
@@ -1144,13 +1171,26 @@ class ResidualBottleneck(nn.Module):
         n_channels = out_channels // res_expansion
 
         self.dimensions = dimensions
+        self.time_embedding = time_embedding
+        self.time_injection = res_time_injection if time_embedding else None
 
         self.norm1 = Norm(dimensions, res_norm_type, in_channels, res_groups)
         self.act1 = act_cls()
         self.conv1 = conv_cls(in_channels, n_channels, kernel_size=1, bias=res_bias)
 
-        self.norm2 = Norm(
-            dimensions, res_norm_type, n_channels, res_groups // res_expansion
+        self.norm2 = (
+            AdaNorm(
+                dimensions,
+                res_norm_type,
+                n_channels,
+                res_groups // res_expansion,
+                time_channels,
+                act_fn=res_act_fn,
+            )
+            if self.time_injection == "scale_shift"
+            else Norm(
+                dimensions, res_norm_type, n_channels, res_groups // res_expansion
+            )
         )
         self.act2 = act_cls()
         self.conv2 = conv_cls(
@@ -1180,9 +1220,10 @@ class ResidualBottleneck(nn.Module):
             else nn.Identity()
         )
 
-        self.time_embedding = time_embedding
-        if time_embedding:
-            self.time_proj = nn.Linear(time_channels, out_channels)
+        if self.time_injection == "add":
+            # the embedding meets the features between conv1 and conv2,
+            # where the block runs at its bottleneck width
+            self.time_proj = nn.Linear(time_channels, n_channels)
             self.time_act = act_cls()
 
         self.dropout = nn.Dropout(res_dropout) if res_dropout > 0 else None
@@ -1190,10 +1231,16 @@ class ResidualBottleneck(nn.Module):
     def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the residual block."""
         hh = self.conv1(self.act1(self.norm1(x)))
-        idx = [slice(None), slice(None)] + [None] * self.dimensions
-        if self.time_embedding:
+        if self.time_injection == "add":
+            idx = [slice(None), slice(None)] + [None] * self.dimensions
             hh += self.time_proj(self.time_act(t))[tuple(idx)]
-        hh = self.conv2(self.act2(self.norm2(hh)))
+        hh = self.conv2(
+            self.act2(
+                self.norm2(hh, t)
+                if self.time_injection == "scale_shift"
+                else self.norm2(hh)
+            )
+        )
         hh = self.act3(self.norm3(hh))
         hh = self.dropout(hh) if self.dropout is not None else hh
         hh = self.conv3(hh)
@@ -1206,6 +1253,7 @@ class LiteResidualBlock(nn.Module):
     Includes (in following order):
         - convolution (default: 3x3, stride 1)
         - activation (default: `'relu6'`)
+        - time embedding (optional; default: `False`)
         - dropout (optional; default: `0.1`)
         - convolution (default: 3x3, stride 1)
         - normalization (default: `'group'`)
@@ -1221,6 +1269,7 @@ class LiteResidualBlock(nn.Module):
             "res_kernel_size": "kernel_size",
             "res_stride": "stride",
             "res_bias": "bias",
+            "res_time_injection": "time_injection",
         }
     )
     def __init__(
@@ -1237,6 +1286,7 @@ class LiteResidualBlock(nn.Module):
         res_kernel_size: int = 3,
         res_stride: int = 1,
         res_bias: bool = True,
+        res_time_injection: TimeInjectionTypes = "add",
         **kwargs,
     ):
         """Initialize the residual block.
@@ -1255,6 +1305,8 @@ class LiteResidualBlock(nn.Module):
             res_kernel_size: Kernel size for the residual block.
             res_stride: Stride of the residual block.
             res_bias: Bias for convolutional layers.
+            res_time_injection: Time embedding injection; added to the features
+                (`'add'`) or modulating the normalization (`'scale_shift'`).
             num_groups: Number of groups; alternative input for `res_groups`.
             act_fn: Activation function; alternative input for `res_act_fn`.
             norm_type: Normalization type; alternative input for `res_norm_type`.
@@ -1263,6 +1315,7 @@ class LiteResidualBlock(nn.Module):
                 alternative input for `res_kernel_size`.
             stride: Stride of the residual block; alternative input for `res_stride`.
             bias: Bias for convolutions; alternative input for `res_bias`.
+            time_injection: Injection mode; alternative input for `res_time_injection`.
             kwargs: Additional or alternative keyword arguments.
         """
         super().__init__()
@@ -1271,6 +1324,8 @@ class LiteResidualBlock(nn.Module):
         conv_cls = DIM_TO_CONV_MAP[dimensions]
 
         self.dimensions = dimensions
+        self.time_embedding = time_embedding
+        self.time_injection = res_time_injection if time_embedding else None
 
         self.act = act_cls()
         self.conv1 = conv_cls(
@@ -1288,7 +1343,18 @@ class LiteResidualBlock(nn.Module):
             padding="same",
             bias=res_bias,
         )
-        self.norm = Norm(dimensions, res_norm_type, out_channels, res_groups)
+        self.norm = (
+            AdaNorm(
+                dimensions,
+                res_norm_type,
+                out_channels,
+                res_groups,
+                time_channels,
+                act_fn=res_act_fn,
+            )
+            if self.time_injection == "scale_shift"
+            else Norm(dimensions, res_norm_type, out_channels, res_groups)
+        )
 
         self.shortcut = (
             conv_cls(
@@ -1302,8 +1368,7 @@ class LiteResidualBlock(nn.Module):
             else nn.Identity()
         )
 
-        self.time_embedding = time_embedding
-        if time_embedding:
+        if self.time_injection == "add":
             self.time_proj = nn.Linear(time_channels, out_channels)
             self.time_act = act_cls()
 
@@ -1312,11 +1377,12 @@ class LiteResidualBlock(nn.Module):
     def forward(self, x: torch.Tensor, t: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass through the residual block."""
         hh = self.act(self.conv1(x))
-        idx = [slice(None), slice(None)] + [None] * self.dimensions
-        if self.time_embedding:
+        if self.time_injection == "add":
+            idx = [slice(None), slice(None)] + [None] * self.dimensions
             hh += self.time_proj(self.time_act(t))[tuple(idx)]
         hh = self.dropout(hh) if self.dropout is not None else hh
-        hh = self.norm(self.conv2(hh))
+        hh = self.conv2(hh)
+        hh = self.norm(hh, t) if self.time_injection == "scale_shift" else self.norm(hh)
         return hh + self.shortcut(x)
 
 

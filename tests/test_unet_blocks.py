@@ -9,9 +9,13 @@ from chuchichaestli.models.unet import UNet
 from chuchichaestli.models.blocks import (
     GaussianNoiseBlock,
     DownBlock,
+    LiteResidualBlock,
     MidBlock,
+    ResidualBlock,
+    ResidualBottleneck,
     UpBlock,
 )
+from chuchichaestli.models.norm import AdaNorm, Norm
 
 
 @pytest.fixture
@@ -82,9 +86,16 @@ def test_down_block_forward_default():
     assert y.shape == (3, 32, 64, 64)
 
 
-def test_down_block_forward_with_time_embedding():
+@pytest.mark.parametrize("time_injection", ["add", "scale_shift"])
+def test_down_block_forward_with_time_embedding(time_injection):
     """Test the DownBlock with time embedding."""
-    block = DownBlock(2, 16, 32, time_embedding=True, res_args={"res_groups": 8})
+    block = DownBlock(
+        2,
+        16,
+        32,
+        time_embedding=True,
+        res_args={"res_groups": 8, "res_time_injection": time_injection},
+    )
     x = torch.randn(3, 16, 64, 64)
     t = torch.randn(3, 32)
     y = block(x, t)
@@ -127,9 +138,16 @@ def test_up_block_forward_default():
     assert y.shape == (3, 16, 64, 64)
 
 
-def test_up_block_forward_with_time_embedding():
+@pytest.mark.parametrize("time_injection", ["add", "scale_shift"])
+def test_up_block_forward_with_time_embedding(time_injection):
     """Test the UpBlock (default)."""
-    block = UpBlock(2, 32, 16, time_embedding=True, res_args={"res_groups": 8})
+    block = UpBlock(
+        2,
+        32,
+        16,
+        time_embedding=True,
+        res_args={"res_groups": 8, "res_time_injection": time_injection},
+    )
     x = torch.randn(3, 32, 64, 64)
     h = torch.randn(3, 32, 64, 64)
     t = torch.randn(3, 32)
@@ -182,3 +200,85 @@ def test_up_block_forward_with_attention(attention):
     h = torch.randn(3, 32, 64, 64)
     y = block(x, h)
     assert y.shape == (3, 16, 64, 64)
+
+
+@pytest.mark.parametrize(
+    "res_block_cls", [ResidualBlock, ResidualBottleneck, LiteResidualBlock]
+)
+@pytest.mark.parametrize("time_injection", ["add", "scale_shift"])
+def test_residual_blocks_accept_both_time_injections(res_block_cls, time_injection):
+    """Test the forward pass of every residual block for both injection modes."""
+    block = res_block_cls(
+        2,
+        16,
+        32,
+        time_embedding=True,
+        time_channels=24,
+        res_groups=8,
+        res_time_injection=time_injection,
+    )
+    x = torch.randn(3, 16, 8, 8)
+    t = torch.randn(3, 24)
+    assert block(x, t).shape == (3, 32, 8, 8)
+
+
+@pytest.mark.parametrize(
+    "res_block_cls, norm_attr",
+    [
+        (ResidualBlock, "norm2"),
+        (ResidualBottleneck, "norm2"),
+        (LiteResidualBlock, "norm"),
+    ],
+)
+def test_scale_shift_replaces_the_additive_projection(res_block_cls, norm_attr):
+    """Test that `'scale_shift'` swaps the time projection for an adaptive norm."""
+    kwargs = dict(time_embedding=True, time_channels=24, res_groups=8)
+    added = res_block_cls(2, 16, 32, res_time_injection="add", **kwargs)
+    modulated = res_block_cls(2, 16, 32, res_time_injection="scale_shift", **kwargs)
+
+    assert isinstance(getattr(added, norm_attr), Norm)
+    assert hasattr(added, "time_proj")
+
+    assert isinstance(getattr(modulated, norm_attr), AdaNorm)
+    assert not hasattr(modulated, "time_proj")
+
+
+def test_time_injection_alias():
+    """Test that the unprefixed spelling reaches the residual block."""
+    block = ResidualBlock(
+        2, 16, 32, time_embedding=True, num_groups=8, time_injection="scale_shift"
+    )
+    assert isinstance(block.norm2, AdaNorm)
+
+
+@pytest.mark.parametrize("time_injection", ["add", "scale_shift"])
+def test_time_injection_is_inert_without_a_time_embedding(time_injection):
+    """Test that a block built without time embedding stays a plain residual block."""
+    block = ResidualBlock(2, 16, 32, res_groups=8, res_time_injection=time_injection)
+    assert block.time_injection is None
+    assert isinstance(block.norm2, Norm)
+    assert not hasattr(block, "time_proj")
+    assert block(torch.randn(3, 16, 8, 8)).shape == (3, 32, 8, 8)
+
+
+def test_scale_shift_makes_the_output_depend_on_the_timestep():
+    """Test that the adaptive norm actually conditions the block on `t`."""
+    torch.manual_seed(0)
+    block = ResidualBlock(
+        2,
+        16,
+        32,
+        time_embedding=True,
+        time_channels=24,
+        res_groups=8,
+        res_dropout=0.0,
+        res_time_injection="scale_shift",
+    ).eval()
+    x = torch.randn(3, 16, 8, 8)
+    t = torch.randn(3, 24)
+
+    # the projection is zero-initialised, so the block ignores `t` to begin with
+    assert torch.allclose(block(x, t), block(x, torch.zeros_like(t)), atol=1e-6)
+
+    torch.nn.init.normal_(block.norm2.proj.weight, std=0.5)
+    assert not torch.allclose(block(x, t), block(x, torch.zeros_like(t)), atol=1e-6)
