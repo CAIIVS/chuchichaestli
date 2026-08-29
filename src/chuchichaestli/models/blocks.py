@@ -1585,7 +1585,7 @@ class UpBlock(nn.Module):
                 self.attn = ATTENTION_MAP[attention](
                     dimensions, in_channels, **attn_args
                 )
-            case "attention_gate":
+            case "attention_gate" if skip_connection_action is not None:
                 # the gate prunes the skip, using the decoder features as signal
                 self.attn = ATTENTION_MAP[attention](
                     dimensions, skip_channels, in_channels, **attn_args
@@ -1602,7 +1602,7 @@ class UpBlock(nn.Module):
         if self.attn is not None:
             if not self.attn_gates_skip:
                 x = self.attn(x)
-            elif h is not None and self.skip_connection_action is not None:
+            elif h is not None:
                 h = self.attn(h, x)
         if self.skip_connection_action == "avg":
             replication_factor = x.shape[1] // h.shape[1]

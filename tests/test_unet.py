@@ -7,6 +7,7 @@ import warnings
 
 import pytest
 import torch
+from chuchichaestli.models.attention.attention_gate import AttentionGate
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS
@@ -1206,21 +1207,49 @@ def test_attn_gate_subsample_factor(subsample_factor: int, stride: int):
     assert model(sample).shape == sample.shape
 
 
-def test_attention_gate_skipped_when_the_skip_is_unused():
-    """Test that no attention gate runs where a level drops its skip connection."""
+def test_attention_gate_not_built_where_the_skip_is_unused():
+    """Test that a level dropping its skip connection carries no attention gate."""
+    args = {
+        "n_channels": 8,
+        "down_block_types": ("DownBlock",) * 2,
+        "up_block_types": ("AttnGateUpBlock",) * 2,
+        "block_out_channel_mults": (1, 2),
+        "res_groups": 4,
+    }
+    gated = UNet(**args)
+    ungated = UNet(**args, skip_connection_action=None)
+
+    def gates(model):
+        return [m for m in model.modules() if isinstance(m, AttentionGate)]
+
+    assert len(gates(gated)) == 2
+    assert not gates(ungated)  # a gate here would only ever be dead weight
+    assert sum(p.numel() for p in ungated.parameters()) < sum(
+        p.numel() for p in gated.parameters()
+    )
+    sample = torch.randn(1, 1, 16, 16)
+    assert ungated(sample).shape == sample.shape
+
+
+def test_attention_gate_only_on_blocks_that_take_a_skip():
+    """Test that only the skip-consuming block of a level carries a gate."""
     model = UNet(
         n_channels=8,
         down_block_types=("DownBlock",) * 2,
         up_block_types=("AttnGateUpBlock",) * 2,
         block_out_channel_mults=(1, 2),
         res_groups=4,
-        skip_connection_action=None,
+        num_blocks_per_level=2,
     )
-    calls = []
-    for block in model.up_blocks:
-        if getattr(block, "attn", None) is not None:
-            block.attn.register_forward_hook(lambda *_: calls.append(1))
-
-    sample = torch.randn(1, 1, 16, 16)
-    assert model(sample).shape == sample.shape
-    assert not calls  # the gated skip would only be discarded
+    carries_gate = [
+        getattr(b, "attn", None) is not None
+        for b in model.up_blocks
+        if hasattr(b, "skip_connection_action")
+    ]
+    consumes_skip = [
+        b.skip_connection_action is not None
+        for b in model.up_blocks
+        if hasattr(b, "skip_connection_action")
+    ]
+    assert carries_gate == consumes_skip
+    assert any(carries_gate) and not all(carries_gate)
