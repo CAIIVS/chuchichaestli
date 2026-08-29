@@ -23,9 +23,7 @@ def require_cls(
     """
     if name not in registry:
         what = f" {context}" if context else ""
-        raise ValueError(
-            f"Unsupported{what}: {name!r}. Use one of {sorted(registry)}."
-        )
+        raise ValueError(f"Unsupported{what}: {name!r}. Use one of {sorted(registry)}.")
     return registry[name]
 
 

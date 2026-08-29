@@ -15,8 +15,8 @@ from chuchichaestli.models.attention import (
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import Norm, NormTypes
 from chuchichaestli.utils import partialclass, alias_kwargs
-from collections.abc import Callable, Sequence
 from math import gcd
+from collections.abc import Callable, Sequence
 from typing import Literal
 
 
