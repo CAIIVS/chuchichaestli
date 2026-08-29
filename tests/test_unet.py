@@ -259,6 +259,21 @@ def test_forward_pass(
         (1, ("DownBlock", "AttnDownBlock"), ("UpBlock", "UpBlock"), 32, (1, 2)),
         (2, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
         (3, ("DownBlock", "AttnDownBlock"), ("AttnUpBlock", "UpBlock"), 32, (1, 2)),
+        # only the first block in a level is handed a skip connection to gate
+        (
+            2,
+            ("DownBlock", "DownBlock"),
+            ("AttnGateUpBlock", "AttnGateUpBlock"),
+            32,
+            (1, 2),
+        ),
+        (
+            3,
+            ("DownBlock", "DownBlock"),
+            ("AttnGateUpBlock", "AttnGateUpBlock"),
+            32,
+            (1, 2),
+        ),
     ],
 )
 def test_forward_with_2_layers_per_block(
@@ -1138,3 +1153,36 @@ def test_attention_gate_inter_channels_can_vary_per_level():
     """Test that the gate width is a per-level argument like the other attn_ ones."""
     gates = attention_gates(UNet(**GATE_CONF, attn_gate_inter_channels=(8, 16, 32)))
     assert [inter for _, inter in gates] == [8, 16, 32]
+
+
+def test_attention_gate_gates_the_skip_connection():
+    """Test that an attention gate prunes the skip connection, not the decoder."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 2,
+        up_block_types=("AttnGateUpBlock",) * 2,
+        block_out_channel_mults=(1, 2),
+        res_groups=4,
+    )
+    up_block = next(b for b in model.up_blocks if getattr(b, "attn", None) is not None)
+    gate = up_block.attn
+    channels = gate.W_out.in_channels
+    with torch.no_grad():
+        gate.psi.weight.zero_()
+        gate.psi.bias.fill_(-50.0)  # alpha -> 0, so the gate prunes all of it
+        # the identity output transform lets the pruned skip stay at zero
+        gate.W_out.weight.copy_(torch.eye(channels).reshape(channels, channels, 1, 1))
+        gate.W_out.bias.zero_()
+    model.eval()
+
+    captured = {}
+    up_block.res_block.register_forward_pre_hook(
+        lambda module, args: captured.update(xh=args[0])
+    )
+    model(torch.randn(1, 1, 16, 16))
+
+    # concatenation puts the decoder features first and the gated skip behind them
+    xh = captured["xh"]
+    decoder, skip = xh[:, : xh.shape[1] // 2], xh[:, xh.shape[1] // 2 :]
+    assert not torch.allclose(decoder, torch.zeros_like(decoder))
+    assert torch.allclose(skip, torch.zeros_like(skip), atol=1e-4)

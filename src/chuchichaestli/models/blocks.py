@@ -1586,17 +1586,24 @@ class UpBlock(nn.Module):
                     dimensions, in_channels, **attn_args
                 )
             case "attention_gate":
+                # the gate prunes the skip, using the decoder features as signal
                 self.attn = ATTENTION_MAP[attention](
-                    dimensions, in_channels, skip_channels, **attn_args
+                    dimensions, skip_channels, in_channels, **attn_args
                 )
             case _:
                 self.attn = None
+        # a gate acts on the skip connection, the other kinds act on the input
+        self.attn_gates_skip = attention == "attention_gate"
 
     def forward(
         self, x: torch.Tensor, h: torch.Tensor, t: torch.Tensor | None = None
     ) -> torch.Tensor:
         """Forward pass through the up block."""
-        x = self.attn(x, h) if self.attn else x
+        if self.attn is not None:
+            if not self.attn_gates_skip:
+                x = self.attn(x)
+            elif h is not None:
+                h = self.attn(h, x)
         if self.skip_connection_action == "avg":
             replication_factor = x.shape[1] // h.shape[1]
             h = h.repeat(
@@ -1807,7 +1814,8 @@ AttnGateUpBlock = partialclass(
     Gated attention block for the decoder of a U-Net (meant to decrease/keep channel dimension).
 
     Includes (in following order):
-        - Attention layer (default: `'attention_gate'`, merges skip connection from the encoder)
+        - Attention layer (default: `'attention_gate'`, prunes the skip
+          connection from the encoder, gated by the decoder features)
         - Residual block:
             - normalization (default: `'group'`)
             - activation (default: `'silu'`)
