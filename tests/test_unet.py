@@ -303,6 +303,25 @@ def test_skip_sources_are_level_terminal():
 @pytest.mark.parametrize(
     "up_block_type", ["UpBlock", "AttnUpBlock", "AttnGateUpBlock", "ConvAttnUpBlock"]
 )
+def test_forward_multiblock_levels_without_skips_to_all(up_block_type):
+    """Test that later blocks in a level still run when they merge no skip."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 3,
+        up_block_types=(up_block_type,) * 3,
+        block_out_channel_mults=(1, 2, 2),
+        num_blocks_per_level=2,
+        res_groups=8,
+        attn_groups=8,
+        groups=8,
+    )
+    input_dims = (2, 1, 32, 32)
+    assert model(torch.randn(*input_dims)).shape == input_dims
+
+
+@pytest.mark.parametrize(
+    "up_block_type", ["UpBlock", "AttnUpBlock", "AttnGateUpBlock", "ConvAttnUpBlock"]
+)
 @pytest.mark.parametrize("block_out_channel_mults", [(1, 1, 1), (1, 2, 2)])
 def test_forward_skip_to_all_blocks(up_block_type, block_out_channel_mults):
     """Test the forward pass with a skip connection to every block in a level."""

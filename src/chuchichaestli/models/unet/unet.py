@@ -503,11 +503,8 @@ class UNet(nn.Module):
         ):
             if is_sampler:
                 x = up_block(x, t_emb)
-            elif is_level_start:
+                continue
+            if is_level_start:
                 hs = hh.pop()
-                x = up_block(x, hs, t_emb)
-            else:
-                x = up_block(
-                    x, hs if self.skip_connection_to_all_blocks else None, t_emb
-                )
+            x = up_block(x, hs, t_emb)
         return self.out_block(x)
