@@ -194,9 +194,7 @@ class Decoder(nn.Module):
         Raises:
             ValueError: If a sampling block does not scale by a constant factor.
         """
-        factors = [
-            getattr(b, "factor", None) for b in self.up_blocks if hasattr(b, "factor")
-        ]
+        factors = [b.factor for b in self.up_blocks if hasattr(b, "factor")]
         if any(factor is None for factor in factors):
             raise ValueError(
                 "A sampling block pools to a fixed size rather than by a factor,"

@@ -44,7 +44,7 @@ class Encoder(nn.Module):
         ),
         out_block_type: EncoderOutBlockTypes = "EncoderOutBlock",
         downsample_type: DownsampleTypes | Sequence[DownsampleTypes] = "Downsample",
-        act_fn: ActivationTypes = "silu", 
+        act_fn: ActivationTypes = "silu",
         norm_type: NormTypes = "group",
         num_groups: int = 8,
         kernel_size: int = 3,
@@ -202,9 +202,7 @@ class Encoder(nn.Module):
         Raises:
             ValueError: If a sampling block does not scale by a constant factor.
         """
-        factors = [
-            getattr(b, "factor", None) for b in self.down_blocks if hasattr(b, "factor")
-        ]
+        factors = [b.factor for b in self.down_blocks if hasattr(b, "factor")]
         if any(factor is None for factor in factors):
             raise ValueError(
                 "A sampling block pools to a fixed size rather than by a factor,"

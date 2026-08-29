@@ -226,7 +226,6 @@ class Autoencoder(nn.Module):
             "norm_type": attn_norm_type,
             "kernel_size": attn_kernel_size,
             "groups": attn_groups,
-            "num_groups": attn_groups,
             "scales": attn_scales,
             "context_args": context_args,
             "local_args": local_args,
