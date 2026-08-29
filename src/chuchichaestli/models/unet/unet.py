@@ -97,7 +97,8 @@ class UNet(nn.Module):
         attn_groups: int | Sequence[int] = 32,
         attn_kernel_size: int | Sequence[int] = 1,
         attn_gate_inter_channels: int | Sequence[int] | None = None,
-        skip_connection_action: SkipConnectionTypes | None
+        skip_connection_action: SkipConnectionTypes
+        | None
         | Sequence[SkipConnectionTypes | None] = "concat",
         skip_connection_to_all_blocks: bool | None = None,
         add_noise: Literal["up", "down"] | None = None,

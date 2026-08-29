@@ -605,7 +605,9 @@ class GenericAdapter:
         b = _Builder(model, info_by_id)
         roles = [NodeRole.MODEL, NodeRole.COMPONENT, NodeRole.LEVEL, NodeRole.BLOCK]
 
-        def rec(module: nn.Module, parent: IRNode | None, name: str, depth: int) -> IRNode:
+        def rec(
+            module: nn.Module, parent: IRNode | None, name: str, depth: int
+        ) -> IRNode:
             if parent is None:
                 node = b._root()
             else:
