@@ -203,13 +203,13 @@ class UNet(nn.Module):
         upsample_types = broadcast(
             upsample_type, n_samplers, "upsample_type", None, smplr_err_ctx
         )
-        smplr_err_ctx = "sampling type for a U-Net"
         downsample_clss = [
-            require_cls(n, DOWNSAMPLE_FUNCTIONS, smplr_err_ctx)
+            require_cls(n, DOWNSAMPLE_FUNCTIONS, "sampling type for a U-Net")
             for n in downsample_types
         ]
         upsample_clss = [
-            require_cls(n, UPSAMPLE_FUNCTIONS, smplr_err_ctx) for n in upsample_types
+            require_cls(n, UPSAMPLE_FUNCTIONS, "sampling type for a U-Net")
+            for n in upsample_types
         ]
         down_changes_channels = [cls.changes_channels for cls in downsample_clss]
         up_changes_channels = [cls.changes_channels for cls in upsample_clss]
@@ -285,7 +285,6 @@ class UNet(nn.Module):
             in_channels, n_channels, kernel_size=in_kernel_size, padding="same"
         )
 
-        self.time_channels = time_channels
         self.time_emb = (
             TIME_EMBEDDING_MAP[time_embedding](
                 num_channels=time_channels,
