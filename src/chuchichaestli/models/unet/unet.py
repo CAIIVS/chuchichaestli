@@ -98,6 +98,9 @@ class UNet(nn.Module):
         attn_kernel_size: int | Sequence[int] = 1,
         attn_gate_inter_channels: int | Sequence[int] | None = None,
         attn_gate_subsample_factor: int | Sequence[int] = 1,
+        attn_gate_out_norm_type: NormTypes
+        | None
+        | Sequence[NormTypes | None] = "batch",
         skip_connection_action: SkipConnectionTypes
         | None
         | Sequence[SkipConnectionTypes | None] = "concat",
@@ -164,6 +167,8 @@ class UNet(nn.Module):
             attn_gate_subsample_factor: Stride at which an attention gate samples the
                 skip connection, per attention block (see
                 `chuchichaestli.models.attention.AttentionGate`).
+            attn_gate_out_norm_type: Normalization after an attention gate's output
+                transform. Defaults to `"batch"`, as in the reference.
             skip_connection_action: Action to take for the skip connection, per up
                 level. If `None`, no skip connection is used at that level.
             skip_connection_to_all_blocks: If `True`, the U-Net builds skip connections
@@ -266,6 +271,7 @@ class UNet(nn.Module):
                 "kernel_size": attn_kernel_size,
                 "num_channels_inter": attn_gate_inter_channels,
                 "subsample_factor": attn_gate_subsample_factor,
+                "out_norm_type": attn_gate_out_norm_type,
             },
             n_pos,
             mask=has_attention,

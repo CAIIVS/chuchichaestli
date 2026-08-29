@@ -1256,16 +1256,24 @@ def test_attention_gate_only_on_blocks_that_take_a_skip():
 
 
 def test_gated_unet_trains_at_batch_one_down_to_a_single_pixel():
-    """Test that a deep gated U-Net trains on one sample at its coarsest level."""
-    model = UNet(
-        n_channels=8,
-        down_block_types=("DownBlock",) * 5,
-        up_block_types=("AttnGateUpBlock",) * 5,
-        block_out_channel_mults=(1,) * 5,
-        res_groups=4,
-    )
+    """Test that a single-pixel gated level trains once its output norm allows it."""
+    args = {
+        "n_channels": 8,
+        "down_block_types": ("DownBlock",) * 5,
+        "up_block_types": ("AttnGateUpBlock",) * 5,
+        "block_out_channel_mults": (1,) * 5,
+        "res_groups": 4,
+    }
+    sample = torch.randn(1, 1, 16, 16)  # 16 -> a single pixel at the bottleneck
+
+    # the reference default cannot normalize one sample over one pixel
+    default = UNet(**args)
+    default.train()
+    with pytest.raises(ValueError, match="more than 1 value per channel"):
+        default(sample)
+
+    model = UNet(**args, attn_gate_out_norm_type=None)
     model.train()
-    sample = torch.randn(1, 1, 16, 16)  # 16 -> 1 pixel at the bottleneck
     out = model(sample)
     assert out.shape == sample.shape
     out.sum().backward()

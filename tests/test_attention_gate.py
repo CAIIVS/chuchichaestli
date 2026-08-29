@@ -7,6 +7,7 @@ import torch
 import pytest
 
 from chuchichaestli.models.attention.attention_gate import AttentionGate
+from chuchichaestli.models.norm import Norm
 
 
 @pytest.mark.parametrize(
@@ -55,7 +56,7 @@ def test_attention_gate_prunes_x_not_g(dimension: int, alpha: float, expected: f
             torch.eye(channels).reshape((channels, channels) + (1,) * dimension)
         )
         gate.W_out.bias.zero_()
-    gate.eval()
+    gate.eval()  # the output norm falls back on its (identity) initial statistics
 
     shape = (1, channels) + (8,) * dimension
     out = gate(torch.full(shape, 3.0), torch.full(shape, 7.0))
@@ -113,15 +114,24 @@ def test_attention_gate_subsample_factor(monkeypatch, size: int):
     assert gate.W_x(x).shape[2:] == (size // 2,) * 2
 
 
-def test_attention_gate_has_no_output_norm_by_default():
-    """Test that nothing normalizes the output unless a norm is asked for."""
+def test_attention_gate_normalizes_its_output_by_default():
+    """Test that batch normalization follows the output transform, as in the reference."""
     gate = AttentionGate(dimension=2, num_channels_x=8, num_channels_g=8)
+    assert isinstance(gate.norm_out, Norm)
+    assert gate.norm_out.ntype == "batch"
+
+
+def test_attention_gate_without_an_output_norm():
+    """Test that the output normalization can be dropped."""
+    gate = AttentionGate(
+        dimension=2, num_channels_x=8, num_channels_g=8, out_norm_type=None
+    )
     assert gate.norm_out is None
     assert not [key for key in gate.state_dict() if key.startswith("norm_out")]
 
 
-@pytest.mark.parametrize("out_norm_type", ["batch", "instance", "group"])
-def test_attention_gate_output_norm(out_norm_type: str):
+@pytest.mark.parametrize("out_norm_type", ["batch", "instance", "group", None])
+def test_attention_gate_output_norm(out_norm_type: str | None):
     """Test that a requested output normalization is built and applied."""
     gate = AttentionGate(
         dimension=2,
@@ -130,13 +140,42 @@ def test_attention_gate_output_norm(out_norm_type: str):
         out_norm_type=out_norm_type,
         out_norm_groups=2,
     )
-    assert gate.norm_out is not None
     x = torch.randn(2, 8, 8, 8)
     assert gate(x, torch.randn(2, 8, 8, 8)).shape == x.shape
 
 
-def test_attention_gate_trains_over_a_unit_spatial_extent():
-    """Test that a batch of one on a single-pixel grid trains."""
-    gate = AttentionGate(dimension=2, num_channels_x=8, num_channels_g=8)
+@pytest.mark.parametrize(
+    "out_norm_type, message",
+    [("batch", "more than 1 value per channel"), ("instance", "more than 1 spatial")],
+)
+def test_attention_gate_output_norm_needs_something_to_reduce_over(
+    out_norm_type: str, message: str
+):
+    """Test the documented limit of the reference's batch normalization."""
+    gate = AttentionGate(
+        dimension=2,
+        num_channels_x=8,
+        num_channels_g=8,
+        out_norm_type=out_norm_type,
+    )
+    gate.train()
+    with pytest.raises(ValueError, match=message):
+        gate(torch.randn(1, 8, 1, 1), torch.randn(1, 8, 1, 1))
+
+
+@pytest.mark.parametrize("out_norm_type", [None, "group", "layer", "rms"])
+def test_attention_gate_trains_over_a_unit_spatial_extent(out_norm_type: str | None):
+    """Test which output norms train on one sample over a single pixel.
+
+    Batch and instance normalization both need more than one element to reduce
+    over, so neither is usable at that size; the rest are.
+    """
+    gate = AttentionGate(
+        dimension=2,
+        num_channels_x=8,
+        num_channels_g=8,
+        out_norm_type=out_norm_type,
+        out_norm_groups=2,
+    )
     gate.train()
     gate(torch.randn(1, 8, 1, 1), torch.randn(1, 8, 1, 1)).sum().backward()

@@ -33,7 +33,7 @@ class AttentionGate(nn.Module):
         num_channels_g: int = 1,
         num_channels_inter: int | None = None,
         subsample_factor: int | tuple[int, ...] = 1,
-        out_norm_type: NormTypes | None = None,
+        out_norm_type: NormTypes | None = "batch",
         out_norm_groups: int = 1,
         **kwargs,
     ):
@@ -48,10 +48,8 @@ class AttentionGate(nn.Module):
             subsample_factor: Stride at which the input features are sampled; the
                 grid the attention coefficients are computed on is coarser than the
                 one of `x` by this factor.
-            out_norm_type: Normalization applied after the output transform; none
-                by default. `"batch"` reproduces the reference implementation, but
-                raises for a batch of one over a unit spatial extent, which a deep
-                enough model reaches at its coarsest level.
+            out_norm_type: Normalization applied after the output transform.
+                Defaults to `"batch"`, as in the reference implementation.
             out_norm_groups: Number of groups, if `out_norm_type` is `"group"`.
             kwargs: Ignored, for compatibility with the other attention modules.
         """
