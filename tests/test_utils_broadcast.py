@@ -25,6 +25,12 @@ def test_full_length_sequences_pass_through(seq):
     assert broadcast(seq, 3) == (0.1, 0.2, 0.3)
 
 
+def test_zero_positions_reject_sequences():
+    """Test that a sequence is rejected where there are no positions to fill."""
+    with pytest.raises(ValueError, match="no values at all"):
+        broadcast(("Downsample",), 0, "downsample_type")
+
+
 def test_masked_sequence_scatters_onto_marked_positions():
     """Test that a sequence as long as the mask lands on the marked positions."""
     mask = [False, False, True, True, True, False, False]

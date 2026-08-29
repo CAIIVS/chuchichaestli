@@ -173,7 +173,11 @@ class UNet(nn.Module):
         super().__init__()
 
         self._validate_inputs(
-            dimensions, down_block_types, up_block_types, block_out_channel_mults
+            dimensions,
+            down_block_types,
+            up_block_types,
+            block_out_channel_mults,
+            num_blocks_per_level,
         )
 
         # Cache commonly used values
@@ -413,7 +417,12 @@ class UNet(nn.Module):
         )
 
     def _validate_inputs(
-        self, dimensions, down_block_types, up_block_types, block_out_channel_mults
+        self,
+        dimensions,
+        down_block_types,
+        up_block_types,
+        block_out_channel_mults,
+        num_blocks_per_level,
     ):
         """Validate constructor inputs."""
         if dimensions not in DIM_TO_CONV_MAP:
@@ -427,6 +436,12 @@ class UNet(nn.Module):
         if len(down_block_types) != len(block_out_channel_mults):
             raise ValueError(
                 "The number of down block types and output channel multipliers must be equal."
+            )
+
+        if num_blocks_per_level < 1:
+            raise ValueError(
+                f"Each level needs at least one block;"
+                f" got num_blocks_per_level={num_blocks_per_level}."
             )
 
     def forward(

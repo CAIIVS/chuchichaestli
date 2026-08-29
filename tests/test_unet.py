@@ -16,6 +16,23 @@ def test_throws_error_on_invalid_dimension():
         UNet(dimensions=4)
 
 
+def test_throws_error_on_empty_levels():
+    """Test that the UNet model throws an error when a level would hold no blocks."""
+    with pytest.raises(ValueError, match="at least one block"):
+        UNet(num_blocks_per_level=0)
+
+
+def test_throws_error_on_sampler_sequence_without_level_transitions():
+    """Test that a per-level sampler sequence is rejected when there is no transition."""
+    with pytest.raises(ValueError, match="no values at all"):
+        UNet(
+            down_block_types=("DownBlock",),
+            up_block_types=("UpBlock",),
+            block_out_channel_mults=(1,),
+            downsample_type=("Downsample",),
+        )
+
+
 def test_throws_error_on_mismatched_lengths():
     """Test that the UNet model throws an error when the down and up block types have different lengths."""
     with pytest.raises(ValueError):

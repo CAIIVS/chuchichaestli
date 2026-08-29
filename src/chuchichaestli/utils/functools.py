@@ -194,6 +194,11 @@ def broadcast(
                 out[p] = next(it)
         return tuple(out)
     where = f" for {context}" if context else ""
+    if n == 0:
+        raise ValueError(
+            f"{name}: takes a single value or no values at all{where};"
+            f" got {len(value)}."
+        )
     alt = f", or {n_masked} for the blocks it applies to" if n_masked else ""
     raise ValueError(
         f"{name}: expected a single value or {n} values{where}{alt}; got {len(value)}."
