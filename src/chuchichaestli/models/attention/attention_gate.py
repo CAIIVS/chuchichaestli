@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP, UPSAMPLE_MODE
-from chuchichaestli.models.norm import Norm
+from chuchichaestli.models.norm import Norm, NormTypes
 
 
 class AttentionGate(nn.Module):
@@ -33,6 +33,8 @@ class AttentionGate(nn.Module):
         num_channels_g: int = 1,
         num_channels_inter: int | None = None,
         subsample_factor: int | tuple[int, ...] = 1,
+        out_norm_type: NormTypes | None = None,
+        out_norm_groups: int = 1,
         **kwargs,
     ):
         """Initialize the AttentionGate.
@@ -46,6 +48,11 @@ class AttentionGate(nn.Module):
             subsample_factor: Stride at which the input features are sampled; the
                 grid the attention coefficients are computed on is coarser than the
                 one of `x` by this factor.
+            out_norm_type: Normalization applied after the output transform; none
+                by default. `"batch"` reproduces the reference implementation, but
+                raises for a batch of one over a unit spatial extent, which a deep
+                enough model reaches at its coarsest level.
+            out_norm_groups: Number of groups, if `out_norm_type` is `"group"`.
             kwargs: Ignored, for compatibility with the other attention modules.
         """
         super().__init__()
@@ -85,7 +92,11 @@ class AttentionGate(nn.Module):
             padding=0,
             bias=True,
         )
-        self.norm_out = Norm(dimension, "batch", num_channels_x, 1)
+        self.norm_out = (
+            Norm(dimension, out_norm_type, num_channels_x, out_norm_groups)
+            if out_norm_type is not None
+            else None
+        )
 
         self.sigma1 = nn.ReLU()
         self.sigma2 = nn.Sigmoid()
@@ -113,5 +124,6 @@ class AttentionGate(nn.Module):
         if alpha.shape[2:] != input_size[2:]:
             alpha = F.interpolate(alpha, size=input_size[2:], mode=self.upsample_mode)
         x_hat = alpha.expand_as(x) * x
-        x_hat = self.norm_out(self.W_out(x_hat))
+        x_hat = self.W_out(x_hat)
+        x_hat = self.norm_out(x_hat) if self.norm_out is not None else x_hat
         return x_hat

@@ -55,7 +55,7 @@ def test_attention_gate_prunes_x_not_g(dimension: int, alpha: float, expected: f
             torch.eye(channels).reshape((channels, channels) + (1,) * dimension)
         )
         gate.W_out.bias.zero_()
-    gate.eval()  # the output norm falls back on its (identity) initial statistics
+    gate.eval()
 
     shape = (1, channels) + (8,) * dimension
     out = gate(torch.full(shape, 3.0), torch.full(shape, 7.0))
@@ -111,3 +111,32 @@ def test_attention_gate_subsample_factor(monkeypatch, size: int):
     # the gating signal drops onto the coarser grid, alpha is lifted back off it
     assert calls[0] == 2
     assert gate.W_x(x).shape[2:] == (size // 2,) * 2
+
+
+def test_attention_gate_has_no_output_norm_by_default():
+    """Test that nothing normalizes the output unless a norm is asked for."""
+    gate = AttentionGate(dimension=2, num_channels_x=8, num_channels_g=8)
+    assert gate.norm_out is None
+    assert not [key for key in gate.state_dict() if key.startswith("norm_out")]
+
+
+@pytest.mark.parametrize("out_norm_type", ["batch", "instance", "group"])
+def test_attention_gate_output_norm(out_norm_type: str):
+    """Test that a requested output normalization is built and applied."""
+    gate = AttentionGate(
+        dimension=2,
+        num_channels_x=8,
+        num_channels_g=8,
+        out_norm_type=out_norm_type,
+        out_norm_groups=2,
+    )
+    assert gate.norm_out is not None
+    x = torch.randn(2, 8, 8, 8)
+    assert gate(x, torch.randn(2, 8, 8, 8)).shape == x.shape
+
+
+def test_attention_gate_trains_over_a_unit_spatial_extent():
+    """Test that a batch of one on a single-pixel grid trains."""
+    gate = AttentionGate(dimension=2, num_channels_x=8, num_channels_g=8)
+    gate.train()
+    gate(torch.randn(1, 8, 1, 1), torch.randn(1, 8, 1, 1)).sum().backward()

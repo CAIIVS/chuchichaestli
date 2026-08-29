@@ -1253,3 +1253,19 @@ def test_attention_gate_only_on_blocks_that_take_a_skip():
     ]
     assert carries_gate == consumes_skip
     assert any(carries_gate) and not all(carries_gate)
+
+
+def test_gated_unet_trains_at_batch_one_down_to_a_single_pixel():
+    """Test that a deep gated U-Net trains on one sample at its coarsest level."""
+    model = UNet(
+        n_channels=8,
+        down_block_types=("DownBlock",) * 5,
+        up_block_types=("AttnGateUpBlock",) * 5,
+        block_out_channel_mults=(1,) * 5,
+        res_groups=4,
+    )
+    model.train()
+    sample = torch.randn(1, 1, 16, 16)  # 16 -> 1 pixel at the bottleneck
+    out = model(sample)
+    assert out.shape == sample.shape
+    out.sum().backward()
