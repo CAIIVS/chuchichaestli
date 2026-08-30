@@ -6,7 +6,9 @@
 import pytest
 import torch
 from torch import nn
-from chuchichaestli.models.attention.multiscale_attention import LiteMultiscaleAttention
+from chuchichaestli.models.attention.multiscale_attention import (
+    MultiscaleLinearAttention,
+)
 
 
 @pytest.mark.parametrize(
@@ -23,9 +25,9 @@ from chuchichaestli.models.attention.multiscale_attention import LiteMultiscaleA
         (3, 32, 16),
     ],
 )
-def test_lma_init(dimensions, in_channels, out_channels):
-    """Test LiteMultiscaleAttention block init."""
-    block = LiteMultiscaleAttention(
+def test_mla_init(dimensions, in_channels, out_channels):
+    """Test MultiscaleLinearAttention block init."""
+    block = MultiscaleLinearAttention(
         dimensions,
         in_channels,
         out_channels,
@@ -50,9 +52,9 @@ def test_lma_init(dimensions, in_channels, out_channels):
         (3, 32, 16),
     ],
 )
-def test_lma_forward(dimensions, in_channels, out_channels):
-    """Test LiteMultiscaleAttention block forward pass."""
-    block = LiteMultiscaleAttention(
+def test_mla_forward(dimensions, in_channels, out_channels):
+    """Test MultiscaleLinearAttention block forward pass."""
+    block = MultiscaleLinearAttention(
         dimensions,
         in_channels,
         out_channels,
@@ -82,9 +84,9 @@ def test_lma_forward(dimensions, in_channels, out_channels):
         (3, 32, 16),
     ],
 )
-def test_lma_backward(dimensions, in_channels, out_channels):
-    """Test LiteMultiscaleAttention block backward pass."""
-    block = LiteMultiscaleAttention(
+def test_mla_backward(dimensions, in_channels, out_channels):
+    """Test MultiscaleLinearAttention block backward pass."""
+    block = MultiscaleLinearAttention(
         dimensions,
         in_channels,
         out_channels,
@@ -100,11 +102,11 @@ def test_lma_backward(dimensions, in_channels, out_channels):
     loss.backward()
 
 
-def test_lma_inspect():
-    """Test LiteMultiscaleAttention block inspection."""
+def test_mla_inspect():
+    """Test MultiscaleLinearAttention block inspection."""
     dimensions = 2
     in_channels, out_channels = 64, 128
-    block = LiteMultiscaleAttention(
+    block = MultiscaleLinearAttention(
         dimensions,
         in_channels,
         out_channels,

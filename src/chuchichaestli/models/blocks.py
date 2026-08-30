@@ -10,7 +10,7 @@ from chuchichaestli.models.attention import (
     ATTENTION_MAP,
     AttentionTypes,
     AttentionDownTypes,
-    LiteMultiscaleAttention,
+    MultiscaleLinearAttention,
 )
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import AdaNorm, Norm, NormTypes
@@ -93,7 +93,7 @@ __all__ = [
     "NormActAttnConvDownBlock",
     "NormActAttnConvDownsampleBlock",
     # transformer blocks
-    "LMAResBlock",
+    "MLAResBlock",
     "EfficientViTBlock",
     # other blocks
     "GaussianNoiseBlock",
@@ -149,7 +149,7 @@ ConvBlockTypes = Literal[
     "NormActAttnConvDownBlock",
     "NormActAttnConvDownsampleBlock",
 ]
-AttnBlockTypes = Literal["LMAResBlock"]
+AttnBlockTypes = Literal["MLAResBlock"]
 TransfomerBlockTypes = Literal["EfficientViTBlock"]
 UNetDownBlockTypes = Literal["DownBlock", "AttnDownBlock", "ConvAttnDownBlock"]
 UNetMidBlockTypes = Literal["MidBlock", "AttnMidBlock", "ConvAttnMidBlock"]
@@ -775,7 +775,7 @@ class GLUMBResBlock(GLUMBConvBlock):
         return super().forward(x) + self.shortcut(x)
 
 
-class LMAResBlock(LiteMultiscaleAttention):
+class MLAResBlock(MultiscaleLinearAttention):
     """Lightweight multi-scale attention block with a residual skip connection."""
 
     def __init__(
@@ -866,7 +866,7 @@ class EfficientViTBlock(nn.Module):
         dimensions: int,
         in_channels: int,
         out_channels: int,
-        context_block_type: AttnBlockTypes = "LMAResBlock",
+        context_block_type: AttnBlockTypes = "MLAResBlock",
         local_block_type: ConvBlockTypes = "GLUMBResBlock",
         context_args: dict = {},
         local_args: dict = {},
@@ -2750,13 +2750,13 @@ RESIDUAL_BLOCK_MAP = {
     "LiteResidualBlock": LiteResidualBlock,
     "MBResBlock": MBResBlock,
     "GLUMBResBlock": GLUMBResBlock,
-    "LMAResBlock": LMAResBlock,
+    "MLAResBlock": MLAResBlock,
 }
 
 
 # context extractors (swap-out attention components in transformer blocks)
 CONTEXT_BLOCK_MAP: dict[str, Callable] = {
-    "LMAResBlock": LMAResBlock,
+    "MLAResBlock": MLAResBlock,
 }
 
 # transformer blocks

@@ -13,7 +13,7 @@ from chuchichaestli.models.norm import Norm, NormTypes
 from collections.abc import Sequence
 
 
-__all__ = ["LiteMultiscaleAttention"]
+__all__ = ["MultiscaleLinearAttention"]
 
 
 def _conv_layer(
@@ -63,7 +63,7 @@ def _conv_layer(
     return block
 
 
-class LiteMultiscaleAttention(nn.Module):
+class MultiscaleLinearAttention(nn.Module):
     """Lightweight multi-scale attention block implementation.
 
     Uses convolutions to compute query, key and value matrices.

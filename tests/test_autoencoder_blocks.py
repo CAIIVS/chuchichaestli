@@ -12,7 +12,7 @@ from chuchichaestli.models.blocks import (
     AutoencoderUpBlock,
     GLUMBConvBlock,
     GLUMBResBlock,
-    LMAResBlock,
+    MLAResBlock,
     EfficientViTBlock,
 )
 from chuchichaestli.models.autoencoder.decoder import Decoder
@@ -196,9 +196,9 @@ def test_glumbres_block(dimensions, in_channels, out_channels, expansion):
         (3, 64, 64, 8),
     ],
 )
-def test_lmares_block(dimensions, in_channels, out_channels, heads):
-    """Test LMAResBlock."""
-    block = LMAResBlock(
+def test_mlares_block(dimensions, in_channels, out_channels, heads):
+    """Test MLAResBlock."""
+    block = MLAResBlock(
         dimensions,
         in_channels,
         out_channels,
