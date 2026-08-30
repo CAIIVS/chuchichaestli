@@ -57,9 +57,7 @@ class VAEDecoder(Decoder):
 
     Consumes a latent code that sampling has already collapsed to a single set
     of channels, so structurally it is a plain `Decoder`; see there for the
-    architecture arguments. It exists as the component a likelihood decoder would
-    occupy, emitting a mean and a variance per output channel the way
-    `VAEEncoder` doubles its latent channels on the way in.
+    architecture arguments.
     """
 
 

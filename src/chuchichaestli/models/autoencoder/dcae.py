@@ -187,8 +187,8 @@ class DCAE(Autoencoder):
     Each downsampling block separates the encoder into spatially hierarchical levels.
     The encoder ends in bottleneck blocks (optionally including attention blocks
     and a convolutional layer) and projects the input into latent space.
-    The decoder is built with residual convolutional and upsampling blocks, and
-    expands from the latent space to the image domain.
+    The decoder is built with residual convolutional, efficient ViT blocks,
+    and upsampling blocks, and expands from the latent space to the image domain.
 
     The compression happens in the blocks themselves, so no latent projection
     is used by default.

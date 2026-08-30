@@ -116,9 +116,6 @@ class VQVAE(Autoencoder):
     and a convolutional layer). The latent code is quantized with the codebook.
     The decoder is built with residual convolutional and upsampling blocks, and
     expands from the (quantized) latent space to the image domain.
-
-    The latent projections map between the latent space and the codebook
-    embedding, so they are built here rather than configured.
     """
 
     def __init__(
