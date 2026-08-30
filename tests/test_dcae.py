@@ -392,9 +392,13 @@ def _assert_dc_structure(model):
         model: Model to inspect.
     """
     from chuchichaestli.models.downsampling import DownsampleUnshuffle
+    from chuchichaestli.models.norm import RMSNorm
     from chuchichaestli.models.upsampling import UpsampleShuffle
 
-    assert len(model.state_dict()) == 302
+    assert len(model.state_dict()) == 354
+    # the reference learns a shift alongside the scale in every RMSNorm
+    rms = [m for m in model.modules() if isinstance(m, RMSNorm)]
+    assert rms and all(m.bias is not None and m.eps == 1e-5 for m in rms)
     assert model.levels == (6, 6)
     assert model.f_comp == 32 and model.f_exp == 32
     assert model.latent_proj is None and model.latent_deproj is None
