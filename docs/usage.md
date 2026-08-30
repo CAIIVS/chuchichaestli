@@ -158,6 +158,51 @@ in the lowest layer (the latent)
 --8<-- "examples/vae_visualization.py:vae"
 ```
 
+Autoencoders take their two components as arguments, so an encoder and a decoder
+can be configured, reused, or swapped independently. When you would rather
+describe the architecture in one call, `build` assembles both components for you:
+arguments shared by them stay flat, while anything specific to one component goes
+into `encoder_args` or `decoder_args`, whose keys are the parameter names of
+[Encoder][chuchichaestli.models.autoencoder.Encoder] and
+[Decoder][chuchichaestli.models.autoencoder.Decoder]. Keys you leave out fall
+back to the defaults of the component itself, which is where each variant keeps its
+architecture: `VAE` builds a `VAEEncoder` that doubles the latent channels, and
+`DCAE` a `DCEncoder`/`DCDecoder` pair of deep-compression blocks.
+
+```python
+from chuchichaestli.models.autoencoder import DCAE, DCDecoder, DCEncoder
+
+model = DCAE.build(dimensions=3, latent_dim=32)
+# equivalently, with the components built by hand
+encoder = DCEncoder(dimensions=3, out_channels=32)
+decoder = DCDecoder(
+    dimensions=3, in_channels=32, n_channels=encoder.bottleneck_channels
+)
+model = DCAE(encoder, decoder)
+```
+
+Both forms map directly onto a configuration framework such as hydra, either as
+nested groups you can override one at a time, or as a single flat group
+
+```yaml
+model:
+  _target_: chuchichaestli.models.autoencoder.DCAE
+  encoder:
+    _target_: chuchichaestli.models.autoencoder.DCEncoder
+    dimensions: 3
+    out_channels: 32
+  decoder:
+    _target_: chuchichaestli.models.autoencoder.DCDecoder
+    dimensions: 3
+    in_channels: 32
+    n_channels: 1024
+# or
+model:
+  _target_: chuchichaestli.models.autoencoder.DCAE.build
+  dimensions: 3
+  latent_dim: 32
+```
+
 
 ### Visualization
 
