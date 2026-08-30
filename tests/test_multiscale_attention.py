@@ -128,10 +128,6 @@ def test_mla_inspect():
     print()
 
 
-if __name__ == "__main__":
-    pytest.main(["-sv", "test_multiscale_attention.py"])
-
-
 @pytest.mark.parametrize(
     "in_channels,head_dim,n_heads",
     [(64, 16, 4), (64, 32, 2), (128, 32, 4), (64, 8, 8)],
@@ -172,3 +168,7 @@ def test_mla_autocast(wh, dtype):
         out = block(sample)
     assert out.shape == sample.shape
     assert torch.isfinite(out).all()
+
+
+if __name__ == "__main__":
+    pytest.main(["-sv", "test_multiscale_attention.py"])
