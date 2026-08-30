@@ -442,6 +442,9 @@ def test_dcae_components_carry_the_same_architecture_when_injected():
     assert sum(p.numel() for p in injected.parameters()) == sum(
         p.numel() for p in built.parameters()
     )
+    # parameter-free settings (activations, dropout) are invisible to the
+    # assertions above, so compare the module trees themselves
+    assert repr(injected) == repr(built)
 
 
 def test_dcae_components_keep_the_default_widths():
