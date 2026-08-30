@@ -7,9 +7,9 @@ from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
 from chuchichaestli.models.autoencoder.decoder import Decoder
 from chuchichaestli.models.autoencoder.encoder import Encoder
 from chuchichaestli.models.autoencoder.protocols import DecoderLike, EncoderLike
-from chuchichaestli.models.autoencoder.vae import VAE
-from chuchichaestli.models.autoencoder.vqvae import VQVAE
-from chuchichaestli.models.autoencoder.dcae import DCAE
+from chuchichaestli.models.autoencoder.vae import VAE, VAEEncoder
+from chuchichaestli.models.autoencoder.vqvae import VQVAE, VectorQuantizer
+from chuchichaestli.models.autoencoder.dcae import DCAE, DCDecoder, DCEncoder
 
 __all__ = [
     "Decoder",
@@ -18,6 +18,10 @@ __all__ = [
     "EncoderLike",
     "Autoencoder",
     "VAE",
+    "VAEEncoder",
     "VQVAE",
+    "VectorQuantizer",
     "DCAE",
+    "DCDecoder",
+    "DCEncoder",
 ]

@@ -25,14 +25,12 @@ from chuchichaestli.models.autoencoder import VAE
 )
 def test_vae_init(dimensions, in_channels, n_channels, latent_dim, out_channels):
     """Test the VAE module initialization."""
-    model = VAE(
+    model = VAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
-        use_latent_proj=True,
-        use_latent_deproj=True,
+        encoder_args={"n_channels": n_channels},
     )
     assert isinstance(model.encoder, nn.Module)
     assert isinstance(model.decoder, nn.Module)
@@ -85,16 +83,13 @@ def test_vae_blocks(
     up_block_types,
 ):
     """Test the VAE module."""
-    model = VAE(
+    model = VAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
-        use_latent_proj=True,
-        use_latent_deproj=True,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 16
     shape = (1, in_channels) + (wh,) * dimensions
@@ -131,16 +126,13 @@ def test_vae_latent_dim(
     up_block_types,
 ):
     """Test the VAE module (latent dim)."""
-    model = VAE(
+    model = VAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
-        use_latent_proj=True,
-        use_latent_deproj=True,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 16
     shape = (1, in_channels) + (wh,) * dimensions
@@ -178,16 +170,13 @@ def test_vae_forward(
     up_block_types,
 ):
     """Test the VAE module (forward pass)."""
-    model = VAE(
+    model = VAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
-        use_latent_proj=True,
-        use_latent_deproj=True,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 16
     shape = (1, in_channels) + (wh,) * dimensions
@@ -230,16 +219,13 @@ def test_vae_backward(
     up_block_types,
 ):
     """Test the VAE module (backward pass)."""
-    model = VAE(
+    model = VAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
-        use_latent_proj=True,
-        use_latent_deproj=True,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 32
     shape = (1, in_channels) + (wh,) * dimensions
@@ -279,16 +265,13 @@ def test_vae_kl_div(
     up_block_types,
 ):
     """Test the VAE kl_divergence."""
-    model = VAE(
+    model = VAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
-        use_latent_proj=True,
-        use_latent_deproj=True,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 32
     shape = (1, in_channels) + (wh,) * dimensions
@@ -306,19 +289,24 @@ if __name__ == "__main__":
 
 def test_per_component_args_reach_the_encoder_only():
     """Test that a VAE forwards the per-component override dicts to the right child."""
-    model = VAE(
-        n_channels=16,
+    model = VAE.build(
         latent_dim=4,
-        block_out_channel_mults=(1, 2),
-        down_block_types=("AutoencoderDownBlock",) * 2,
-        up_block_types=("AutoencoderUpBlock",) * 2,
-        encoder_mid_block_types=(),
-        decoder_mid_block_types=(),
-        down_layers_per_block=1,
-        up_layers_per_block=1,
         res_groups=4,
         res_dropout=0.1,
-        encoder_res_args={"res_dropout": (0.3, 0.6)},
+        encoder_args={
+            "n_channels": 16,
+            "block_out_channel_mults": (1, 2),
+            "down_block_types": ("AutoencoderDownBlock",) * 2,
+            "mid_block_types": (),
+            "num_layers_per_block": 1,
+            "res_args": {"res_dropout": (0.3, 0.6)},
+        },
+        decoder_args={
+            "block_out_channel_mults": (1, 2),
+            "up_block_types": ("AutoencoderUpBlock",) * 2,
+            "mid_block_types": (),
+            "num_layers_per_block": 1,
+        },
     )
     assert [s[0].res_block.dropout.p for s in model.encoder.down_blocks[::2]] == [
         0.3,
@@ -328,3 +316,32 @@ def test_per_component_args_reach_the_encoder_only():
         0.1,
         0.1,
     ]
+
+
+def test_vae_requires_an_encoder_that_doubles_the_latent():
+    """Test that a VAE refuses an encoder without mean and variance channels."""
+    from chuchichaestli.models.autoencoder import Decoder, Encoder
+
+    encoder = Encoder(2, 1, 16, 4, res_args={"res_groups": 4})
+    decoder = Decoder(2, 4, encoder.bottleneck_channels, 1, res_args={"res_groups": 4})
+    with pytest.raises(ValueError, match="double_z"):
+        VAE(encoder, decoder)
+
+
+def test_vae_encoder_refuses_to_drop_the_doubling():
+    """Test that the VAE encoder cannot be built without doubled channels."""
+    from chuchichaestli.models.autoencoder import VAEEncoder
+
+    with pytest.raises(ValueError, match="mean and variance"):
+        VAEEncoder(2, 1, 16, 4, double_z=False)
+
+
+def test_vae_builds_its_own_encoder_half():
+    """Test that the flat constructor picks the VAE-specific encoder."""
+    from chuchichaestli.models.autoencoder import VAEEncoder
+
+    model = VAE.build(latent_dim=4, encoder_args={"n_channels": 16})
+    assert isinstance(model, VAE)
+    assert isinstance(model.encoder, VAEEncoder)
+    assert model.encoder.out_channels == 8
+    assert model.latent_dim == 4

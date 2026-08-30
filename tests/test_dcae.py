@@ -21,15 +21,15 @@ from chuchichaestli.models.autoencoder import DCAE
 )
 def test_dcae_init(dimensions, in_channels, n_channels, latent_dim, out_channels):
     """Test the VAE module initialization."""
-    model = DCAE(
+    model = DCAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
         attn_groups=8,
         res_groups=8,
-        decoder_groups=8,
+        encoder_args={"n_channels": n_channels},
+        decoder_args={"num_groups": 8},
     )
     assert isinstance(model.encoder, nn.Module)
     assert isinstance(model.decoder, nn.Module)
@@ -90,14 +90,13 @@ def test_dcae_blocks(
     up_block_types,
 ):
     """Test the DCAE module."""
-    model = DCAE(
+    model = DCAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         # latent_dim=latent_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 64
     shape = (1, in_channels) + (wh,) * dimensions
@@ -157,14 +156,13 @@ def test_dcae_latent_dim(
     up_block_types,
 ):
     """Test the DCAE module (latent dim)."""
-    model = DCAE(
+    model = DCAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 64
     shape = (1, in_channels) + (wh,) * dimensions
@@ -226,14 +224,13 @@ def test_dcae_forward(
     up_block_types,
 ):
     """Test the DCAE module (forward pass)."""
-    model = DCAE(
+    model = DCAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 64
     shape = (1, in_channels) + (wh,) * dimensions
@@ -299,14 +296,13 @@ def test_dcae_backward(
     up_block_types,
 ):
     """Test the DCAE module (backward pass)."""
-    model = DCAE(
+    model = DCAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 64
     shape = (1, in_channels) + (wh,) * dimensions
@@ -321,12 +317,12 @@ def test_dcae_backward(
 
 def test_dcae_inspect():
     """Test the DCAE module inspection."""
-    model = DCAE(
+    model = DCAE.build(
         dimensions=2,
         in_channels=1,
-        n_channels=128,
         latent_dim=32,
         out_channels=1,
+        encoder_args={"n_channels": 128},
         # down_block_types=("DCAutoencoderDownBlock",) * 3 + ("EfficientViTBlock",) * 4,
         # up_block_types=("EfficientViTBlock",) * 4 + ("DCAutoencoderUpBlock",) * 3,
         # block_out_channel_mults=(2, 2, 1, 2, 1, 2, 1),
@@ -352,7 +348,7 @@ if __name__ == "__main__":
 
 def test_attn_norm_type_sequence_keeps_its_intra_block_meaning():
     """Test that a norm_type sequence is not read as a per-level list."""
-    model = DCAE(attn_norm_type=("rms", "rms"))
+    model = DCAE.build(attn_norm_type=("rms", "rms"))
     assert model.levels == (6, 6)
 
 
@@ -360,15 +356,15 @@ def test_attn_norm_type_sequence_keeps_its_intra_block_meaning():
 def test_dcae_reconstructs_at_every_rank(dimensions):
     """Test that deep-compression autoencoding works beyond 2D data."""
     wh = 64
-    model = DCAE(
+    model = DCAE.build(
         dimensions=dimensions,
         in_channels=1,
-        n_channels=32,
         latent_dim=4,
         out_channels=1,
         attn_groups=8,
         res_groups=8,
-        decoder_groups=8,
+        encoder_args={"n_channels": 32},
+        decoder_args={"num_groups": 8},
     )
     shape = (1, 1) + (wh,) * dimensions
     sample = torch.randn(shape)
@@ -378,3 +374,88 @@ def test_dcae_reconstructs_at_every_rank(dimensions):
         model.compute_latent_shape(shape) == (1, 4) + (wh // model.f_comp,) * dimensions
     )
     out.sum().backward()
+
+
+DCAE_REDUCED = dict(
+    latent_dim=8,
+    attn_groups=8,
+    res_groups=8,
+    encoder_args={"n_channels": 32},
+    decoder_args={"num_groups": 8},
+)
+
+
+def _assert_dc_structure(model):
+    """Assert the deep-compression architecture the components are meant to carry.
+
+    Args:
+        model: Model to inspect.
+    """
+    from chuchichaestli.models.downsampling import DownsampleUnshuffle
+    from chuchichaestli.models.upsampling import UpsampleShuffle
+
+    assert len(model.state_dict()) == 302
+    assert model.levels == (6, 6)
+    assert model.f_comp == 32 and model.f_exp == 32
+    assert model.latent_proj is None and model.latent_deproj is None
+    assert len(model.encoder.mid_blocks) == 0 and len(model.decoder.mid_blocks) == 0
+    assert [type(s[0]).__name__ for s in model.encoder.down_blocks[::2]] == [
+        "DCAutoencoderDownBlock"
+    ] * 3 + ["EfficientViTBlock"] * 3
+    assert [type(s[0]).__name__ for s in model.decoder.up_blocks[::2]] == [
+        "DCAutoencoderUpBlock"
+    ] * 3 + ["EfficientViTBlock"] * 3
+    assert all(
+        isinstance(b, DownsampleUnshuffle) for b in model.encoder.down_blocks[1::2]
+    )
+    assert all(isinstance(b, UpsampleShuffle) for b in model.decoder.up_blocks[1::2])
+
+
+def test_dcae_build_carries_the_deep_compression_architecture():
+    """Test that the flat constructor still yields the DC architecture."""
+    _assert_dc_structure(DCAE.build(**DCAE_REDUCED))
+
+
+def test_dcae_components_carry_the_same_architecture_when_injected():
+    """Test that injecting the components gives the same model as building it."""
+    from chuchichaestli.models.autoencoder import DCDecoder, DCEncoder
+
+    encoder = DCEncoder(
+        n_channels=32,
+        out_channels=8,
+        num_groups=8,
+        attn_args={"groups": 8},
+        res_args={"res_groups": 8},
+    )
+    decoder = DCDecoder(
+        in_channels=8,
+        n_channels=encoder.bottleneck_channels,
+        num_groups=8,
+        attn_args={"groups": 8},
+        res_args={"res_groups": 8},
+    )
+    injected = DCAE(encoder, decoder)
+    built = DCAE.build(**DCAE_REDUCED)
+    _assert_dc_structure(injected)
+    assert list(injected.state_dict()) == list(built.state_dict())
+    assert sum(p.numel() for p in injected.parameters()) == sum(
+        p.numel() for p in built.parameters()
+    )
+
+
+def test_dcae_components_keep_the_default_widths():
+    """Test that the numeric defaults survived moving into the components."""
+    import inspect
+
+    from chuchichaestli.models.autoencoder import DCDecoder, DCEncoder
+
+    enc = inspect.signature(DCEncoder.__init__).parameters
+    dec = inspect.signature(DCDecoder.__init__).parameters
+    assert enc["n_channels"].default == 128
+    assert enc["out_channels"].default == 32
+    assert enc["block_out_channel_mults"].default == (2, 2, 1, 2, 1)
+    assert enc["norm_type"].default == "rms"
+    assert dec["n_channels"].default == 1024
+    assert dec["block_out_channel_mults"].default == (1, 2, 1, 2, 2)
+    assert dec["act_fn"].default == "relu"
+    assert inspect.signature(DCAE.build).parameters["latent_dim"].default == 32
