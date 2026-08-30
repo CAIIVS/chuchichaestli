@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Traits the two components of an autoencoder implementation."""
 
+from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
 
 import torch
+from torch import nn
 
 
 __all__ = ["EncoderLike", "DecoderLike"]
@@ -54,6 +56,14 @@ class EncoderLike(Protocol):
         """
         ...
 
+    def parameters(self) -> Iterator[nn.Parameter]:
+        """Iterate over the component's parameters."""
+        ...
+
+    def buffers(self) -> Iterator[torch.Tensor]:
+        """Iterate over the component's buffers."""
+        ...
+
 
 @runtime_checkable
 class DecoderLike(Protocol):
@@ -90,4 +100,12 @@ class DecoderLike(Protocol):
         Args:
             z: Input latent tensor.
         """
+        ...
+
+    def parameters(self) -> Iterator[nn.Parameter]:
+        """Iterate over the component's parameters."""
+        ...
+
+    def buffers(self) -> Iterator[torch.Tensor]:
+        """Iterate over the component's buffers."""
         ...
