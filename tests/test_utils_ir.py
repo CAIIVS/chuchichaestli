@@ -30,23 +30,28 @@ def _unet(dimensions=2, num_blocks_per_level=1, skip_connection_action="concat")
 
 
 def _vae(cls=VAE):
-    return cls(
+    return cls.build(
         dimensions=2,
         in_channels=3,
-        n_channels=16,
         latent_dim=4,
         out_channels=3,
-        down_block_types=("AutoencoderDownBlock", "AutoencoderDownBlock"),
-        up_block_types=("AutoencoderUpBlock", "AutoencoderUpBlock"),
-        block_out_channel_mults=(1, 2),
-        down_layers_per_block=1,
-        up_layers_per_block=1,
-        encoder_mid_block_types=("AutoencoderMidBlock",),
-        decoder_mid_block_types=("AutoencoderMidBlock",),
         res_groups=4,
-        encoder_groups=4,
-        decoder_groups=4,
         attn_groups=4,
+        encoder_args={
+            "n_channels": 16,
+            "down_block_types": ("AutoencoderDownBlock", "AutoencoderDownBlock"),
+            "block_out_channel_mults": (1, 2),
+            "num_layers_per_block": 1,
+            "mid_block_types": ("AutoencoderMidBlock",),
+            "num_groups": 4,
+        },
+        decoder_args={
+            "up_block_types": ("AutoencoderUpBlock", "AutoencoderUpBlock"),
+            "block_out_channel_mults": (1, 2),
+            "num_layers_per_block": 1,
+            "mid_block_types": ("AutoencoderMidBlock",),
+            "num_groups": 4,
+        },
     )
 
 

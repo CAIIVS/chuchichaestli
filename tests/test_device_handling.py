@@ -23,16 +23,16 @@ def test_vae_forward_device(device):
     """Test that VAE forward pass works correctly on different devices."""
     from chuchichaestli.models.autoencoder import VAE
 
-    model = VAE(
+    model = VAE.build(
         dimensions=2,
         in_channels=1,
-        n_channels=32,
         latent_dim=4,
         out_channels=1,
-        down_block_types=("AutoencoderDownBlock",) * 2,
-        up_block_types=("AutoencoderUpBlock",) * 2,
-        use_latent_proj=True,
-        use_latent_deproj=True,
+        encoder_args={
+            "n_channels": 32,
+            "down_block_types": ("AutoencoderDownBlock",) * 2,
+        },
+        decoder_args={"up_block_types": ("AutoencoderUpBlock",) * 2},
     ).to(device)
 
     sample = torch.randn(1, 1, 16, 16, device=device)
@@ -47,14 +47,16 @@ def test_vae_kl_divergence_device(device):
     """Test KL divergence computation on different devices (Issue #133)."""
     from chuchichaestli.models.autoencoder import VAE
 
-    model = VAE(
+    model = VAE.build(
         dimensions=2,
         in_channels=1,
-        n_channels=32,
         latent_dim=4,
         out_channels=1,
-        down_block_types=("AutoencoderDownBlock",) * 2,
-        up_block_types=("AutoencoderUpBlock",) * 2,
+        encoder_args={
+            "n_channels": 32,
+            "down_block_types": ("AutoencoderDownBlock",) * 2,
+        },
+        decoder_args={"up_block_types": ("AutoencoderUpBlock",) * 2},
     ).to(device)
 
     sample = torch.randn(1, 1, 16, 16, device=device)
@@ -72,14 +74,16 @@ def test_vae_kl_divergence_dtype(device, dtype):
     """Test KL divergence preserves dtype correctly."""
     from chuchichaestli.models.autoencoder import VAE
 
-    model = VAE(
+    model = VAE.build(
         dimensions=2,
         in_channels=1,
-        n_channels=32,
         latent_dim=4,
         out_channels=1,
-        down_block_types=("AutoencoderDownBlock",) * 2,
-        up_block_types=("AutoencoderUpBlock",) * 2,
+        encoder_args={
+            "n_channels": 32,
+            "down_block_types": ("AutoencoderDownBlock",) * 2,
+        },
+        decoder_args={"up_block_types": ("AutoencoderUpBlock",) * 2},
     ).to(device=device, dtype=dtype)
 
     sample = torch.randn(1, 1, 16, 16, device=device, dtype=dtype)
@@ -96,14 +100,16 @@ def test_vae_backward_with_kl_device(device):
     """Test backward pass with KL divergence on different devices."""
     from chuchichaestli.models.autoencoder import VAE
 
-    model = VAE(
+    model = VAE.build(
         dimensions=2,
         in_channels=1,
-        n_channels=32,
         latent_dim=4,
         out_channels=1,
-        down_block_types=("AutoencoderDownBlock",) * 2,
-        up_block_types=("AutoencoderUpBlock",) * 2,
+        encoder_args={
+            "n_channels": 32,
+            "down_block_types": ("AutoencoderDownBlock",) * 2,
+        },
+        decoder_args={"up_block_types": ("AutoencoderUpBlock",) * 2},
     ).to(device)
 
     sample = torch.randn(1, 1, 32, 32, device=device)
@@ -134,6 +140,7 @@ def test_gaussian_noise_block_forward_device(device):
     assert out.device == device
     assert out.shape == x.shape
 
+
 @pytest.mark.parametrize("device", get_available_devices())
 def test_gaussian_noise_block_noise_buffer_moves(device):
     """Test that noise buffer moves with module to different devices."""
@@ -150,6 +157,7 @@ def test_gaussian_noise_block_noise_buffer_moves(device):
     # Check noise buffer moved
     assert block.noise.device == device
 
+
 @pytest.mark.parametrize("device", get_available_devices())
 def test_gaussian_noise_block_with_nonzero_mu(device):
     """Test GaussianNoiseBlock with non-zero mu on different devices."""
@@ -162,6 +170,7 @@ def test_gaussian_noise_block_with_nonzero_mu(device):
     out = block(x)
 
     assert out.device == device
+
 
 @pytest.mark.parametrize("device", get_available_devices())
 def test_gaussian_noise_block_inference_mode(device):
@@ -176,7 +185,6 @@ def test_gaussian_noise_block_inference_mode(device):
 
     assert out.device == device
     assert torch.equal(out, x)  # No noise should be added in eval mode
-
 
 
 @pytest.mark.parametrize("device", get_available_devices())
@@ -219,6 +227,7 @@ def test_sinusoidal_embedding_device(device):
     assert out.device == device
     assert out.shape == (3, 32)
 
+
 @pytest.mark.parametrize("device", get_available_devices())
 def test_deep_sinusoidal_embedding_device(device):
     """Test DeepSinusoidalTimeEmbedding on different devices."""
@@ -233,6 +242,7 @@ def test_deep_sinusoidal_embedding_device(device):
 
     assert out.device == device
     assert out.shape == (3, 32)
+
 
 @pytest.mark.parametrize("device", get_available_devices())
 def test_unet_with_time_embedding_device(device):
@@ -258,6 +268,7 @@ def test_unet_with_time_embedding_device(device):
     out = model(x, t)
 
     assert out.device == device
+
 
 @pytest.mark.parametrize("device", get_available_devices())
 def test_unet_with_scalar_timestep_device(device):
@@ -291,14 +302,16 @@ def test_vae_dimensions_device(dimensions, device):
     """Test VAE with different dimensions on different devices."""
     from chuchichaestli.models.autoencoder import VAE
 
-    model = VAE(
+    model = VAE.build(
         dimensions=dimensions,
         in_channels=1,
-        n_channels=16,
         latent_dim=4,
         out_channels=1,
-        down_block_types=("AutoencoderDownBlock",) * 2,
-        up_block_types=("AutoencoderUpBlock",) * 2,
+        encoder_args={
+            "n_channels": 16,
+            "down_block_types": ("AutoencoderDownBlock",) * 2,
+        },
+        decoder_args={"up_block_types": ("AutoencoderUpBlock",) * 2},
     ).to(device)
 
     wh = 16
@@ -311,3 +324,39 @@ def test_vae_dimensions_device(dimensions, device):
     assert out.device == device
     assert posterior.mean.device == device
     assert kl_div.device == device
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+def test_latent_projections_follow_pre_placed_components(device):
+    """Test that the bottleneck is built where the components already live."""
+    from chuchichaestli.models.autoencoder import Autoencoder, Decoder, Encoder
+
+    encoder = Encoder(2, 1, 16, 4, res_args={"res_groups": 4}).to(device)
+    decoder = Decoder(
+        2, 4, encoder.bottleneck_channels, 1, res_args={"res_groups": 4}
+    ).to(device)
+
+    # the model is never moved; only the components were placed
+    model = Autoencoder(encoder, decoder)
+
+    assert next(model.latent_proj.parameters()).device.type == device.type
+    assert next(model.latent_deproj.parameters()).device.type == device.type
+    sample = torch.randn(1, 1, 16, 16, device=device)
+    assert model(sample).device.type == device.type
+
+
+@pytest.mark.parametrize("dtype", [torch.float64, torch.float16])
+def test_latent_projections_follow_pre_placed_dtype(dtype):
+    """Test that the bottleneck is built in the dtype the components already use."""
+    from chuchichaestli.models.autoencoder import Autoencoder, Decoder, Encoder
+
+    encoder = Encoder(2, 1, 16, 4, res_args={"res_groups": 4}).to(dtype)
+    decoder = Decoder(
+        2, 4, encoder.bottleneck_channels, 1, res_args={"res_groups": 4}
+    ).to(dtype)
+
+    # the model is never moved; only the components were cast
+    model = Autoencoder(encoder, decoder)
+
+    assert next(model.latent_proj.parameters()).dtype == dtype
+    assert next(model.latent_deproj.parameters()).dtype == dtype

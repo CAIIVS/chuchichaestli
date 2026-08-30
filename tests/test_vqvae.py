@@ -36,14 +36,13 @@ def test_vqvae_init(
     up_block_types,
 ):
     """Test VQVAE initialization with different parameters."""
-    vqvae = VQVAE(
+    vqvae = VQVAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         vq_dim=vq_dim,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     assert isinstance(vqvae.encoder, nn.Module)
     assert isinstance(vqvae.decoder, nn.Module)
@@ -77,14 +76,13 @@ def test_vqvae_encode(
     up_block_types,
 ):
     """Test VQVAE initialization with different parameters."""
-    vqvae = VQVAE(
+    vqvae = VQVAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         vq_dim=vq_dim,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 16
     shape = (1, in_channels) + (wh,) * dimensions
@@ -126,15 +124,14 @@ def test_vqvae_decode(
 ):
     """Test VQVAE initialization with different parameters."""
     out_channels = in_channels
-    vqvae = VQVAE(
+    vqvae = VQVAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         vq_dim=vq_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 16
     shape = (1, in_channels) + (wh,) * dimensions
@@ -177,15 +174,14 @@ def test_vqvae_forward(
 ):
     """Test VQVAE initialization with different parameters."""
     out_channels = in_channels
-    vqvae = VQVAE(
+    vqvae = VQVAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         vq_dim=vq_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 16
     shape = (1, in_channels) + (wh,) * dimensions
@@ -230,15 +226,14 @@ def test_vqvae_backward(
 ):
     """Test VQVAE initialization with different parameters."""
     out_channels = in_channels
-    vqvae = VQVAE(
+    vqvae = VQVAE.build(
         dimensions=dimensions,
         in_channels=in_channels,
-        n_channels=n_channels,
         latent_dim=latent_dim,
         vq_dim=vq_dim,
         out_channels=out_channels,
-        down_block_types=down_block_types,
-        up_block_types=up_block_types,
+        encoder_args={"n_channels": n_channels, "down_block_types": down_block_types},
+        decoder_args={"up_block_types": up_block_types},
     )
     wh = 16
     shape = (1, in_channels) + (wh,) * dimensions
@@ -259,3 +254,32 @@ def test_vqvae_backward(
 
 if __name__ == "__main__":
     pytest.main(["-sv", "test_vqvae.py"])
+
+
+def test_injected_vqvae_wires_the_codebook_between_the_components():
+    """Test that the quantizer sits between two externally built components."""
+    from chuchichaestli.models.autoencoder import Decoder, Encoder
+
+    encoder = Encoder(2, 1, 16, 4, res_args={"res_groups": 4})
+    decoder = Decoder(2, 4, encoder.bottleneck_channels, 1, res_args={"res_groups": 4})
+    model = VQVAE(encoder, decoder, vq_dim=8, vq_embeddings=32)
+    assert model.latent_proj.in_channels == encoder.out_channels
+    assert model.latent_proj.out_channels == model.vq_dim
+    assert model.latent_deproj.in_channels == model.vq_dim
+    assert model.latent_deproj.out_channels == decoder.in_channels
+    assert model.quantize.embedding_dim == model.vq_dim
+    assert model.quantize.num_embeddings == 32
+    sample = torch.randn(1, 1, 16, 16)
+    out, loss, _ = model(sample)
+    assert out.shape == sample.shape
+    assert loss.ndim == 0
+
+
+def test_vqvae_rejects_an_encoder_without_a_single_latent_code():
+    """Test that an encoder describing a latent with several outputs is refused."""
+    from chuchichaestli.models.autoencoder import Decoder, VAEEncoder
+
+    encoder = VAEEncoder(2, 1, 16, 4, res_args={"res_groups": 4})
+    decoder = Decoder(2, 4, encoder.bottleneck_channels, 1, res_args={"res_groups": 4})
+    with pytest.raises(ValueError, match="must emit its 4 latent channels"):
+        VQVAE(encoder, decoder, vq_dim=8, vq_embeddings=32)

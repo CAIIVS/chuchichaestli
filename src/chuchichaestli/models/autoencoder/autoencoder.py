@@ -8,26 +8,61 @@ from torch import nn
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.autoencoder.decoder import Decoder
 from chuchichaestli.models.autoencoder.encoder import Encoder
-from chuchichaestli.models.blocks import (
-    AutoencoderDownBlockTypes,
-    AutoencoderMidBlockTypes,
-    AutoencoderUpBlockTypes,
-    EncoderOutBlockTypes,
-    DecoderInBlockTypes,
-)
-from chuchichaestli.models.downsampling import DownsampleTypes
+from chuchichaestli.models.autoencoder.traits import DecoderLike, EncoderLike
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
-from chuchichaestli.models.upsampling import UpsampleTypes
-from chuchichaestli.utils import prod
 from collections.abc import Sequence
+from itertools import chain
 
 
 __all__ = ["Autoencoder"]
 
 
+ENCODER_RESERVED = {
+    "dimensions": "pass `dimensions`",
+    "in_channels": "pass `in_channels`",
+    "out_channels": "pass `latent_dim`",
+}
+
+DECODER_RESERVED = {
+    "dimensions": "pass `dimensions`",
+    "in_channels": "derived from the encoder's latent width",
+    "n_channels": "derived from the encoder's bottleneck width",
+    "out_channels": "pass `out_channels`",
+}
+
+
+def _merge_shared_args(
+    component_args: dict,
+    res_args: dict,
+    attn_args: dict,
+    reserved: dict[str, str],
+    name: str,
+) -> dict:
+    """Merge the shared block arguments into one component's own arguments.
+
+    Args:
+        component_args: Arguments for one component; its own block arguments win.
+        res_args: Shared residual block arguments.
+        attn_args: Shared attention block arguments.
+        reserved: Keys the model sets itself, mapped to what to pass instead.
+        name: Name of the checked dict, for the error message.
+
+    Raises:
+        ValueError: If a reserved key is present.
+    """
+    for key, hint in reserved.items():
+        if key in component_args:
+            raise ValueError(f'{name}["{key}"]: set by the model; {hint}.')
+    return {
+        **component_args,
+        "res_args": {**res_args, **component_args.get("res_args", {})},
+        "attn_args": {**attn_args, **component_args.get("attn_args", {})},
+    }
+
+
 def _reject_sequences(**kwargs) -> None:
-    """Reject per-level sequences on arguments that both halves share.
+    """Reject per-level sequences on arguments that both components share.
 
     Args:
         kwargs: Shared argument names and values.
@@ -40,7 +75,7 @@ def _reject_sequences(**kwargs) -> None:
             group = "res_args" if name.startswith("res_") else "attn_args"
             raise ValueError(
                 f"{name}: shared arguments take a single value; pass per-level values"
-                f" in encoder_{group} or decoder_{group} instead."
+                f' in encoder_args["{group}"] or decoder_args["{group}"] instead.'
             )
 
 
@@ -54,45 +89,121 @@ class Autoencoder(nn.Module):
     and a convolutional layer) and projects the input into latent space.
     The decoder is built with residual convolutional and upsampling blocks, and
     expands from the latent space to the image domain.
+
+    Both components are constructed externally and passed in, which lets a
+    configuration framework instantiate them as separate groups. Use the `build`
+    constructor to assemble a model from architecture arguments instead.
+
+    Attributes:
+        encoder_cls: Encoder class that `build` instantiates.
+        decoder_cls: Decoder class that `build` instantiates.
     """
+
+    encoder_cls: type = Encoder
+    decoder_cls: type = Decoder
 
     def __init__(
         self,
+        encoder: EncoderLike,
+        decoder: DecoderLike,
+        latent_proj: nn.Module | bool = True,
+        latent_deproj: nn.Module | bool = True,
+    ):
+        """Assemble an autoencoder from an encoding and a decoding component.
+
+        Args:
+            encoder: Encoding component, mapping the input to latent space.
+            decoder: Decoding component, expanding the latent space to the output.
+            latent_proj: Projection between encoder and latent space; `True`
+                builds a pointwise convolution, `False` omits it, and a module
+                is used as given.
+            latent_deproj: Projection between latent space and decoder, with the
+                same options as `latent_proj`.
+        """
+        super().__init__()
+
+        self.encoder = encoder
+        self.decoder = decoder
+        if latent_proj is True:
+            latent_proj = self.projection(
+                encoder, encoder.out_channels, encoder.out_channels
+            )
+        if latent_deproj is True:
+            latent_deproj = self.projection(decoder, self.latent_dim, self.latent_dim)
+        self.latent_proj = latent_proj if isinstance(latent_proj, nn.Module) else None
+        self.latent_deproj = (
+            latent_deproj if isinstance(latent_deproj, nn.Module) else None
+        )
+        self._check_components()
+
+    @staticmethod
+    def projection(
+        component: EncoderLike | DecoderLike, in_channels: int, out_channels: int
+    ) -> nn.Module:
+        """Pointwise convolution matching the component it serves.
+
+        Device and dtype are read from the component's first parameter or
+        buffer, so a component placed before the model is assembled keeps the
+        projection alongside it; a component holding neither leaves both to the
+        torch defaults.
+
+        Args:
+            component: Encoding or decoding component the projection is attached to.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+        """
+        ref = next(chain(component.parameters(), component.buffers()), None)
+        return DIM_TO_CONV_MAP[component.dimensions](
+            in_channels,
+            out_channels,
+            kernel_size=1,
+            stride=1,
+            padding="same",
+            device=None if ref is None else ref.device,
+            dtype=None if ref is None else ref.dtype,
+        )
+
+    def _check_components(self) -> None:
+        """Check that the components and their projections agree on shape.
+
+        Each check is skipped when either side does not expose the attribute it
+        reads, so components that implement only part of the interface still work.
+
+        Raises:
+            ValueError: If the components disagree on dimensions or channel widths.
+        """
+        enc_dims = getattr(self.encoder, "dimensions", None)
+        dec_dims = getattr(self.decoder, "dimensions", None)
+        if None not in (enc_dims, dec_dims) and enc_dims != dec_dims:
+            raise ValueError(
+                f"encoder is {enc_dims}-dimensional but decoder is {dec_dims}-dimensional."
+            )
+
+        enc_out = getattr(self.encoder, "out_channels", None)
+        proj_in = getattr(self.latent_proj, "in_channels", None)
+        if None not in (enc_out, proj_in) and enc_out != proj_in:
+            raise ValueError(
+                f"latent_proj takes {proj_in} channels but the encoder emits {enc_out}."
+            )
+
+        dec_in = getattr(self.decoder, "in_channels", None)
+        expected = getattr(self.latent_deproj, "out_channels", None)
+        if expected is None and enc_out is not None:
+            expected = self.latent_dim
+        if None not in (dec_in, expected) and dec_in != expected:
+            raise ValueError(
+                f"decoder takes {dec_in} latent channels but receives {expected};"
+                " pass an encoder with a matching `out_channels` (or a"
+                " `latent_deproj` that projects onto the decoder's width)."
+            )
+
+    @classmethod
+    def build(
+        cls,
         dimensions: int = 2,
         in_channels: int = 1,
-        n_channels: int = 64,
-        latent_dim: int = 4,
         out_channels: int = 1,
-        down_block_types: Sequence[AutoencoderDownBlockTypes] = (
-            "AutoencoderDownBlock",
-            "AutoencoderDownBlock",
-            "AutoencoderDownBlock",
-            "AutoencoderDownBlock",
-        ),
-        down_layers_per_block: int | Sequence[int] = 2,
-        downsample_type: DownsampleTypes = "Downsample",
-        encoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (
-            "AutoencoderMidBlock",
-            "AttnAutoencoderMidBlock",
-        ),
-        encoder_out_block_type: EncoderOutBlockTypes = "EncoderOutBlock",
-        decoder_in_block_type: DecoderInBlockTypes = "DecoderInBlock",
-        decoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (
-            "AutoencoderMidBlock",
-            "AttnAutoencoderMidBlock",
-        ),
-        up_block_types: AutoencoderUpBlockTypes = (
-            "AutoencoderUpBlock",
-            "AutoencoderUpBlock",
-            "AutoencoderUpBlock",
-            "AutoencoderUpBlock",
-        ),
-        up_layers_per_block: int | Sequence[int] = 3,
-        upsample_type: UpsampleTypes = "UpsampleInterpolate",
-        block_out_channel_mults: Sequence[int] = (1, 2, 2, 2),
-        decoder_block_out_channel_mults: Sequence[int] | None = None,
-        use_latent_proj: bool = True,
-        use_latent_deproj: bool = True,
+        latent_dim: int = 4,
         res_act_fn: ActivationTypes = "silu",
         res_dropout: float = 0.0,
         res_norm_type: NormTypes = "group",
@@ -107,48 +218,22 @@ class Autoencoder(nn.Module):
         attn_scales: Sequence[int] = (5,),
         context_args: dict = {},
         local_args: dict = {},
-        encoder_act_fn: ActivationTypes = "silu",
-        encoder_norm_type: NormTypes = "group",
-        encoder_groups: int = 8,
-        encoder_kernel_size: int = 3,
-        encoder_out_shortcut: bool = False,
-        encoder_res_args: dict = {},
-        encoder_attn_args: dict = {},
-        decoder_act_fn: ActivationTypes = "silu",
-        decoder_norm_type: NormTypes = "group",
-        decoder_groups: int = 8,
-        decoder_kernel_size: int = 3,
-        decoder_in_shortcut: bool = False,
-        decoder_res_args: dict = {},
-        decoder_attn_args: dict = {},
-        double_z: bool = False,
-    ):
-        """Initializes the VAE model with the given parameters.
+        encoder_args: dict = {},
+        decoder_args: dict = {},
+        **kwargs,
+    ) -> "Autoencoder":
+        """Build a model from architecture arguments, components included.
+
+        The `res_*` and `attn_*` arguments are shared by both components; anything
+        specific to one component goes into `encoder_args` or `decoder_args`, whose
+        keys are the parameter names of `Encoder` and `Decoder`. Keys left out
+        fall back to the defaults of `encoder_cls` and `decoder_cls`.
 
         Args:
             dimensions: Number of dimensions for the model.
             in_channels: Number of input channels.
-            n_channels: Number of channels in the hidden layer.
-            latent_dim: Number of channels in the latent space.
             out_channels: Number of output channels.
-            down_block_types: Types of down block(s) to use for each level.
-            down_layers_per_block: Number of blocks per level in the encoder
-                (blocks are repeated if `>1`).
-            downsample_type: Type of downsampling block
-                (see `chuchichaestli.models.downsampling` for details).
-            encoder_mid_block_types: Types of middle block(s) in the encoder.
-            encoder_out_block_type: Type of output block in the encoder.
-            decoder_in_block_type: Type of input block in the decoder
-            decoder_mid_block_types: Types of middle block(s) in the decoder.
-            up_block_types: Type of up block(s) to use for each level.
-            up_layers_per_block: Number of blocks per level in the decoder
-                (blocks are repeated if `>1`).
-            upsample_type: Type of upsampling block
-                (see `chuchichaestli.models.upsampling` for details).
-            block_out_channel_mults: Multiplier for output channels of each level block.
-            decoder_block_out_channel_mults: Multiplier for output channels of each decoder level.
-            use_latent_proj: Whether to use a linear layer between encoder and latent space.
-            use_latent_deproj: Whether to use a linear layer between latent space and decoder.
+            latent_dim: Number of channels in the latent space.
             res_act_fn: Activation function for the residual blocks
                 (see `chuchichaestli.models.activations` for details).
             res_dropout: Dropout rate for the residual blocks.
@@ -167,37 +252,14 @@ class Autoencoder(nn.Module):
             attn_scales: Scales for the multi-scale attention block.
             context_args: Keyword arguments for the context block in a transformer module.
             local_args: Keyword arguments for the local block in a transformer module.
-            encoder_act_fn: Activation function for the output layers in the encoder
-                (see `chuchichaestli.models.activations` for details).
-            encoder_norm_type: Normalization type for the encoder's output block
-                (see `chuchichaestli.models.norm` for details).
-            encoder_groups: Number of groups for normalization in the output layer of the encoder.
-            encoder_kernel_size: Kernel size for the output convolution in the encoder.
-            encoder_out_shortcut: Whether to use an encoder shortcut.
-            encoder_res_args: Encoder residual block arguments, overriding the shared
-                `res_*` values. Each entry is a single value or one per block position.
-            encoder_attn_args: Encoder attention block arguments, overriding the shared
-                `attn_*` values.
-            decoder_act_fn: Activation function for the input/output layers in the decoder
-                (see `chuchichaestli.models.activations` for details).
-            decoder_norm_type: Normalization type for the decoder's output block
-                (see `chuchichaestli.models.norm` for details).
-            decoder_groups: Number of groups for normalization in the input/output layer of the decoder.
-            decoder_kernel_size: Kernel size for the output convolution in the decoder.
-            decoder_in_shortcut: Whether to use a decoder shortcut.
-            decoder_res_args: Decoder residual block arguments, overriding the shared
-                `res_*` values. Each entry is a single value or one per block position.
-            decoder_attn_args: Decoder attention block arguments, overriding the shared
-                `attn_*` values.
-            double_z: Whether to double the latent space.
+            encoder_args: Arguments for the encoding component, overriding its defaults.
+                Its `res_args` and `attn_args` override the shared values above.
+            decoder_args: Arguments for the decoding component, with the same options.
+            kwargs: Keyword arguments for the constructor, such as `latent_proj`.
+
+        Returns:
+            An assembled model of the class this was called on.
         """
-        super().__init__()
-
-        self.double_z = double_z
-        self.channel_mults = prod(block_out_channel_mults)
-        if decoder_block_out_channel_mults is None:
-            decoder_block_out_channel_mults = block_out_channel_mults
-
         _reject_sequences(
             res_act_fn=res_act_fn,
             res_dropout=res_dropout,
@@ -231,75 +293,36 @@ class Autoencoder(nn.Module):
             "local_args": local_args,
         }
 
-        self.encoder = Encoder(
+        enc_args = _merge_shared_args(
+            encoder_args, res_args, attn_args, ENCODER_RESERVED, "encoder_args"
+        )
+        dec_args = _merge_shared_args(
+            decoder_args, res_args, attn_args, DECODER_RESERVED, "decoder_args"
+        )
+        encoder = cls.encoder_cls(
             dimensions=dimensions,
             in_channels=in_channels,
-            n_channels=n_channels,
             out_channels=latent_dim,
-            down_block_types=down_block_types,
-            block_out_channel_mults=block_out_channel_mults,
-            num_layers_per_block=down_layers_per_block,
-            mid_block_types=encoder_mid_block_types,
-            out_block_type=encoder_out_block_type,
-            downsample_type=downsample_type,
-            act_fn=encoder_act_fn,
-            norm_type=encoder_norm_type,
-            num_groups=encoder_groups,
-            kernel_size=encoder_kernel_size,
-            res_args={**res_args, **encoder_res_args},
-            attn_args={**attn_args, **encoder_attn_args},
-            double_z=double_z,
-            out_shortcut=encoder_out_shortcut,
+            **enc_args,
         )
-        self.decoder = Decoder(
+        decoder = cls.decoder_cls(
             dimensions=dimensions,
-            in_channels=latent_dim,
-            n_channels=self.channel_mults * n_channels,
+            in_channels=encoder.latent_channels,
+            n_channels=encoder.bottleneck_channels,
             out_channels=out_channels,
-            up_block_types=up_block_types,
-            in_block_type=decoder_in_block_type,
-            block_out_channel_mults=decoder_block_out_channel_mults,
-            num_layers_per_block=up_layers_per_block,
-            mid_block_types=decoder_mid_block_types,
-            upsample_type=upsample_type,
-            act_fn=decoder_act_fn,
-            norm_type=decoder_norm_type,
-            num_groups=decoder_groups,
-            kernel_size=decoder_kernel_size,
-            res_args={**res_args, **decoder_res_args},
-            attn_args={**attn_args, **decoder_attn_args},
-            in_shortcut=decoder_in_shortcut,
+            **dec_args,
         )
-        self.latent_proj = (
-            DIM_TO_CONV_MAP[dimensions](
-                self.latent_dim * (2 if self.double_z else 1),
-                self.latent_dim * (2 if self.double_z else 1),
-                kernel_size=1,
-                stride=1,
-                padding="same",
-            )
-            if use_latent_proj
-            else None
-        )
-        self.latent_deproj = (
-            DIM_TO_CONV_MAP[dimensions](
-                self.latent_dim,
-                self.latent_dim,
-                kernel_size=1,
-                stride=1,
-                padding="same",
-            )
-            if use_latent_deproj
-            else None
-        )
+        return cls(encoder=encoder, decoder=decoder, **kwargs)
+
+    @property
+    def channel_mults(self) -> int:
+        """Total channel multiplication across the encoder levels."""
+        return self.encoder.channel_mults
 
     @property
     def latent_dim(self) -> int:
         """Latent channel dimension."""
-        if self.double_z:
-            return self.encoder.out_channels // 2
-        else:
-            return self.encoder.out_channels
+        return getattr(self.encoder, "latent_channels", self.encoder.out_channels)
 
     @property
     def levels(self) -> tuple[int, int]:

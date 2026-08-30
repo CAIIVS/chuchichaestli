@@ -3,8 +3,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A flexible deep-compression autoencoder implementation."""
 
+from torch import nn
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
+from chuchichaestli.models.autoencoder.decoder import Decoder
+from chuchichaestli.models.autoencoder.encoder import Encoder
+from chuchichaestli.models.autoencoder.traits import DecoderLike, EncoderLike
 from chuchichaestli.models.blocks import (
     AutoencoderDownBlockTypes,
     AutoencoderMidBlockTypes,
@@ -18,6 +22,163 @@ from chuchichaestli.models.upsampling import UpsampleTypes
 from collections.abc import Sequence
 
 
+__all__ = ["DCAE", "DCDecoder", "DCEncoder"]
+
+
+# Block arguments both components share; `DCAE.build` repeats them as its own
+# defaults so that building and injecting the components give the same model.
+DC_RES_ARGS = {"res_norm_type": "rms"}
+DC_ATTN_ARGS = {
+    "norm_type": "rms",
+    "context_args": {"norm_type": (None, "rms")},
+    "local_args": {"norm_type": (None, None, "rms")},
+}
+
+
+class DCEncoder(Encoder):
+    """Encoding component of a deep-compression autoencoder.
+
+    Compresses with channel-shuffling downsamplers and efficient attention at
+    the deeper levels; see `Encoder` for what each argument does.
+    """
+
+    def __init__(
+        self,
+        dimensions: int = 2,
+        in_channels: int = 1,
+        n_channels: int = 128,
+        out_channels: int = 32,
+        down_block_types: Sequence[AutoencoderDownBlockTypes] = (
+            "DCAutoencoderDownBlock",
+        )
+        * 3
+        + ("EfficientViTBlock",) * 3,
+        block_out_channel_mults: Sequence[int] = (2, 2, 1, 2, 1),
+        num_layers_per_block: int | Sequence[int] = (2, 2, 2, 3, 3, 3),
+        mid_block_types: Sequence[AutoencoderMidBlockTypes] = (),
+        out_block_type: EncoderOutBlockTypes = "DCEncoderOutBlock",
+        downsample_type: DownsampleTypes = "DownsampleUnshuffle",
+        act_fn: ActivationTypes = "silu",
+        norm_type: NormTypes = "rms",
+        num_groups: int = 8,
+        kernel_size: int = 3,
+        res_args: dict = {},
+        attn_args: dict = {},
+        out_shortcut: bool = True,
+    ):
+        """Constructor.
+
+        Args:
+            dimensions: Number of dimensions.
+            in_channels: Number of input channels.
+            n_channels: Number of channels in the hidden layer.
+            out_channels: Number of output channels (latent space).
+            down_block_types: Type of down blocks to use for each level.
+            block_out_channel_mults: Multiplier for output channels of each block.
+            num_layers_per_block: Number of blocks per level.
+            mid_block_types: Type of blocks to use before the output.
+            out_block_type: Type of block for output (latent space).
+            downsample_type: Type of downsampling block, per level.
+            act_fn: Activation function for the output layers.
+            norm_type: Normalization type for the output layer.
+            num_groups: Number of groups for normalization in the output layer.
+            kernel_size: Kernel size for the output convolution.
+            res_args: Arguments for residual blocks, overriding `DC_RES_ARGS`.
+            attn_args: Arguments for attention blocks, overriding `DC_ATTN_ARGS`.
+            out_shortcut: Whether to use a shortcut for the output block.
+        """
+        super().__init__(
+            dimensions=dimensions,
+            in_channels=in_channels,
+            n_channels=n_channels,
+            out_channels=out_channels,
+            down_block_types=down_block_types,
+            block_out_channel_mults=block_out_channel_mults,
+            num_layers_per_block=num_layers_per_block,
+            mid_block_types=mid_block_types,
+            out_block_type=out_block_type,
+            downsample_type=downsample_type,
+            act_fn=act_fn,
+            norm_type=norm_type,
+            num_groups=num_groups,
+            kernel_size=kernel_size,
+            res_args={**DC_RES_ARGS, **res_args},
+            attn_args={**DC_ATTN_ARGS, **attn_args},
+            out_shortcut=out_shortcut,
+        )
+
+
+class DCDecoder(Decoder):
+    """Decoding component of a deep-compression autoencoder.
+
+    Expands with channel-shuffling upsamplers, mirroring `DCEncoder`; see
+    `Decoder` for what each argument does. Blocks are listed in order of data
+    flow, deepest level first, so attention precedes the convolutional blocks.
+    """
+
+    def __init__(
+        self,
+        dimensions: int = 2,
+        in_channels: int = 32,
+        n_channels: int = 1024,
+        out_channels: int = 1,
+        in_block_type: DecoderInBlockTypes = "DCDecoderInBlock",
+        mid_block_types: Sequence[AutoencoderMidBlockTypes] = (),
+        up_block_types: Sequence[AutoencoderUpBlockTypes] = ("EfficientViTBlock",) * 3
+        + ("DCAutoencoderUpBlock",) * 3,
+        block_out_channel_mults: Sequence[int] = (1, 2, 1, 2, 2),
+        num_layers_per_block: int | Sequence[int] = 3,
+        upsample_type: UpsampleTypes = "UpsampleShuffle",
+        act_fn: ActivationTypes = "relu",
+        norm_type: NormTypes = "rms",
+        num_groups: int = 8,
+        kernel_size: int = 3,
+        res_args: dict = {},
+        attn_args: dict = {},
+        in_shortcut: bool = True,
+    ):
+        """Constructor.
+
+        Args:
+            dimensions: Number of dimensions.
+            in_channels: Number of input channels (latent space).
+            n_channels: Number of channels for the first block.
+            out_channels: Number of output channels.
+            in_block_type: Type of block for input (latent space).
+            mid_block_types: Type of blocks to use after the input.
+            up_block_types: Type of up blocks to use for each level.
+            block_out_channel_mults: Divisor for output channels of each block.
+            num_layers_per_block: Number of blocks per level.
+            upsample_type: Type of upsampling block, per level.
+            act_fn: Activation function for the output layers.
+            norm_type: Normalization type for the output layer.
+            num_groups: Number of groups for normalization in the output layer.
+            kernel_size: Kernel size for the output convolution.
+            res_args: Arguments for residual blocks, overriding `DC_RES_ARGS`.
+            attn_args: Arguments for attention blocks, overriding `DC_ATTN_ARGS`.
+            in_shortcut: Whether to use a shortcut for the input block.
+        """
+        super().__init__(
+            dimensions=dimensions,
+            in_channels=in_channels,
+            n_channels=n_channels,
+            out_channels=out_channels,
+            in_block_type=in_block_type,
+            mid_block_types=mid_block_types,
+            up_block_types=up_block_types,
+            block_out_channel_mults=block_out_channel_mults,
+            num_layers_per_block=num_layers_per_block,
+            upsample_type=upsample_type,
+            act_fn=act_fn,
+            norm_type=norm_type,
+            num_groups=num_groups,
+            kernel_size=kernel_size,
+            res_args={**DC_RES_ARGS, **res_args},
+            attn_args={**DC_ATTN_ARGS, **attn_args},
+            in_shortcut=in_shortcut,
+        )
+
+
 class DCAE(Autoencoder):
     """Flexible deep-compression autoencoder implementation.
 
@@ -26,174 +187,68 @@ class DCAE(Autoencoder):
     Each downsampling block separates the encoder into spatially hierarchical levels.
     The encoder ends in bottleneck blocks (optionally including attention blocks
     and a convolutional layer) and projects the input into latent space.
-    The decoder is built with residual convolutional and upsampling blocks, and
-    expands from the latent space to the image domain.
+    The decoder is built with residual convolutional, efficient ViT blocks,
+    and upsampling blocks, and expands from the latent space to the image domain.
+
+    The compression happens in the blocks themselves, so no latent projection
+    is used by default.
+
+    Attributes:
+        encoder_cls: Encoder class that `build` instantiates.
+        decoder_cls: Decoder class that `build` instantiates.
     """
+
+    encoder_cls: type = DCEncoder
+    decoder_cls: type = DCDecoder
 
     def __init__(
         self,
-        dimensions: int = 2,
-        in_channels: int = 1,
-        n_channels: int = 128,
-        latent_dim: int = 32,
-        out_channels: int = 1,
-        down_block_types: Sequence[AutoencoderDownBlockTypes] = (
-            "DCAutoencoderDownBlock",
-        )
-        * 3
-        + ("EfficientViTBlock",) * 3,
-        down_layers_per_block: int | Sequence[int] = (2, 2, 2, 3, 3, 3),
-        downsample_type: DownsampleTypes = "DownsampleUnshuffle",
-        encoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (),
-        encoder_out_block_type: EncoderOutBlockTypes = "DCEncoderOutBlock",
-        decoder_in_block_type: DecoderInBlockTypes = "DCDecoderInBlock",
-        decoder_mid_block_types: Sequence[AutoencoderMidBlockTypes] = (),
-        up_block_types: Sequence[AutoencoderUpBlockTypes] = ("DCAutoencoderUpBlock",)
-        * 3
-        + ("EfficientViTBlock",) * 3,
-        up_layers_per_block: int | Sequence[int] = 3,
-        upsample_type: UpsampleTypes = "UpsampleShuffle",
-        block_out_channel_mults: Sequence[int] = (2, 2, 1, 2, 1),
-        res_act_fn: ActivationTypes = "silu",
-        res_dropout: float = 0.0,
-        res_norm_type: NormTypes = "rms",
-        res_groups: int = 8,
-        res_kernel_size: int = 3,
-        attn_head_dim: int = 32,
-        attn_n_heads: int = 1,
-        attn_dropout_p: float = 0.0,
-        attn_norm_type: NormTypes | Sequence[NormTypes] | None = "rms",
-        attn_groups: int = 32,
-        attn_kernel_size: int = 1,
-        attn_scales: Sequence[int] = (5,),
-        context_args: dict = dict(norm_type=(None, "rms")),
-        local_args: dict = dict(norm_type=((None, None, "rms"))),
-        encoder_act_fn: ActivationTypes = "silu",
-        encoder_norm_type: NormTypes = "rms",
-        encoder_groups: int = 8,
-        encoder_kernel_size: int = 3,
-        encoder_out_shortcut: bool = True,
-        encoder_res_args: dict = {},
-        encoder_attn_args: dict = {},
-        decoder_act_fn: ActivationTypes = "relu",
-        decoder_norm_type: NormTypes = "rms",
-        decoder_groups: int = 8,
-        decoder_kernel_size: int = 3,
-        decoder_in_shortcut: bool = True,
-        decoder_res_args: dict = {},
-        decoder_attn_args: dict = {},
+        encoder: EncoderLike,
+        decoder: DecoderLike,
+        latent_proj: nn.Module | bool = False,
+        latent_deproj: nn.Module | bool = False,
     ):
-        """Initializes the VAE model with the given parameters.
+        """Assemble a deep-compression autoencoder from its two components.
 
         Args:
-            dimensions: Number of dimensions for the model.
-            in_channels: Number of input channels.
-            n_channels: Number of channels in the hidden layer.
+            encoder: Encoding component, mapping the input to latent space.
+            decoder: Decoding component, expanding the latent space to the output.
+            latent_proj: Projection between encoder and latent space (see `Autoencoder`).
+            latent_deproj: Projection between latent space and decoder.
+        """
+        super().__init__(encoder, decoder, latent_proj, latent_deproj)
+
+    @classmethod
+    def build(
+        cls,
+        latent_dim: int = 32,
+        res_norm_type: NormTypes = "rms",
+        attn_norm_type: NormTypes | Sequence[NormTypes] | None = "rms",
+        context_args: dict = DC_ATTN_ARGS["context_args"],
+        local_args: dict = DC_ATTN_ARGS["local_args"],
+        **kwargs,
+    ) -> "DCAE":
+        """Build a deep-compression autoencoder from architecture arguments.
+
+        Only the arguments whose defaults differ from `Autoencoder.build` are
+        named here; the components supply every structural default.
+
+        Args:
             latent_dim: Number of channels in the latent space.
-            out_channels: Number of output channels.
-            down_block_types: Types of down block(s) to use for each level.
-            down_layers_per_block: Number of blocks per level in the encoder
-                (blocks are repeated if `>1`).
-            downsample_type: Type of downsampling block
-                (see `chuchichaestli.models.downsampling` for details).
-            encoder_mid_block_types: Types of middle block(s) in the encoder.
-            encoder_out_block_type: Type of output block in the encoder.
-            decoder_in_block_type: Type of input block in the decoder
-            decoder_mid_block_types: Types of middle block(s) in the decoder.
-            up_block_types: Type of up block(s) to use for each level.
-            up_layers_per_block: Number of blocks per level in the decoder
-                (blocks are repeated if `>1`).
-            upsample_type: Type of upsampling block
-                (see `chuchichaestli.models.upsampling` for details).
-            block_out_channel_mults: Multiplier for output channels of each level block.
-            res_act_fn: Activation function for the residual blocks
-                (see `chuchichaestli.models.activations` for details).
-            res_dropout: Dropout rate for the residual blocks.
-            res_norm_type: Normalization type for the residual block
-                (see `chuchichaestli.models.norm` for details).
-            res_groups: Number of groups for the residual block normalization (if group norm).
-            res_kernel_size: Kernel size for the residual blocks.
-            attn_head_dim: Dimension of the attention heads.
-            attn_n_heads: Number of attention heads.
-            attn_dropout_p: Dropout probability of the scaled dot product attention.
-            attn_norm_type: Normalization type for the convolutional attention block
-                (see `chuchichaestli.models.norm` for details).
-            attn_groups: Number of groups for the convolutional attention block normalization
-                (if `attn_norm_type` is `"group"`).
-            attn_kernel_size: Kernel size for the convolutional attention block.
-            attn_scales: Scales for the multi-scale attention block.
+            res_norm_type: Normalization type for the residual blocks.
+            attn_norm_type: Normalization type for the attention blocks.
             context_args: Keyword arguments for the context block in a transformer module.
             local_args: Keyword arguments for the local block in a transformer module.
-            encoder_act_fn: Activation function for the output layers in the encoder
-                (see `chuchichaestli.models.activations` for details).
-            encoder_norm_type: Normalization type for the encoder's output block
-                (see `chuchichaestli.models.norm` for details).
-            encoder_groups: Number of groups for normalization in the output layer of the encoder.
-            encoder_kernel_size: Kernel size for the output convolution in the encoder.
-            encoder_out_shortcut: Whether to use an encoder shortcut.
-            encoder_res_args: Encoder residual block arguments, overriding the shared
-                `res_*` values. Each entry is a single value or one per block position.
-            encoder_attn_args: Encoder attention block arguments, overriding the shared
-                `attn_*` values.
-            decoder_act_fn: Activation function for the input/output layers in the decoder
-                (see `chuchichaestli.models.activations` for details).
-            decoder_norm_type: Normalization type for the decoder's output block
-                (see `chuchichaestli.models.norm` for details).
-            decoder_groups: Number of groups for normalization in the input/output layer of the decoder.
-            decoder_kernel_size: Kernel size for the output convolution in the decoder.
-            decoder_in_shortcut: Whether to use a decoder shortcut.
-            decoder_res_args: Decoder residual block arguments, overriding the shared
-                `res_*` values. Each entry is a single value or one per block position.
-            decoder_attn_args: Decoder attention block arguments, overriding the shared
-                `attn_*` values.
+            kwargs: Further architecture arguments, see `Autoencoder.build`.
+
+        Returns:
+            An assembled model of the class this was called on.
         """
-        super().__init__(
-            dimensions=dimensions,
-            in_channels=in_channels,
-            n_channels=n_channels,
+        return super().build(
             latent_dim=latent_dim,
-            out_channels=out_channels,
-            down_block_types=down_block_types,
-            down_layers_per_block=down_layers_per_block,
-            downsample_type=downsample_type,
-            encoder_mid_block_types=encoder_mid_block_types,
-            encoder_out_block_type=encoder_out_block_type,
-            decoder_in_block_type=decoder_in_block_type,
-            decoder_mid_block_types=decoder_mid_block_types,
-            up_block_types=up_block_types,
-            up_layers_per_block=up_layers_per_block,
-            upsample_type=upsample_type,
-            block_out_channel_mults=block_out_channel_mults,
-            decoder_block_out_channel_mults=tuple(reversed(block_out_channel_mults)),
-            use_latent_proj=False,
-            use_latent_deproj=False,
-            res_act_fn=res_act_fn,
-            res_dropout=res_dropout,
             res_norm_type=res_norm_type,
-            res_groups=res_groups,
-            res_kernel_size=res_kernel_size,
-            attn_head_dim=attn_head_dim,
-            attn_n_heads=attn_n_heads,
-            attn_dropout_p=attn_dropout_p,
             attn_norm_type=attn_norm_type,
-            attn_groups=attn_groups,
-            attn_kernel_size=attn_kernel_size,
-            attn_scales=attn_scales,
             context_args=context_args,
             local_args=local_args,
-            encoder_act_fn=encoder_act_fn,
-            encoder_norm_type=encoder_norm_type,
-            encoder_groups=encoder_groups,
-            encoder_kernel_size=encoder_kernel_size,
-            encoder_out_shortcut=encoder_out_shortcut,
-            encoder_res_args=encoder_res_args,
-            encoder_attn_args=encoder_attn_args,
-            decoder_act_fn=decoder_act_fn,
-            decoder_norm_type=decoder_norm_type,
-            decoder_groups=decoder_groups,
-            decoder_kernel_size=decoder_kernel_size,
-            decoder_in_shortcut=decoder_in_shortcut,
-            decoder_res_args=decoder_res_args,
-            decoder_attn_args=decoder_attn_args,
-            double_z=False,
+            **kwargs,
         )
