@@ -46,12 +46,12 @@ def _conv_layer(
         block.append(ACTIVATION_FUNCTIONS[act_fn]())
     if norm_type is not None:
         if norm_type == "group" and (
-            in_channels % num_groups != 0 or in_channels < num_groups
+            out_channels % num_groups != 0 or out_channels < num_groups
         ):
-            if in_channels % 2 == 0:
-                num_groups = in_channels // 2
+            if out_channels % 2 == 0:
+                num_groups = out_channels // 2
             else:
-                num_groups = gcd(in_channels, in_channels // 3)
+                num_groups = gcd(out_channels, out_channels // 3)
         block.append(
             Norm(
                 dimensions,
@@ -78,27 +78,48 @@ class MultiscaleLinearAttention(nn.Module):
         heads_mult: float = 1,
         head_dim: int = 16,
         scales: Sequence[int] = (5,),
+        attn_act_fn: ActivationTypes = "relu",
         act_fn: ActivationTypes | Sequence[ActivationTypes | None] | None = None,
         norm_type: NormTypes | Sequence[NormTypes | None] | None = (None, "batch"),
-        groups: int | Sequence[int] = 16,
+        num_groups: int | Sequence[int] = 16,
         kernel_size: int = 1,
         bias: bool | Sequence[bool] = False,
         dropout_p: float = 0.0,
         eps: float = 1e-15,
         **kwargs,
     ):
-        """Initialize lightweight multi-scale attention block."""
+        """Initialize the multi-scale linear attention block.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            n_heads: Number of attention heads.
+            heads_mult: Head multiplicity of input channels per head dimension (if `n_heads` is `None`).
+            head_dim: Dimensionality of an attention head.
+            scales: Convolutional scales for aggregation layers.
+            attn_act_fn: Activation function for normalizing query and key.
+            act_fn: Activation function(s).
+            norm_type: Normalization type(s) for the convolutional layers.
+            num_groups: Number of groups for normalization (if `'group'` in `norm_type`).
+            kernel_size: Kernel size for the convolutional layers.
+            bias: Whether to use bias(es) for the convolutional layers.
+            dropout_p: Dropout probability of the block.
+            eps: Numerical stability constant.
+            kwargs: Additional keyword arguments (only for compatibility).
+        """
         super().__init__()
         n_heads = (
             int(in_channels // head_dim * heads_mult) if n_heads is None else n_heads
         )
+        self.n_heads = n_heads
         self.dim = head_dim
         self.total_dim = n_heads * head_dim
         self.eps = eps
         if isinstance(norm_type, str) or norm_type is None:
             norm_type = (norm_type, norm_type)
-        if isinstance(groups, int):
-            groups = (groups, groups)
+        if isinstance(num_groups, int):
+            num_groups = (num_groups, num_groups)
         if isinstance(act_fn, str) or act_fn is None:
             act_fn = (act_fn, act_fn)
         if isinstance(bias, bool):
@@ -111,8 +132,8 @@ class MultiscaleLinearAttention(nn.Module):
             self.total_dim * 3,
             act_fn=act_fn[0],
             norm_type=norm_type[0],
-            num_groups=groups[0],
-            kernel_size=1,
+            num_groups=num_groups[0],
+            kernel_size=kernel_size,
             stride=1,
             padding="same",
             bias=bias[0],
@@ -123,13 +144,13 @@ class MultiscaleLinearAttention(nn.Module):
             out_channels,
             act_fn=act_fn[1],
             norm_type=norm_type[1],
-            num_groups=groups[1],
-            kernel_size=1,
+            num_groups=num_groups[1],
+            kernel_size=kernel_size,
             stride=1,
             padding="same",
             bias=bias[1],
         )
-        self.attn_act = ACTIVATION_FUNCTIONS["relu"]()
+        self.attn_act = ACTIVATION_FUNCTIONS[attn_act_fn]()
         self.scale_aggregation = nn.ModuleList(
             [
                 nn.Sequential(
@@ -146,7 +167,7 @@ class MultiscaleLinearAttention(nn.Module):
                         self.total_dim * 3,
                         1,
                         padding="same",
-                        groups=3 * self.dim,
+                        groups=3 * self.n_heads,
                         bias=bias[0],
                     ),
                 )
@@ -156,52 +177,53 @@ class MultiscaleLinearAttention(nn.Module):
 
     def _relu_lin_attn(self, qkv: torch.Tensor) -> torch.Tensor:
         """Lightweight linear attention with activated query and key."""
-        if qkv.dtype == torch.float16:
+        # The denominator accumulates over every token, so the reduction runs in
+        # float32 outside of autocast no matter what dtype the block is called in.
+        with torch.autocast(device_type=qkv.device.type, enabled=False):
             qkv = qkv.float()
-        B = qkv.shape[0]
-        spatial_dims = qkv.shape[2:]
-        spatial_size = spatial_dims.numel()
-        qkv = qkv.reshape(B, -1, 3 * self.dim, spatial_size)
-        q, k, v = qkv.chunk(chunks=3, dim=2)
-        q = self.attn_act(q)
-        k = self.attn_act(k)
+            B = qkv.shape[0]
+            spatial_dims = qkv.shape[2:]
+            spatial_size = spatial_dims.numel()
+            qkv = qkv.reshape(B, -1, 3 * self.dim, spatial_size)
+            q, k, v = qkv.chunk(chunks=3, dim=2)
+            q = self.attn_act(q)
+            k = self.attn_act(k)
 
-        trans_k = k.transpose(-1, -2)
-        v = F.pad(v, (0, 0, 0, 1), mode="constant", value=1)
-        vk = torch.matmul(v, trans_k)
-        out = torch.matmul(vk, q)
-        if out.dtype == torch.bfloat16:
-            out = out.float()
-        out = out[:, :, :-1] / (out[:, :, -1:] + self.eps)
+            trans_k = k.transpose(-1, -2)
+            v = F.pad(v, (0, 0, 0, 1), mode="constant", value=1)
+            vk = torch.matmul(v, trans_k)
+            out = torch.matmul(vk, q)
+            out = out[:, :, :-1] / (out[:, :, -1:] + self.eps)
 
-        if self.training and self.attn_dropout is not None:
-            out = self.attn_dropout(out)
+            if self.training and self.attn_dropout is not None:
+                out = self.attn_dropout(out)
 
-        out = torch.reshape(out, (B, -1, *spatial_dims))
+            out = torch.reshape(out, (B, -1, *spatial_dims))
         return out
 
     def _relu_quad_attn(self, qkv: torch.Tensor) -> torch.Tensor:
         """Lightweight quadratic attention with activated query and key."""
-        B = qkv.shape[0]
-        spatial_dims = qkv.shape[2:]
-        spatial_size = spatial_dims.numel()
-        qkv = qkv.reshape(B, -1, 3 * self.dim, spatial_size)
-        q, k, v = qkv.chunk(chunks=3, dim=2)
-        q = self.attn_act(q)
-        k = self.attn_act(k)
+        with torch.autocast(device_type=qkv.device.type, enabled=False):
+            B = qkv.shape[0]
+            spatial_dims = qkv.shape[2:]
+            spatial_size = spatial_dims.numel()
+            qkv = qkv.reshape(B, -1, 3 * self.dim, spatial_size)
+            q, k, v = qkv.chunk(chunks=3, dim=2)
+            q = self.attn_act(q)
+            k = self.attn_act(k)
 
-        att_map = torch.matmul(k.transpose(-1, -2), q)
-        dtype = att_map.dtype
-        if dtype in [torch.float16, torch.bfloat16]:
-            att_map = att_map.float()
-        att_map = att_map / (torch.sum(att_map, dim=2, keepdim=True) + self.eps)
+            att_map = torch.matmul(k.transpose(-1, -2), q)
+            dtype = att_map.dtype
+            if dtype in [torch.float16, torch.bfloat16]:
+                att_map = att_map.float()
+            att_map = att_map / (torch.sum(att_map, dim=2, keepdim=True) + self.eps)
 
-        if self.training and self.attn_dropout is not None:
-            att_map = self.attn_dropout(att_map)
+            if self.training and self.attn_dropout is not None:
+                att_map = self.attn_dropout(att_map)
 
-        att_map = att_map.to(dtype)
-        out = torch.matmul(v, att_map)
-        out = torch.reshape(out, (B, -1, *spatial_dims))
+            att_map = att_map.to(dtype)
+            out = torch.matmul(v, att_map)
+            out = torch.reshape(out, (B, -1, *spatial_dims))
         return out
 
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:

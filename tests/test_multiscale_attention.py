@@ -130,3 +130,45 @@ def test_mla_inspect():
 
 if __name__ == "__main__":
     pytest.main(["-sv", "test_multiscale_attention.py"])
+
+
+@pytest.mark.parametrize(
+    "in_channels,head_dim,n_heads",
+    [(64, 16, 4), (64, 32, 2), (128, 32, 4), (64, 8, 8)],
+)
+def test_mla_aggregation_groups(in_channels, head_dim, n_heads):
+    """Test that the aggregation's point-wise conv groups per head."""
+    block = MultiscaleLinearAttention(2, in_channels, in_channels, head_dim=head_dim)
+    assert block.n_heads == n_heads
+    for agg in block.scale_aggregation:
+        assert agg[0].groups == block.total_dim * 3
+        assert agg[1].groups == 3 * n_heads
+
+
+def test_mla_attn_act_fn():
+    """Test that the query/key kernel function is configurable."""
+    block = MultiscaleLinearAttention(2, 64, 64, attn_act_fn="gelu")
+    assert isinstance(block.attn_act, nn.GELU)
+    assert isinstance(MultiscaleLinearAttention(2, 64, 64).attn_act, nn.ReLU)
+
+
+@pytest.mark.parametrize("out_channels", [40, 64, 96])
+def test_mla_group_norm(out_channels):
+    """Test that group normalization is grouped over the normalized channels."""
+    block = MultiscaleLinearAttention(
+        2, 64, out_channels, norm_type=(None, "group"), num_groups=16
+    )
+    norm = block.proj_out[-1].norm
+    assert norm.num_channels == out_channels
+    assert out_channels % norm.num_groups == 0
+
+
+@pytest.mark.parametrize("wh,dtype", [(16, torch.bfloat16), (4, torch.bfloat16)])
+def test_mla_autocast(wh, dtype):
+    """Test both attention paths under autocast."""
+    block = MultiscaleLinearAttention(2, 64, 64, head_dim=32)
+    sample = torch.randn(1, 64, wh, wh)
+    with torch.autocast("cpu", dtype=dtype):
+        out = block(sample)
+    assert out.shape == sample.shape
+    assert torch.isfinite(out).all()
