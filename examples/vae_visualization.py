@@ -22,7 +22,7 @@ INPUT_SHAPE = (1, 3, 64, 64)
 
 # Build a simple VAE model
 # --8<-- [start:vae]
-from chuchichaestli.models.autoencoder import Decoder, VAE, VAEEncoder
+from chuchichaestli.models.autoencoder import VAE, VAEDecoder, VAEEncoder
 
 encoder = VAEEncoder(
     dimensions=2,
@@ -34,7 +34,7 @@ encoder = VAEEncoder(
     num_layers_per_block=2,
     mid_block_types=("AutoencoderMidBlock",),
 )
-decoder = Decoder(
+decoder = VAEDecoder(
     dimensions=2,
     in_channels=4,
     n_channels=encoder.bottleneck_channels,

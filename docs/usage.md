@@ -166,8 +166,9 @@ into `encoder_args` or `decoder_args`, whose keys are the parameter names of
 [Encoder][chuchichaestli.models.autoencoder.Encoder] and
 [Decoder][chuchichaestli.models.autoencoder.Decoder]. Keys you leave out fall
 back to the defaults of the component itself, which is where each variant keeps its
-architecture: `VAE` builds a `VAEEncoder` that doubles the latent channels, and
-`DCAE` a `DCEncoder`/`DCDecoder` pair of deep-compression blocks.
+architecture: `VAE` builds a `VAEEncoder`/`VAEDecoder` pair whose encoder doubles
+the latent channels, and `DCAE` a `DCEncoder`/`DCDecoder` pair of
+deep-compression blocks.
 
 ```python
 from chuchichaestli.models.autoencoder import DCAE, DCDecoder, DCEncoder

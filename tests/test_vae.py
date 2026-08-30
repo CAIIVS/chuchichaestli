@@ -336,12 +336,31 @@ def test_vae_encoder_refuses_to_drop_the_doubling():
         VAEEncoder(2, 1, 16, 4, double_z=False)
 
 
-def test_vae_builds_its_own_encoder_half():
-    """Test that the flat constructor picks the VAE-specific encoder."""
-    from chuchichaestli.models.autoencoder import VAEEncoder
+def test_vae_builds_its_own_components():
+    """Test that the flat constructor picks the VAE-specific components."""
+    from chuchichaestli.models.autoencoder import VAEDecoder, VAEEncoder
 
     model = VAE.build(latent_dim=4, encoder_args={"n_channels": 16})
     assert isinstance(model, VAE)
     assert isinstance(model.encoder, VAEEncoder)
+    assert isinstance(model.decoder, VAEDecoder)
     assert model.encoder.out_channels == 8
     assert model.latent_dim == 4
+
+
+def test_vae_decoder_takes_the_sampled_latent_width():
+    """Test that the decoding component consumes the latent code after sampling."""
+    from chuchichaestli.models.autoencoder import Decoder, VAEDecoder, VAEEncoder
+
+    encoder = VAEEncoder(2, 1, 16, 4, res_args={"res_groups": 4})
+    decoder = VAEDecoder(
+        2, 4, encoder.bottleneck_channels, 1, res_args={"res_groups": 4}
+    )
+    assert isinstance(decoder, Decoder)
+    assert decoder.in_channels == encoder.out_channels // 2
+
+    model = VAE(encoder, decoder)
+    sample = torch.randn(1, 1, 16, 16)
+    out, posterior = model(sample)
+    assert out.shape == sample.shape
+    assert posterior.mean.shape[1] == decoder.in_channels

@@ -7,11 +7,12 @@ import torch
 from torch import nn
 from torch.distributions import MultivariateNormal, kl
 from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
+from chuchichaestli.models.autoencoder.decoder import Decoder
 from chuchichaestli.models.autoencoder.encoder import Encoder
 from chuchichaestli.models.autoencoder.protocols import DecoderLike, EncoderLike
 
 
-__all__ = ["VAE", "VAEEncoder"]
+__all__ = ["VAE", "VAEDecoder", "VAEEncoder"]
 
 
 class VAEEncoder(Encoder):
@@ -40,6 +41,17 @@ class VAEEncoder(Encoder):
         super().__init__(*args, double_z=True, **kwargs)
 
 
+class VAEDecoder(Decoder):
+    """Decoding component of a variational autoencoder.
+
+    Consumes a latent code that sampling has already collapsed to a single set
+    of channels, so structurally it is a plain `Decoder`; see there for the
+    architecture arguments. It exists as the component a likelihood decoder would
+    occupy, emitting a mean and a variance per output channel the way
+    `VAEEncoder` doubles its latent channels on the way in.
+    """
+
+
 class VAE(Autoencoder):
     """Flexible variational autoencoder implementation.
 
@@ -58,6 +70,7 @@ class VAE(Autoencoder):
     """
 
     encoder_cls: type = VAEEncoder
+    decoder_cls: type = VAEDecoder
 
     def __init__(
         self,
