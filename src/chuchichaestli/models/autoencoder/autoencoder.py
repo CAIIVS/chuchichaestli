@@ -27,7 +27,7 @@ __all__ = ["Autoencoder"]
 
 
 def _reject_sequences(**kwargs) -> None:
-    """Reject per-level sequences on arguments that both halves share.
+    """Reject per-level sequences on arguments that both components share.
 
     Args:
         kwargs: Shared argument names and values.

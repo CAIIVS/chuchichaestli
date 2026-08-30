@@ -90,6 +90,10 @@ class Decoder(nn.Module):
             block_out_channel_mults = block_out_channel_mults[: len(up_block_types)]
         n_mults = len(block_out_channel_mults)
         self.channel_mults = prod(block_out_channel_mults)
+        self.dimensions = dimensions
+        self.in_channels = in_channels
+        self.n_channels = n_channels
+        self.out_channels = out_channels
         if isinstance(num_layers_per_block, int):
             num_layers_per_block = (num_layers_per_block,) * n_mults
         else:

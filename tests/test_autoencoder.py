@@ -262,7 +262,7 @@ if __name__ == "__main__":
     pytest.main(["-v", "test_autoencoder.py"])
 
 
-PER_HALF_CONF = {
+PER_COMPONENT_CONF = {
     "n_channels": 16,
     "latent_dim": 4,
     "block_out_channel_mults": (1, 2, 2),
@@ -276,10 +276,10 @@ PER_HALF_CONF = {
 }
 
 
-def test_per_half_args_follow_each_half_own_path():
-    """Test that each half reads its override dict in its own data-flow order."""
+def test_per_component_args_follow_each_component_own_path():
+    """Test that each component reads its override dict in its own data-flow order."""
     model = Autoencoder(
-        **PER_HALF_CONF,
+        **PER_COMPONENT_CONF,
         encoder_res_args={"res_dropout": (0.1, 0.2, 0.4, 0.5)},
         decoder_res_args={"res_dropout": (0.5, 0.4, 0.2, 0.1)},
     )
@@ -294,15 +294,15 @@ def test_per_half_args_follow_each_half_own_path():
 def test_shared_scalars_fill_keys_absent_from_the_override():
     """Test that an override dict replaces only the keys it names."""
     model = Autoencoder(
-        **PER_HALF_CONF, res_dropout=0.3, encoder_res_args={"res_kernel_size": 1}
+        **PER_COMPONENT_CONF, res_dropout=0.3, encoder_res_args={"res_kernel_size": 1}
     )
     assert model.encoder.down_blocks[0][0].res_block.dropout.p == 0.3
 
 
-def test_each_half_gets_an_independent_argument_dict():
+def test_each_component_gets_an_independent_argument_dict():
     """Test that an encoder override does not leak into the decoder."""
     model = Autoencoder(
-        **PER_HALF_CONF, res_dropout=0.3, encoder_res_args={"res_dropout": 0.6}
+        **PER_COMPONENT_CONF, res_dropout=0.3, encoder_res_args={"res_dropout": 0.6}
     )
     assert model.encoder.down_blocks[0][0].res_block.dropout.p == 0.6
     assert model.decoder.up_blocks[0][0].res_block.dropout.p == 0.3
@@ -316,4 +316,4 @@ def test_each_half_gets_an_independent_argument_dict():
 def test_throws_error_on_sequence_for_a_shared_argument(kwargs):
     """Test that a shared argument rejects sequences and names the dict to use."""
     with pytest.raises(ValueError, match="encoder_"):
-        Autoencoder(**PER_HALF_CONF, **kwargs)
+        Autoencoder(**PER_COMPONENT_CONF, **kwargs)

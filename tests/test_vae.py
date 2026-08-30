@@ -304,8 +304,8 @@ if __name__ == "__main__":
     pytest.main(["-v", "test_vae.py"])
 
 
-def test_per_half_args_reach_the_encoder_only():
-    """Test that a VAE forwards the per-half override dicts to the right child."""
+def test_per_component_args_reach_the_encoder_only():
+    """Test that a VAE forwards the per-component override dicts to the right child."""
     model = VAE(
         n_channels=16,
         latent_dim=4,

@@ -50,7 +50,7 @@ class Encoder(nn.Module):
         kernel_size: int = 3,
         res_args: dict = {},
         attn_args: dict = {},
-        double_z: bool = True,
+        double_z: bool = False,
         out_shortcut: bool = False,
     ):
         """Constructor.
@@ -91,6 +91,10 @@ class Encoder(nn.Module):
             block_out_channel_mults = block_out_channel_mults[: len(down_block_types)]
         n_mults = len(block_out_channel_mults)
         self.channel_mults = prod(block_out_channel_mults)
+        self.dimensions = dimensions
+        self.in_channels = in_channels
+        self.n_channels = n_channels
+        self.double_z = double_z
         if isinstance(num_layers_per_block, int):
             num_layers_per_block = (num_layers_per_block,) * n_mults
         else:
@@ -168,6 +172,7 @@ class Encoder(nn.Module):
                         )
                     )
                     ins = outs
+        self.bottleneck_channels = outs
 
         self.mid_blocks = nn.ModuleList([])
         for j, mid_block_type in enumerate(mid_block_types):

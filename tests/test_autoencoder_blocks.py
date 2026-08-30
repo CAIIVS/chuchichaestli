@@ -17,6 +17,7 @@ from chuchichaestli.models.blocks import (
 )
 from chuchichaestli.models.autoencoder.decoder import Decoder
 from chuchichaestli.models.autoencoder.encoder import Encoder
+from chuchichaestli.models.autoencoder.protocols import DecoderLike, EncoderLike
 
 
 @pytest.mark.parametrize(
@@ -384,3 +385,27 @@ def test_compression_factor_rejects_a_fixed_size_sampler():
     encoder.down_blocks[1] = AdaptiveMaxPool(2, 16, output_size=(8, 8))
     with pytest.raises(ValueError, match="fixed size"):
         encoder.f
+
+
+def test_components_expose_the_metadata_an_autoencoder_reads():
+    """Test that both components satisfy their structural interface."""
+    encoder = Encoder(**F_CONF)
+    decoder = Decoder(2, 4, 64, 1, mid_block_types=(), res_args={"res_groups": 4})
+    assert isinstance(encoder, EncoderLike)
+    assert isinstance(decoder, DecoderLike)
+    assert not isinstance(nn.Identity(), EncoderLike)
+
+
+def test_encoder_reports_the_width_entering_its_out_block():
+    """Test that the bottleneck width follows the levels that were built."""
+    encoder = Encoder(**F_CONF)
+    assert encoder.bottleneck_channels == F_CONF["n_channels"] * encoder.channel_mults
+    assert encoder.out_block.conv.in_channels == encoder.bottleneck_channels
+
+
+def test_encoder_keeps_latent_channels_undoubled_by_default():
+    """Test that an encoder emits one latent channel per requested channel."""
+    encoder = Encoder(**F_CONF, out_channels=4)
+    assert encoder.double_z is False
+    assert encoder.out_channels == 4
+    assert Encoder(**F_CONF, out_channels=4, double_z=True).out_channels == 8
