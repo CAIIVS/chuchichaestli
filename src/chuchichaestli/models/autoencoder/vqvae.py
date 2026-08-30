@@ -5,12 +5,7 @@
 
 import torch
 from torch import nn
-from chuchichaestli.models.autoencoder.autoencoder import (
-    Autoencoder,
-    latent_channels,
-    module_device,
-    pointwise_conv,
-)
+from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
 from chuchichaestli.models.autoencoder.traits import DecoderLike, EncoderLike
 
 
@@ -141,16 +136,12 @@ class VQVAE(Autoencoder):
             vq_dim: Size of the quantized embedding vectors.
             vq_embeddings: Size of the quantization codebook.
         """
-        latent_dim = latent_channels(encoder)
+        latent_dim = getattr(encoder, "latent_channels", encoder.out_channels)
         super().__init__(
             encoder,
             decoder,
-            latent_proj=pointwise_conv(
-                encoder.dimensions, latent_dim, vq_dim, device=module_device(encoder)
-            ),
-            latent_deproj=pointwise_conv(
-                decoder.dimensions, vq_dim, latent_dim, device=module_device(decoder)
-            ),
+            latent_proj=self.projection(encoder, latent_dim, vq_dim),
+            latent_deproj=self.projection(decoder, vq_dim, latent_dim),
         )
         self.vq_dim = vq_dim
         self.quantize = VectorQuantizer(

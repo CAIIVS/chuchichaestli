@@ -462,7 +462,6 @@ def test_components_may_implement_only_part_of_the_interface():
     sample = torch.randn(1, 1, 16, 16)
     assert model(sample).shape == sample.shape
     assert model.latent_dim == 4
-    assert model.double_z is False
 
 
 def test_projections_are_used_as_given_or_omitted():

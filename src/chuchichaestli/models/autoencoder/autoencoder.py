@@ -14,7 +14,7 @@ from chuchichaestli.models.norm import NormTypes
 from collections.abc import Sequence
 
 
-__all__ = ["Autoencoder", "latent_channels", "module_device", "pointwise_conv"]
+__all__ = ["Autoencoder"]
 
 
 ENCODER_RESERVED = {
@@ -31,73 +31,28 @@ DECODER_RESERVED = {
 }
 
 
-def latent_channels(encoder: EncoderLike) -> int:
-    """Number of latent channels an encoder produces.
-
-    Args:
-        encoder: Encoding component to inspect.
-    """
-    if getattr(encoder, "double_z", False):
-        return encoder.out_channels // 2
-    return encoder.out_channels
-
-
-def pointwise_conv(
-    dimensions: int,
-    in_channels: int,
-    out_channels: int,
-    device: torch.device | None = None,
-) -> nn.Module:
-    """Channel projection that leaves the spatial dimensions untouched.
-
-    Args:
-        dimensions: Number of spatial dimensions.
-        in_channels: Number of input channels.
-        out_channels: Number of output channels.
-        device: Device to place the convolution on.
-    """
-    return DIM_TO_CONV_MAP[dimensions](
-        in_channels,
-        out_channels,
-        kernel_size=1,
-        stride=1,
-        padding="same",
-        device=device,
-    )
-
-
-def module_device(module: nn.Module) -> torch.device | None:
-    """Device a module's parameters live on, or `None` if it has none.
-
-    Args:
-        module: Module to inspect.
-    """
-    return next((p.device for p in module.parameters()), None)
-
-
-def _resolve_projection(spec: nn.Module | bool | None, factory) -> nn.Module | None:
-    """Turn a projection specification into a module or `None`.
-
-    Args:
-        spec: `True` to build the default projection, `False`/`None` for none,
-            or a module to use as given.
-        factory: Callable building the default projection.
-    """
-    if spec is True:
-        return factory()
-    if spec is False or spec is None:
-        return None
-    return spec
-
-
-def _with_shared_args(component_args: dict, res_args: dict, attn_args: dict) -> dict:
-    """Merge the shared block arguments into a component's own arguments.
+def _merge_shared_args(
+    component_args: dict,
+    res_args: dict,
+    attn_args: dict,
+    reserved: dict[str, str],
+    name: str,
+) -> dict:
+    """Merge the shared block arguments into one component's own arguments.
 
     Args:
         component_args: Arguments for one component; its own block arguments win.
         res_args: Shared residual block arguments.
         attn_args: Shared attention block arguments.
+        reserved: Keys the model sets itself, mapped to what to pass instead.
+        name: Name of the checked dict, for the error message.
+
+    Raises:
+        ValueError: If a reserved key is present.
     """
+    for key, hint in reserved.items():
+        if key in component_args:
+            raise ValueError(f'{name}["{key}"]: set by the model; {hint}.')
     return {
         **component_args,
         "res_args": {**res_args, **component_args.get("res_args", {})},
@@ -121,22 +76,6 @@ def _reject_sequences(**kwargs) -> None:
                 f"{name}: shared arguments take a single value; pass per-level values"
                 f' in encoder_args["{group}"] or decoder_args["{group}"] instead.'
             )
-
-
-def _reject_reserved(args: dict, reserved: dict[str, str], name: str) -> None:
-    """Reject per-component keys that the `build` constructor sets itself.
-
-    Args:
-        args: Per-component argument dict to check.
-        reserved: Reserved keys mapped to what to pass instead.
-        name: Name of the checked dict, for the error message.
-
-    Raises:
-        ValueError: If a reserved key is present.
-    """
-    for key, hint in reserved.items():
-        if key in args:
-            raise ValueError(f'{name}["{key}"]: set by the model; {hint}.')
 
 
 class Autoencoder(nn.Module):
@@ -184,25 +123,37 @@ class Autoencoder(nn.Module):
 
         self.encoder = encoder
         self.decoder = decoder
-        self.latent_proj = _resolve_projection(
-            latent_proj,
-            lambda: pointwise_conv(
-                encoder.dimensions,
-                encoder.out_channels,
-                encoder.out_channels,
-                device=module_device(encoder),
-            ),
-        )
-        self.latent_deproj = _resolve_projection(
-            latent_deproj,
-            lambda: pointwise_conv(
-                decoder.dimensions,
-                latent_channels(encoder),
-                latent_channels(encoder),
-                device=module_device(decoder),
-            ),
+        if latent_proj is True:
+            latent_proj = self.projection(
+                encoder, encoder.out_channels, encoder.out_channels
+            )
+        if latent_deproj is True:
+            latent_deproj = self.projection(decoder, self.latent_dim, self.latent_dim)
+        self.latent_proj = latent_proj if isinstance(latent_proj, nn.Module) else None
+        self.latent_deproj = (
+            latent_deproj if isinstance(latent_deproj, nn.Module) else None
         )
         self._check_components()
+
+    @staticmethod
+    def projection(
+        component: EncoderLike | DecoderLike, in_channels: int, out_channels: int
+    ) -> nn.Module:
+        """Pointwise convolution, placed on the device of the component it serves.
+
+        Args:
+            component: Encoding or decoding component the projection is attached to.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+        """
+        return DIM_TO_CONV_MAP[component.dimensions](
+            in_channels,
+            out_channels,
+            kernel_size=1,
+            stride=1,
+            padding="same",
+            device=next((p.device for p in component.parameters()), None),
+        )
 
     def _check_components(self) -> None:
         """Check that the components and their projections agree on shape.
@@ -230,7 +181,7 @@ class Autoencoder(nn.Module):
         dec_in = getattr(self.decoder, "in_channels", None)
         expected = getattr(self.latent_deproj, "out_channels", None)
         if expected is None and enc_out is not None:
-            expected = latent_channels(self.encoder)
+            expected = self.latent_dim
         if None not in (dec_in, expected) and dec_in != expected:
             raise ValueError(
                 f"decoder takes {dec_in} latent channels but receives {expected};"
@@ -313,8 +264,6 @@ class Autoencoder(nn.Module):
             attn_groups=attn_groups,
             attn_kernel_size=attn_kernel_size,
         )
-        _reject_reserved(encoder_args, ENCODER_RESERVED, "encoder_args")
-        _reject_reserved(decoder_args, DECODER_RESERVED, "decoder_args")
 
         res_args = {
             "res_act_fn": res_act_fn,
@@ -336,25 +285,26 @@ class Autoencoder(nn.Module):
             "local_args": local_args,
         }
 
+        enc_args = _merge_shared_args(
+            encoder_args, res_args, attn_args, ENCODER_RESERVED, "encoder_args"
+        )
+        dec_args = _merge_shared_args(
+            decoder_args, res_args, attn_args, DECODER_RESERVED, "decoder_args"
+        )
         encoder = cls.encoder_cls(
             dimensions=dimensions,
             in_channels=in_channels,
             out_channels=latent_dim,
-            **_with_shared_args(encoder_args, res_args, attn_args),
+            **enc_args,
         )
         decoder = cls.decoder_cls(
             dimensions=dimensions,
-            in_channels=latent_channels(encoder),
+            in_channels=encoder.latent_channels,
             n_channels=encoder.bottleneck_channels,
             out_channels=out_channels,
-            **_with_shared_args(decoder_args, res_args, attn_args),
+            **dec_args,
         )
         return cls(encoder=encoder, decoder=decoder, **kwargs)
-
-    @property
-    def double_z(self) -> bool:
-        """Whether the encoder emits both latent mean and variance channels."""
-        return getattr(self.encoder, "double_z", False)
 
     @property
     def channel_mults(self) -> int:
@@ -364,7 +314,7 @@ class Autoencoder(nn.Module):
     @property
     def latent_dim(self) -> int:
         """Latent channel dimension."""
-        return latent_channels(self.encoder)
+        return getattr(self.encoder, "latent_channels", self.encoder.out_channels)
 
     @property
     def levels(self) -> tuple[int, int]:

@@ -50,7 +50,6 @@ class Encoder(nn.Module):
         kernel_size: int = 3,
         res_args: dict = {},
         attn_args: dict = {},
-        double_z: bool = False,
         out_shortcut: bool = False,
     ):
         """Constructor.
@@ -59,7 +58,7 @@ class Encoder(nn.Module):
             dimensions: Number of dimensions.
             in_channels: Number of input channels.
             n_channels: Number of channels in the hidden layer.
-            out_channels: Number of output channels (latent space; doubled if `double_z`).
+            out_channels: Number of output channels (latent space).
             down_block_types: Type of down blocks to use for each level.
             block_out_channel_mults: Multiplier for output channels of each block.
             num_layers_per_block: Number of blocks per level (blocks are repeated if `>1`).
@@ -77,7 +76,6 @@ class Encoder(nn.Module):
             attn_args: Arguments for attention blocks, per block position or per
                 block that has attention. `norm_type`, `scales`, `context_args`
                 and `local_args` are passed through unchanged.
-            double_z: Whether to double the latent space.
             out_shortcut: Whether to use a shortcut for the output block.
         """
         super().__init__()
@@ -94,7 +92,7 @@ class Encoder(nn.Module):
         self.dimensions = dimensions
         self.in_channels = in_channels
         self.n_channels = n_channels
-        self.double_z = double_z
+        self.latent_channels = out_channels
         if isinstance(num_layers_per_block, int):
             num_layers_per_block = (num_layers_per_block,) * n_mults
         else:
@@ -185,7 +183,7 @@ class Encoder(nn.Module):
             self.mid_blocks.append(mid_block)
 
         self.levels = (len(self.down_blocks) + 1) // 2
-        self.out_channels = 2 * out_channels if double_z else out_channels
+        self.out_channels = out_channels
         self.out_block = BLOCK_MAP[out_block_type](
             dimensions=dimensions,
             in_channels=outs,

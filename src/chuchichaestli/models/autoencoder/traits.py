@@ -29,9 +29,11 @@ class EncoderLike(Protocol):
         dimensions: Number of spatial dimensions.
         in_channels: Number of input channels.
         n_channels: Number of channels after the input convolution.
-        out_channels: Number of latent channels produced (doubled if `double_z`).
+        out_channels: Number of channels emitted.
+        latent_channels: Number of latent channels `out_channels` stands for;
+            smaller than `out_channels` when several channels describe one
+            latent channel (a mean and a variance, say).
         bottleneck_channels: Number of channels entering the output block.
-        double_z: Whether the latent channels hold both mean and variance.
         channel_mults: Total channel multiplication across all levels.
         levels: Number of spatially hierarchical levels.
     """
@@ -40,8 +42,8 @@ class EncoderLike(Protocol):
     in_channels: int
     n_channels: int
     out_channels: int
+    latent_channels: int
     bottleneck_channels: int
-    double_z: bool
     channel_mults: int
     levels: int
 

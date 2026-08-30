@@ -22,23 +22,34 @@ class VAEEncoder(Encoder):
     them; see `Encoder` for the architecture arguments.
     """
 
-    def __init__(self, *args, double_z: bool = True, **kwargs):
+    def __init__(
+        self,
+        dimensions: int = 2,
+        in_channels: int = 1,
+        n_channels: int = 64,
+        out_channels: int = 1,
+        **kwargs,
+    ):
         """Constructor.
 
-        Args:
-            args: Positional architecture arguments for `Encoder`.
-            double_z: Whether to double the latent space; a VAE requires `True`.
-            kwargs: Keyword architecture arguments for `Encoder`.
+        The leading arguments are named so that `out_channels` is doubled
+        whether it is passed positionally or by keyword.
 
-        Raises:
-            ValueError: If the doubling is disabled.
+        Args:
+            dimensions: Number of dimensions.
+            in_channels: Number of input channels.
+            n_channels: Number of channels in the hidden layer.
+            out_channels: Number of latent channels; twice as many are emitted.
+            kwargs: Further architecture arguments for `Encoder`.
         """
-        if not double_z:
-            raise ValueError(
-                "VAEEncoder doubles the latent channels to carry mean and variance;"
-                " use a plain Encoder for a single latent code."
-            )
-        super().__init__(*args, double_z=True, **kwargs)
+        super().__init__(
+            dimensions=dimensions,
+            in_channels=in_channels,
+            n_channels=n_channels,
+            out_channels=2 * out_channels,
+            **kwargs,
+        )
+        self.latent_channels = out_channels
 
 
 class VAEDecoder(Decoder):
@@ -90,10 +101,12 @@ class VAE(Autoencoder):
         Raises:
             ValueError: If the encoder does not double its latent channels.
         """
-        if not getattr(encoder, "double_z", False):
+        latent = getattr(encoder, "latent_channels", encoder.out_channels)
+        if encoder.out_channels != 2 * latent:
             raise ValueError(
-                "VAE reads a mean and a variance from the latent channels; pass an"
-                " encoder that doubles them (e.g. VAEEncoder, or double_z=True)."
+                f"VAE reads a mean and a variance from the latent channels, so the"
+                f" encoder must emit twice its {latent} latent channels; it emits"
+                f" {encoder.out_channels} (e.g. use a VAEEncoder)."
             )
         super().__init__(encoder, decoder, latent_proj, latent_deproj)
         self.softplus = nn.Softplus()

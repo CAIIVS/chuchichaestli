@@ -403,9 +403,8 @@ def test_encoder_reports_the_width_entering_its_out_block():
     assert encoder.out_block.conv.in_channels == encoder.bottleneck_channels
 
 
-def test_encoder_keeps_latent_channels_undoubled_by_default():
-    """Test that an encoder emits one latent channel per requested channel."""
+def test_encoder_emits_one_channel_per_latent_channel():
+    """Test that a plain encoder emits exactly the latent channels asked for."""
     encoder = Encoder(**F_CONF, out_channels=4)
-    assert encoder.double_z is False
     assert encoder.out_channels == 4
-    assert Encoder(**F_CONF, out_channels=4, double_z=True).out_channels == 8
+    assert encoder.latent_channels == encoder.out_channels

@@ -324,16 +324,17 @@ def test_vae_requires_an_encoder_that_doubles_the_latent():
 
     encoder = Encoder(2, 1, 16, 4, res_args={"res_groups": 4})
     decoder = Decoder(2, 4, encoder.bottleneck_channels, 1, res_args={"res_groups": 4})
-    with pytest.raises(ValueError, match="double_z"):
+    with pytest.raises(ValueError, match="twice its 4 latent channels"):
         VAE(encoder, decoder)
 
 
-def test_vae_encoder_refuses_to_drop_the_doubling():
-    """Test that the VAE encoder cannot be built without doubled channels."""
+def test_vae_encoder_emits_two_channels_per_latent_channel():
+    """Test that the VAE encoder doubles the latent channels it is asked for."""
     from chuchichaestli.models.autoencoder import VAEEncoder
 
-    with pytest.raises(ValueError, match="mean and variance"):
-        VAEEncoder(2, 1, 16, 4, double_z=False)
+    encoder = VAEEncoder(2, 1, 16, out_channels=4, res_args={"res_groups": 4})
+    assert encoder.latent_channels == 4
+    assert encoder.out_channels == 8
 
 
 def test_vae_builds_its_own_components():

@@ -64,7 +64,6 @@ class DCEncoder(Encoder):
         kernel_size: int = 3,
         res_args: dict = {},
         attn_args: dict = {},
-        double_z: bool = False,
         out_shortcut: bool = True,
     ):
         """Constructor.
@@ -86,7 +85,6 @@ class DCEncoder(Encoder):
             kernel_size: Kernel size for the output convolution.
             res_args: Arguments for residual blocks, overriding `DC_RES_ARGS`.
             attn_args: Arguments for attention blocks, overriding `DC_ATTN_ARGS`.
-            double_z: Whether to double the latent space.
             out_shortcut: Whether to use a shortcut for the output block.
         """
         super().__init__(
@@ -106,7 +104,6 @@ class DCEncoder(Encoder):
             kernel_size=kernel_size,
             res_args={**DC_RES_ARGS, **res_args},
             attn_args={**DC_ATTN_ARGS, **attn_args},
-            double_z=double_z,
             out_shortcut=out_shortcut,
         )
 
