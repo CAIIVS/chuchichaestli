@@ -25,9 +25,17 @@ from collections.abc import Sequence
 __all__ = ["DCAE", "DCDecoder", "DCEncoder"]
 
 
-# Block arguments both components share; `DCAE.build` repeats them as its own
-# defaults so that building and injecting the components give the same model.
-DC_RES_ARGS = {"res_norm_type": "rms"}
+# Block arguments both components share. These mirror what `DCAE.build` resolves
+# to, so that building and injecting the components give the same model; the
+# values `DCAE.build` inherits unchanged from `Autoencoder.build` are repeated
+# here because the components are constructed without going through it.
+DC_RES_ARGS = {
+    "res_act_fn": "silu",
+    "res_dropout": 0.0,
+    "res_groups": 8,
+    "res_norm_type": "rms",
+    "res_kernel_size": 3,
+}
 DC_ATTN_ARGS = {
     "norm_type": "rms",
     "context_args": {"norm_type": (None, "rms")},

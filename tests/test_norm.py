@@ -7,7 +7,13 @@ import pytest
 import torch
 from typing import get_args
 
-from chuchichaestli.models.norm import AdaNorm, AdaptiveBatchNorm, Norm, NormTypes
+from chuchichaestli.models.norm import (
+    AdaNorm,
+    AdaptiveBatchNorm,
+    Norm,
+    NormTypes,
+    RMSNorm,
+)
 
 
 def test_norm_keeps_the_wrapped_layer_defaults():
@@ -33,6 +39,36 @@ def test_norm_drops_the_elementwise_affine_parameters(norm_type):
     norm = Norm(2, norm_type, 8, 0, affine=False)
     assert norm.norm.elementwise_affine is False
     assert norm.norm.weight is None
+
+
+def test_rms_norm_learns_a_shift():
+    """Test that RMS normalization learns a shift alongside the scale."""
+    norm = Norm(2, "rms", 8, 0).norm
+    assert isinstance(norm, RMSNorm)
+    assert dict(norm.named_parameters()).keys() == {"weight", "bias"}
+    assert norm.eps == 1e-5
+
+    x = torch.randn(2, 8, 4, 4).movedim(1, -1)
+    with torch.no_grad():
+        baseline = norm(x)
+        norm.bias.fill_(1.0)
+    assert torch.allclose(norm(x), baseline + 1.0, atol=1e-6)
+
+
+def test_rms_norm_without_bias_matches_torch():
+    """Test that the shift is optional and otherwise a plain `nn.RMSNorm`."""
+    norm = RMSNorm(8, bias=False)
+    assert norm.bias is None
+    reference = torch.nn.RMSNorm(8, eps=1e-5)
+    x = torch.randn(2, 4, 8)
+    assert torch.allclose(norm(x), reference(x), atol=1e-6)
+
+
+def test_rms_norm_gradients_reach_the_shift():
+    """Test that the shift is trainable."""
+    norm = RMSNorm(8)
+    norm(torch.randn(2, 4, 8)).sum().backward()
+    assert norm.bias.grad is not None and norm.bias.grad.abs().sum() > 0
 
 
 @pytest.mark.parametrize("dimensions", [1, 2, 3])

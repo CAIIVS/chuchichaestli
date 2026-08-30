@@ -6,6 +6,7 @@
 import torch
 from torch import nn
 from chuchichaestli.models.activations import ACTIVATION_FUNCTIONS, ActivationTypes
+from collections.abc import Sequence
 from typing import Literal
 
 
@@ -60,7 +61,7 @@ class Norm(nn.Module):
             case "batch" if dimensions == 3:
                 self.norm = nn.BatchNorm3d(channels, **kwargs)
             case "rms":
-                self.norm = nn.RMSNorm(channels, **kwargs)
+                self.norm = RMSNorm(channels, **kwargs)
             case "layer":
                 self.norm = nn.LayerNorm(channels, **kwargs)
             case "adabatch":
@@ -130,6 +131,53 @@ class AdaNorm(nn.Module):
         scale, shift = self.proj(self.act(emb)).chunk(2, dim=-1)
         idx = (slice(None), slice(None)) + (None,) * self.dimensions
         return self.norm(x) * (1 + scale[idx]) + shift[idx]
+
+
+class RMSNorm(nn.RMSNorm):
+    """Root-mean-square normalization that also learns a shift.
+
+    `torch.nn.RMSNorm` only learns a scale, and defaults its epsilon to the
+    resolution of the input dtype.
+    """
+
+    def __init__(
+        self,
+        normalized_shape: int | Sequence[int],
+        eps: float = 1e-5,
+        elementwise_affine: bool = True,
+        bias: bool = True,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        """Initialize the normalization layer.
+
+        Args:
+            normalized_shape: Shape of the trailing dimensions to normalize over.
+            eps: Numerical stability constant.
+            elementwise_affine: Whether the layer learns a scale, and a shift if
+                `bias`. If `False`, the layer has no parameters at all.
+            bias: Whether the layer learns a shift alongside the scale.
+            device: Compute device holding the parameters.
+            dtype: Data type of the parameters.
+        """
+        super().__init__(
+            normalized_shape,
+            eps=eps,
+            elementwise_affine=elementwise_affine,
+            device=device,
+            dtype=dtype,
+        )
+        if elementwise_affine and bias:
+            self.bias = nn.Parameter(
+                torch.zeros(self.normalized_shape, device=device, dtype=dtype)
+            )
+        else:
+            self.register_parameter("bias", None)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the normalization layer."""
+        x = super().forward(x)
+        return x if self.bias is None else x + self.bias
 
 
 class AdaptiveBatchNorm(nn.Module):
