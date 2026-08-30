@@ -12,6 +12,7 @@ from chuchichaestli.models.autoencoder.traits import DecoderLike, EncoderLike
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
 from collections.abc import Sequence
+from itertools import chain
 
 
 __all__ = ["Autoencoder"]
@@ -139,20 +140,27 @@ class Autoencoder(nn.Module):
     def projection(
         component: EncoderLike | DecoderLike, in_channels: int, out_channels: int
     ) -> nn.Module:
-        """Pointwise convolution, placed on the device of the component it serves.
+        """Pointwise convolution matching the component it serves.
+
+        Device and dtype are read from the component's first parameter or
+        buffer, so a component placed before the model is assembled keeps the
+        projection alongside it; a component holding neither leaves both to the
+        torch defaults.
 
         Args:
             component: Encoding or decoding component the projection is attached to.
             in_channels: Number of input channels.
             out_channels: Number of output channels.
         """
+        ref = next(chain(component.parameters(), component.buffers()), None)
         return DIM_TO_CONV_MAP[component.dimensions](
             in_channels,
             out_channels,
             kernel_size=1,
             stride=1,
             padding="same",
-            device=next((p.device for p in component.parameters()), None),
+            device=None if ref is None else ref.device,
+            dtype=None if ref is None else ref.dtype,
         )
 
     def _check_components(self) -> None:

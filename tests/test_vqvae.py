@@ -273,3 +273,13 @@ def test_injected_vqvae_wires_the_codebook_between_the_components():
     out, loss, _ = model(sample)
     assert out.shape == sample.shape
     assert loss.ndim == 0
+
+
+def test_vqvae_rejects_an_encoder_without_a_single_latent_code():
+    """Test that an encoder describing a latent with several outputs is refused."""
+    from chuchichaestli.models.autoencoder import Decoder, VAEEncoder
+
+    encoder = VAEEncoder(2, 1, 16, 4, res_args={"res_groups": 4})
+    decoder = Decoder(2, 4, encoder.bottleneck_channels, 1, res_args={"res_groups": 4})
+    with pytest.raises(ValueError, match="must emit its 4 latent channels"):
+        VQVAE(encoder, decoder, vq_dim=8, vq_embeddings=32)

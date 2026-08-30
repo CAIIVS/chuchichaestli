@@ -134,6 +134,14 @@ class VQVAE(Autoencoder):
             vq_embeddings: Size of the quantization codebook.
         """
         latent_dim = getattr(encoder, "latent_channels", encoder.out_channels)
+        if encoder.out_channels != latent_dim:
+            raise ValueError(
+                f"VQVAE quantizes the latent code as it is, so the encoder must emit"
+                f" its {latent_dim} latent channels; this one emits"
+                f" {encoder.out_channels} (an encoder that describes each latent"
+                " channel with several outputs, such as VAEEncoder, has no"
+                " single code to quantize)."
+            )
         super().__init__(
             encoder,
             decoder,
