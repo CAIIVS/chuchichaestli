@@ -11,7 +11,7 @@ from chuchichaestli.models.autoencoder.autoencoder import (
     module_device,
     pointwise_conv,
 )
-from chuchichaestli.models.autoencoder.protocols import DecoderLike, EncoderLike
+from chuchichaestli.models.autoencoder.traits import DecoderLike, EncoderLike
 
 
 __all__ = ["VectorQuantizer", "VQVAE"]

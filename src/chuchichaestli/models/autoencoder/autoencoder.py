@@ -8,7 +8,7 @@ from torch import nn
 from chuchichaestli.models.activations import ActivationTypes
 from chuchichaestli.models.autoencoder.decoder import Decoder
 from chuchichaestli.models.autoencoder.encoder import Encoder
-from chuchichaestli.models.autoencoder.protocols import DecoderLike, EncoderLike
+from chuchichaestli.models.autoencoder.traits import DecoderLike, EncoderLike
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
 from collections.abc import Sequence

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Structural interfaces for the two components of an autoencoder."""
+"""Traits the two components of an autoencoder implement."""
 
 from typing import Protocol, runtime_checkable
 
@@ -21,9 +21,9 @@ class EncoderLike(Protocol):
 
     Rendering a model with `chuchichaestli.utils.visualization` additionally
     requires a `down_blocks` sequence of level stages and downsampling blocks.
-    Submodules are excluded from the protocol itself because `isinstance` resolves
-    members with `inspect.getattr_static`, which does not see the children an
-    `nn.Module` exposes through `__getattr__`.
+    Submodules are excluded from the trait itself because `isinstance` resolves
+    protocol members with `inspect.getattr_static`, which does not see the
+    children an `nn.Module` exposes through `__getattr__`.
 
     Attributes:
         dimensions: Number of spatial dimensions.
@@ -69,7 +69,7 @@ class DecoderLike(Protocol):
 
     Rendering a model with `chuchichaestli.utils.visualization` additionally
     requires an `up_blocks` sequence of level stages and upsampling blocks (see
-    `EncoderLike` for why submodules are not protocol members).
+    `EncoderLike` for why submodules are not trait members).
 
     Attributes:
         dimensions: Number of spatial dimensions.
