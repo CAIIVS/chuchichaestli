@@ -402,9 +402,10 @@ def _assert_dc_structure(model):
     assert [type(s[0]).__name__ for s in model.encoder.down_blocks[::2]] == [
         "DCAutoencoderDownBlock"
     ] * 3 + ["EfficientViTBlock"] * 3
+    # data flow runs deepest level first, so the decoder mirrors the encoder
     assert [type(s[0]).__name__ for s in model.decoder.up_blocks[::2]] == [
-        "DCAutoencoderUpBlock"
-    ] * 3 + ["EfficientViTBlock"] * 3
+        "EfficientViTBlock"
+    ] * 3 + ["DCAutoencoderUpBlock"] * 3
     assert all(
         isinstance(b, DownsampleUnshuffle) for b in model.encoder.down_blocks[1::2]
     )
@@ -457,5 +458,30 @@ def test_dcae_components_keep_the_default_widths():
     assert enc["norm_type"].default == "rms"
     assert dec["n_channels"].default == 1024
     assert dec["block_out_channel_mults"].default == (1, 2, 1, 2, 2)
+    assert (
+        dec["up_block_types"].default
+        == ("EfficientViTBlock",) * 3 + ("DCAutoencoderUpBlock",) * 3
+    )
     assert dec["act_fn"].default == "relu"
     assert inspect.signature(DCAE.build).parameters["latent_dim"].default == 32
+
+
+def test_dcae_runs_attention_on_the_compressed_levels():
+    """Test that attention sits at the low resolutions in both components."""
+    model = DCAE.build(**DCAE_REDUCED)
+    seen = []
+    handles = [
+        stage[0].register_forward_hook(
+            lambda mod, inp, out: seen.append((type(mod).__name__, inp[0].shape[-1]))
+        )
+        for stage in (*model.encoder.down_blocks[::2], *model.decoder.up_blocks[::2])
+    ]
+    with torch.no_grad():
+        model(torch.randn(1, 1, 64, 64))
+    for handle in handles:
+        handle.remove()
+
+    attn = [size for name, size in seen if name == "EfficientViTBlock"]
+    conv = [size for name, size in seen if name != "EfficientViTBlock"]
+    assert attn and conv
+    assert max(attn) <= min(conv)

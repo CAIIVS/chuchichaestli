@@ -112,7 +112,8 @@ class DCDecoder(Decoder):
     """Decoding component of a deep-compression autoencoder.
 
     Expands with channel-shuffling upsamplers, mirroring `DCEncoder`; see
-    `Decoder` for what each argument does.
+    `Decoder` for what each argument does. Blocks are listed in order of data
+    flow, deepest level first, so attention precedes the convolutional blocks.
     """
 
     def __init__(
@@ -123,9 +124,8 @@ class DCDecoder(Decoder):
         out_channels: int = 1,
         in_block_type: DecoderInBlockTypes = "DCDecoderInBlock",
         mid_block_types: Sequence[AutoencoderMidBlockTypes] = (),
-        up_block_types: Sequence[AutoencoderUpBlockTypes] = ("DCAutoencoderUpBlock",)
-        * 3
-        + ("EfficientViTBlock",) * 3,
+        up_block_types: Sequence[AutoencoderUpBlockTypes] = ("EfficientViTBlock",) * 3
+        + ("DCAutoencoderUpBlock",) * 3,
         block_out_channel_mults: Sequence[int] = (1, 2, 1, 2, 2),
         num_layers_per_block: int | Sequence[int] = 3,
         upsample_type: UpsampleTypes = "UpsampleShuffle",
