@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.16.4",
+    "ruff==0.16.5",
     "pytest>=8.3.4",
     "pytest-cov>=6.2.1",
 ]
@@ -54,7 +54,7 @@ viz = [
     "matplotlib>=3.7",
 ]
 all = [
-    "ruff==0.16.4",
+    "ruff==0.16.5",
     "pre-commit>=3.7.0",
     "pytest>=8.3.4",
     "pytest-cov>=6.2.1",
@@ -82,7 +82,7 @@ gpu = [
     "torchvision>=0.20.1",
 ]
 dev = [
-    "ruff==0.16.4",
+    "ruff==0.16.5",
     "pre-commit>=3.7.0",
     "pytest>=8.3.4",
     "pytest-cov>=6.2.1",
