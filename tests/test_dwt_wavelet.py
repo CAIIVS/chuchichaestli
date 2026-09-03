@@ -256,11 +256,23 @@ class TestTensorsAndState:
     """Tests for the tensor cache and pickling."""
 
     def test_filters_are_cached_per_dtype_and_device(self):
-        """Test that repeated requests return the very same tensors."""
+        """Test that repeated requests share the storage they were built into."""
         w = Wavelet.from_name("db2")
         first = w.filters(torch.float32, "cpu")
-        assert w.filters(torch.float32, "cpu") is first
-        assert w.filters(torch.float64, "cpu") is not first
+        again = w.filters(torch.float32, "cpu")
+        assert all(a.data_ptr() == b.data_ptr() for a, b in zip(first, again))
+        other = w.filters(torch.float64, "cpu")
+        assert all(a.data_ptr() != b.data_ptr() for a, b in zip(first, other))
+
+    def test_the_shared_bank_cannot_be_marked_by_a_caller(self):
+        """Test that one caller marking the filters does not reach the next."""
+        w = Wavelet.from_name("db2")
+        w.filters(torch.float64, "cpu")[0].requires_grad_(True)
+        assert not any(f.requires_grad for f in w.filters(torch.float64, "cpu"))
+
+    def test_lookup_by_name_is_shared(self):
+        """Test that a repeated lookup does not derive the bank again."""
+        assert Wavelet.from_name("db4") is Wavelet.from_name("db4")
 
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
     def test_filters_respect_the_requested_dtype(self, dtype):

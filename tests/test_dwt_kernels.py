@@ -136,7 +136,10 @@ class TestAgreement:
         from chuchichaestli.dwt.wavelet import Wavelet
 
         wavelet = Wavelet.from_name("db2")
-        dec_lo, dec_hi, _, _ = wavelet.filters(torch.float64, "cpu")
+        # instances are shared, so the bank is cloned before it is marked
+        dec_lo, dec_hi, _, _ = (
+            filt.clone() for filt in wavelet.filters(torch.float64, "cpu")
+        )
         with pytest.raises(ValueError, match="filters are constants"):
             _ext.dwt_axis(
                 torch.randn(1, 1, 8, dtype=torch.float64),
