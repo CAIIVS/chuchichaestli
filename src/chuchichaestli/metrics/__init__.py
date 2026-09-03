@@ -8,6 +8,16 @@ from chuchichaestli.metrics.psnr import PSNR
 from chuchichaestli.metrics.ssim import SSIM, SSIMLoss
 from chuchichaestli.metrics.fid import FID
 from chuchichaestli.metrics.lpips import LPIPSLoss
+from chuchichaestli.metrics.wavelet import GaussianLoss, WaveletLoss
 
 
-__all__ = ["MSE", "PSNR", "SSIM", "SSIMLoss", "FID", "LPIPSLoss"]
+__all__ = [
+    "MSE",
+    "PSNR",
+    "SSIM",
+    "SSIMLoss",
+    "FID",
+    "LPIPSLoss",
+    "GaussianLoss",
+    "WaveletLoss",
+]
