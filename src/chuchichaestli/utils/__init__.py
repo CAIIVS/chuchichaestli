@@ -13,6 +13,7 @@ from chuchichaestli.utils.functools import (
     broadcast_kwargs,
 )
 from chuchichaestli.utils.formatting import metric_suffix
+from chuchichaestli.utils.tensors import as_inexact, view_along_axis
 from chuchichaestli.utils.modules import (
     info_forward_pass,
     layer_info,
@@ -37,6 +38,8 @@ __all__ = [
     "broadcast",
     "broadcast_kwargs",
     "metric_suffix",
+    "as_inexact",
+    "view_along_axis",
     "info_forward_pass",
     "layer_info",
     "clear_info_cache",
