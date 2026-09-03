@@ -23,6 +23,7 @@ __all__ = [
     "dwt_coeff_len",
     "dwt_max_level",
     "dwtn",
+    "dwtn_approx",
     "idwt",
     "idwtn",
     "subband_keys",
@@ -158,6 +159,26 @@ def _bank(
     return pair.repeat(groups, 1, *([1] * dimensions))
 
 
+def _pad_for_analysis(
+    h: torch.Tensor, axis: int, filter_len: int, mode: ExtensionModeTypes
+) -> torch.Tensor:
+    """Extend one spatial axis by what the analysis convolution consumes.
+
+    Args:
+        h: Input tensor, shaped `(B, G, *spatial)`.
+        axis: Spatial axis to extend.
+        filter_len: Length of the decomposition filters.
+        mode: Signal extension mode.
+    """
+    length = h.shape[2 + axis]
+    if mode == "periodization":
+        if length % 2:
+            # An odd axis is made even by repeating its last sample.
+            h = pad_signal(h, 2 + axis, 0, 1, "constant")
+        return pad_signal(h, 2 + axis, filter_len // 2 - 1, filter_len // 2, "periodic")
+    return pad_signal(h, 2 + axis, filter_len - 2, filter_len - 2 + (length % 2), mode)
+
+
 def _analysis(
     h: torch.Tensor,
     lo: torch.Tensor,
@@ -176,18 +197,31 @@ def _analysis(
     """
     dimensions = h.ndim - 2
     groups = h.shape[1]
-    filter_len = lo.numel()
-    length = h.shape[2 + axis]
-    if mode == "periodization":
-        if length % 2:
-            # An odd axis is made even by repeating its last sample.
-            h = pad_signal(h, 2 + axis, 0, 1, "constant")
-        h = pad_signal(h, 2 + axis, filter_len // 2 - 1, filter_len // 2, "periodic")
-    else:
-        pad_lo, pad_hi = filter_len - 2, filter_len - 2 + (length % 2)
-        h = pad_signal(h, 2 + axis, pad_lo, pad_hi, mode)
+    h = _pad_for_analysis(h, axis, lo.numel(), mode)
     # `conv` cross-correlates, so the filters are flipped to convolve.
     weight = _bank(lo.flip(0), hi.flip(0), groups, axis, dimensions)
+    stride = [1] * dimensions
+    stride[axis] = 2
+    return DIM_TO_CONV_FN_MAP[dimensions](h, weight, stride=stride, groups=groups)
+
+
+def _analysis_lowpass(
+    h: torch.Tensor, lo: torch.Tensor, axis: int, mode: ExtensionModeTypes
+) -> torch.Tensor:
+    """Keep only the low-pass half of every band of `h` along one spatial axis.
+
+    Args:
+        h: Bands so far, shaped `(B, G, *spatial)`.
+        lo: Decomposition low-pass filter.
+        axis: Spatial axis to transform.
+        mode: Signal extension mode.
+    """
+    dimensions = h.ndim - 2
+    groups = h.shape[1]
+    h = _pad_for_analysis(h, axis, lo.numel(), mode)
+    shape = [1] * dimensions
+    shape[axis] = lo.numel()
+    weight = lo.flip(0).reshape(1, 1, *shape).repeat(groups, 1, *([1] * dimensions))
     stride = [1] * dimensions
     stride[axis] = 2
     return DIM_TO_CONV_FN_MAP[dimensions](h, weight, stride=stride, groups=groups)
@@ -271,6 +305,29 @@ def dwtn(
         h = _analysis(h, dec_lo, dec_hi, axis, mode)
     keys = subband_keys(len(axes))
     return {key: _unfold(h[:, i], lead, perm) for i, key in enumerate(keys)}
+
+
+def dwtn_approx(
+    data: torch.Tensor,
+    wave: str | Wavelet = "haar",
+    mode: ExtensionModeTypes = "zero",
+    axes: Sequence[int] | None = None,
+) -> torch.Tensor:
+    """Approximation band of a single-level transform, skipping the detail bands.
+
+    Args:
+        data: Input tensor of any rank.
+        wave: Wavelet, by name or as a `Wavelet`.
+        mode: Signal extension mode.
+        axes: Axes to transform; the trailing one if omitted.
+    """
+    data = as_inexact(data)
+    axes = _resolve_axes(data.ndim, axes)
+    dec_lo, _, _, _ = wavelet(wave).filters(data.dtype, data.device)
+    h, lead, perm = _fold(data, axes)
+    for axis in range(len(axes)):
+        h = _analysis_lowpass(h, dec_lo, axis, mode)
+    return _unfold(h[:, 0], lead, perm)
 
 
 def idwtn(
@@ -452,8 +509,8 @@ def waverecn(
         wave: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode the analysis used.
         axes: Axes that were transformed; the trailing one if omitted.
-        output_size: Per level, the length of each transformed axis, finest
-            level last.
+        output_size: Per level, the length of each transformed axis, coarsest
+            level first.
 
     Raises:
         ValueError: If `coeffs` is empty or malformed.
@@ -508,7 +565,7 @@ def waverec(
         wave: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode the analysis used.
         axis: Axis that was transformed.
-        output_size: Length of the axis at each level, finest level last.
+        output_size: Length of the axis at each level, coarsest level first.
 
     Raises:
         ValueError: If `coeffs` is empty.
