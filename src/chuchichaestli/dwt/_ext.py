@@ -10,9 +10,20 @@ from chuchichaestli.dwt.modes import (
     ExtensionModeTypes,
     pad_signal_adjoint,
 )
+from chuchichaestli.dwt.wavelet import Wavelet
 
 
-__all__ = ["USE_CUSTOM_KERNELS", "kernels_available", "dwt_axis", "idwt_axis"]
+_HAAR = Wavelet.from_name("haar")
+
+
+__all__ = [
+    "USE_CUSTOM_KERNELS",
+    "kernels_available",
+    "dwt_axis",
+    "haar_nd",
+    "idwt_axis",
+    "fused_haar_applies",
+]
 
 
 try:
@@ -153,3 +164,55 @@ def idwt_axis(
     return _dwt_kernels.idwt_axis(
         coeffs.contiguous(), rec_lo, rec_hi, axis, MODE_TO_CODE[mode], trim, out_length
     )
+
+
+def fused_haar_applies(
+    wave, mode: ExtensionModeTypes, shape: tuple[int, ...]
+) -> bool:
+    """Whether the fused Haar transform can serve this call.
+
+    Haar has two taps, so on an even axis it consumes no boundary extension at
+    all and every mode agrees; that is what lets one butterfly replace the pass
+    per axis.
+
+    Args:
+        wave: Wavelet the transform was asked for.
+        mode: Signal extension mode.
+        shape: Lengths of the axes being transformed.
+    """
+    return (
+        wave.filter_bank == _HAAR.filter_bank
+        and all(n % 2 == 0 for n in shape)
+        and len(shape) <= 3
+    )
+
+
+class _FusedHaar(torch.autograd.Function):
+    """Haar analysis over every axis at once, computed by the compiled kernel.
+
+    The transform is orthogonal, so its adjoint is the same butterfly run
+    backwards, which is what the synthesis kernel already does.
+    """
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, dimensions: int) -> torch.Tensor:
+        """Run the fused kernel and remember what the adjoint needs."""
+        ctx.dimensions = dimensions
+        return _dwt_kernels.haar_nd(x.contiguous(), 2**-0.5)
+
+    @staticmethod
+    def backward(ctx, grad_out: torch.Tensor):
+        """Apply the adjoint, which for an orthogonal transform is the inverse."""
+        from chuchichaestli.dwt.functional import _HAAR_ADJOINT
+
+        return _HAAR_ADJOINT(grad_out, ctx.dimensions), None
+
+
+def haar_nd(x: torch.Tensor, dimensions: int) -> torch.Tensor:
+    """Haar analysis over every spatial axis, through the compiled kernel.
+
+    Args:
+        x: Input tensor, shaped `(batch, groups, spatial...)`.
+        dimensions: Number of spatial axes.
+    """
+    return _FusedHaar.apply(x, dimensions)

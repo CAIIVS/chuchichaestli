@@ -297,6 +297,22 @@ def _wrap(x: torch.Tensor, axis: int, trim: int, length: int) -> torch.Tensor:
     return zeros.index_add(axis, index, x)
 
 
+def _HAAR_ADJOINT(grad: torch.Tensor, dimensions: int) -> torch.Tensor:
+    """Adjoint of the fused Haar analysis, used by its backward pass.
+
+    Args:
+        grad: Gradient with respect to the stacked subbands.
+        dimensions: Number of spatial axes.
+    """
+    wave = wavelet("haar")
+    _, _, rec_lo, rec_hi = wave.filters(grad.dtype, grad.device)
+    groups = grad.shape[1] // 2**dimensions
+    h = grad
+    for axis in reversed(range(dimensions)):
+        h = _synthesis(h, rec_lo, rec_hi, axis, "zero", 2 * h.shape[2 + axis])
+    return h if groups == h.shape[1] else h
+
+
 def dwtn(
     data: torch.Tensor,
     wave: str | Wavelet = "haar",
@@ -318,9 +334,15 @@ def dwtn(
     axes = _resolve_axes(data.ndim, axes)
     wave = wavelet(wave)
     dec_lo, dec_hi, _, _ = wave.filters(data.dtype, data.device)
+    from chuchichaestli.dwt import _ext
+
     h, lead, perm = _fold(data, axes)
-    for axis in range(len(axes)):
-        h = _analysis(h, dec_lo, dec_hi, axis, mode)
+    spatial = tuple(h.shape[2:])
+    if _ext.kernels_available(h.device) and _ext.fused_haar_applies(wave, mode, spatial):
+        h = _ext.haar_nd(h, len(axes))
+    else:
+        for axis in range(len(axes)):
+            h = _analysis(h, dec_lo, dec_hi, axis, mode)
     keys = subband_keys(len(axes))
     return {key: _unfold(h[:, i], lead, perm) for i, key in enumerate(keys)}
 
