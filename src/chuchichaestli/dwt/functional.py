@@ -195,9 +195,27 @@ def _analysis(
         axis: Spatial axis to transform.
         mode: Signal extension mode.
     """
+    from chuchichaestli.dwt import _ext
+
     dimensions = h.ndim - 2
     groups = h.shape[1]
-    h = _pad_for_analysis(h, axis, lo.numel(), mode)
+    filter_len = lo.numel()
+    length = h.shape[2 + axis]
+    if mode == "periodization" and length % 2:
+        # an odd axis is made even by repeating its last sample
+        h = pad_signal(h, 2 + axis, 0, 1, "constant")
+        length += 1
+    if mode == "periodization":
+        pad_lo, pad_hi = filter_len // 2 - 1, filter_len // 2
+    else:
+        pad_lo, pad_hi = filter_len - 2, filter_len - 2 + (length % 2)
+    out_length = (length + pad_lo + pad_hi - filter_len) // 2 + 1
+
+    if _ext.kernels_available(h.device):
+        return _ext.dwt_axis(h, lo, hi, axis, mode, pad_lo, pad_hi, out_length)
+
+    extension = "periodic" if mode == "periodization" else mode
+    h = pad_signal(h, 2 + axis, pad_lo, pad_hi, extension)
     # `conv` cross-correlates, so the filters are flipped to convolve.
     weight = _bank(lo.flip(0), hi.flip(0), groups, axis, dimensions)
     stride = [1] * dimensions
