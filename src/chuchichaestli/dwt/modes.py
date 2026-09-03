@@ -11,7 +11,13 @@ from functools import lru_cache
 from typing import Literal
 
 
-__all__ = ["ExtensionModeTypes", "MODE_TO_CODE", "extension_indices", "pad_signal"]
+__all__ = [
+    "ExtensionModeTypes",
+    "MODE_TO_CODE",
+    "extension_indices",
+    "pad_signal",
+    "pad_signal_adjoint",
+]
 
 
 ExtensionModeTypes = Literal[
@@ -150,4 +156,54 @@ def pad_signal(
         edge_hi = x.narrow(axis, n - 1, 1)
         out = out + edge_lo * view_along_axis(lo.to(x.dtype), x.ndim, axis).to(x.device)
         out = out + edge_hi * view_along_axis(hi.to(x.dtype), x.ndim, axis).to(x.device)
+    return out
+
+
+def pad_signal_adjoint(
+    grad: torch.Tensor,
+    axis: int,
+    pad_lo: int,
+    pad_hi: int,
+    mode: ExtensionModeTypes = "zero",
+    length: int | None = None,
+) -> torch.Tensor:
+    """Transpose of `pad_signal`, scattering a gradient back onto the samples.
+
+    The extension gathers, so its transpose scatters: every extended sample
+    returns its share to the source it was read from, and to the two edges the
+    anchored modes lean on.
+
+    Args:
+        grad: Gradient with respect to the extended tensor.
+        axis: Axis that was extended.
+        pad_lo: Number of samples that were prepended.
+        pad_hi: Number of samples that were appended.
+        mode: Signal extension mode that was used.
+        length: Length of the axis before extension; derived if omitted.
+    """
+    axis = axis % grad.ndim
+    if pad_lo == 0 and pad_hi == 0:
+        return grad
+    n = grad.shape[axis] - pad_lo - pad_hi if length is None else length
+    if mode == "zero":
+        return grad.narrow(axis, pad_lo, n)
+
+    sign, index, lo, hi = extension_indices(n, pad_lo, pad_hi, mode)
+    index = index.to(grad.device)
+    contribution = grad * view_along_axis(sign.to(grad.dtype), grad.ndim, axis).to(
+        grad.device
+    )
+    shape = list(grad.shape)
+    shape[axis] = n
+    out = torch.zeros(shape, dtype=grad.dtype, device=grad.device)
+    out = out.index_add(axis, index, contribution)
+    if bool(torch.any(lo != 0.0)) or bool(torch.any(hi != 0.0)):
+        weights_lo = view_along_axis(lo.to(grad.dtype), grad.ndim, axis).to(grad.device)
+        weights_hi = view_along_axis(hi.to(grad.dtype), grad.ndim, axis).to(grad.device)
+        edge_lo = (grad * weights_lo).sum(dim=axis, keepdim=True)
+        edge_hi = (grad * weights_hi).sum(dim=axis, keepdim=True)
+        # a single-sample axis makes both edges the same one, which `index_add`
+        # handles by accumulating the two contributions
+        edges = torch.tensor([0, n - 1], device=grad.device)
+        out = out.index_add(axis, edges, torch.cat((edge_lo, edge_hi), dim=axis))
     return out
