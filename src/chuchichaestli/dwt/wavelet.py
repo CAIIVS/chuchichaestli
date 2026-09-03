@@ -12,6 +12,7 @@ from chuchichaestli.dwt.filters import (
     ORTHOGONAL_DEC_LO,
 )
 from collections.abc import Sequence
+from functools import cache
 from typing import Literal
 
 
@@ -189,8 +190,14 @@ class Wavelet:
         return len(self.dec_lo)
 
     @classmethod
+    @cache
     def from_name(cls, name: str) -> "Wavelet":
         """Build one of the available wavelets.
+
+        Cached: deriving a bank and checking that it reconstructs costs more
+        than a small transform does, and the result only depends on the name.
+        The filter tensors a caller asks for are cached on the instance, so
+        sharing it also shares those.
 
         Args:
             name: Name of the wavelet, e.g. `'haar'`, `'db4'` or `'bior2.2'`.
@@ -238,6 +245,10 @@ class Wavelet:
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return the filter bank as tensors, cached per dtype and device.
 
+        Instances are shared, so the cached tensors are handed out detached:
+        a caller marking them for a gradient, or otherwise touching them in
+        place, then changes only its own view of them.
+
         Args:
             dtype: Floating point type of the returned tensors.
             device: Device the returned tensors live on.
@@ -247,7 +258,7 @@ class Wavelet:
             self._cache[key] = tuple(
                 torch.tensor(f, dtype=dtype, device=device) for f in self.filter_bank
             )
-        return self._cache[key]
+        return tuple(filt.detach() for filt in self._cache[key])
 
     def check_perfect_reconstruction(self, atol: float = 1e-10) -> bool:
         """Check that the bank introduces no distortion and cancels its aliasing.
