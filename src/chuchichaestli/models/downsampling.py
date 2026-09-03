@@ -6,7 +6,9 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from chuchichaestli.models.dwt.layers import WaveletTransformND
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP, DIM_TO_POOL_MAP, DOWNSAMPLE_MODE
+from chuchichaestli.models.resample import ChannelResample
 from chuchichaestli.models.shuffle import PixelUnshuffleND
 from chuchichaestli.utils import partialclass
 from collections.abc import Sequence
@@ -15,6 +17,7 @@ from typing import Literal
 
 __all__ = [
     "Downsample",
+    "DownsampleWavelet",
     "DownsampleInterpolate",
     "DownsampleUnshuffle",
     "Pool",
@@ -29,6 +32,8 @@ __all__ = [
 
 DownsampleTypes = Literal[
     "Downsample",
+    "ChannelResample",
+    "DownsampleWavelet",
     "DownsampleInterpolate",
     "DownsampleUnshuffle",
     "MaxPool",
@@ -170,6 +175,73 @@ class DownsampleUnshuffle(nn.Module):
         return h + shortcut
 
 
+class DownsampleWavelet(nn.Module):
+    """Downsampling layer for 1D, 2D, and 3D inputs implemented with a wavelet transform.
+
+    The transform is critically sampled, so it halves every spatial axis while
+    moving the detail bands into the channel axis, losing nothing on the way
+    down. It is the wavelet counterpart of `DownsampleUnshuffle`.
+    """
+
+    changes_channels = True
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        wavelet: str = "haar",
+        mode: str = "periodization",
+        factor: int | None = None,
+        **kwargs,
+    ):
+        """Initialize the downsampling layer.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            wavelet: Wavelet to decompose with.
+            mode: Signal extension mode; the default is the only critically
+                sampled one, and hence the only one that halves exactly.
+            factor: Downscaling factor; only a factor of two is supported.
+            kwargs: Additional keyword arguments for the convolution.
+
+        Raises:
+            ValueError: If the channel counts do not fit the transform, or if a
+                factor other than two is requested.
+        """
+        super().__init__()
+        conv_cls = DIM_TO_CONV_MAP[dimensions]
+        self.dimensions = dimensions
+        self.factor = factor if factor is not None else 2
+        if self.factor != 2:
+            raise ValueError(
+                f"A wavelet transform halves each axis, so only a factor of two is"
+                f" supported; got {self.factor}."
+            )
+        rd = self.factor**dimensions
+        if out_channels % rd or in_channels * rd % out_channels:
+            raise ValueError(
+                f"Cannot decompose {in_channels} into {out_channels} channels over"
+                f" {dimensions} dimension(s): out_channels must be divisible by {rd},"
+                f" and {rd} * in_channels by out_channels."
+            )
+        self.group_size = in_channels * rd // out_channels
+        kwargs.setdefault("kernel_size", 3)
+        kwargs.setdefault("stride", 1)
+        kwargs.setdefault("padding", "same")
+        self.conv = conv_cls(in_channels, out_channels // rd, **kwargs)
+        self.dwt = WaveletTransformND(dimensions, wavelet, mode, "channel")
+
+    def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
+        """Forward pass through the downsampling layer."""
+        h = self.dwt(self.conv(x))
+        shortcut = self.dwt(x)
+        shortcut = shortcut.unflatten(1, (-1, self.group_size)).mean(dim=2)
+        return h + shortcut
+
+
 ADAPTIVE_POOL_FUNCTIONS = {
     (1, False): F.adaptive_max_pool1d,
     (2, False): F.adaptive_max_pool2d,
@@ -237,6 +309,8 @@ AdaptiveAvgPool = partialclass("AdaptiveAvgPool", Pool, average=True, adaptive=T
 
 DOWNSAMPLE_FUNCTIONS = {
     "Downsample": Downsample,
+    "ChannelResample": ChannelResample,
+    "DownsampleWavelet": DownsampleWavelet,
     "DownsampleInterpolate": DownsampleInterpolate,
     "DownsampleUnshuffle": DownsampleUnshuffle,
     "MaxPool": MaxPool,

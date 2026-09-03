@@ -1017,12 +1017,15 @@ def test_throws_error_on_unsupported_sampling_type(kwargs):
 @pytest.mark.parametrize("downsample_type", sorted(DOWNSAMPLE_FUNCTIONS))
 def test_every_registered_downsampling_type_runs(downsample_type):
     """Test that every registered downsampling type builds and preserves the shape."""
-    # a sampler that changes the channel count has to be mirrored in the other half
-    upsample_type = (
-        "UpsampleShuffle"
-        if DOWNSAMPLE_FUNCTIONS[downsample_type].changes_channels
-        else "Upsample"
-    )
+    # a sampler has to be mirrored in the other half, both in whether it changes
+    # the channel count and in the factor by which it scales the spatial axes
+    sampler = DOWNSAMPLE_FUNCTIONS[downsample_type]
+    if getattr(sampler, "factor", 2) == 1:
+        upsample_type = "ChannelResample"
+    elif sampler.changes_channels:
+        upsample_type = "UpsampleShuffle"
+    else:
+        upsample_type = "Upsample"
     model = UNet(
         **PER_LEVEL_CONF,
         downsample_type=downsample_type,
@@ -1034,11 +1037,13 @@ def test_every_registered_downsampling_type_runs(downsample_type):
 @pytest.mark.parametrize("upsample_type", sorted(UPSAMPLE_FUNCTIONS))
 def test_every_registered_upsampling_type_runs(upsample_type):
     """Test that every registered upsampling type builds and preserves the shape."""
-    downsample_type = (
-        "DownsampleUnshuffle"
-        if UPSAMPLE_FUNCTIONS[upsample_type].changes_channels
-        else "Downsample"
-    )
+    sampler = UPSAMPLE_FUNCTIONS[upsample_type]
+    if getattr(sampler, "factor", 2) == 1:
+        downsample_type = "ChannelResample"
+    elif sampler.changes_channels:
+        downsample_type = "DownsampleUnshuffle"
+    else:
+        downsample_type = "Downsample"
     model = UNet(
         **PER_LEVEL_CONF,
         downsample_type=downsample_type,
