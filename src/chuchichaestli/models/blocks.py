@@ -14,6 +14,7 @@ from chuchichaestli.models.attention import (
 )
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import AdaNorm, Norm, NormTypes
+from chuchichaestli.models.smc import SMConvND
 from chuchichaestli.utils import partialclass, alias_kwargs
 from math import gcd
 from collections.abc import Callable, Sequence
@@ -87,6 +88,7 @@ __all__ = [
     "ActAttnConvDownBlock",
     "ActAttnConvDownsampleBlock",
     "NormActConvBlock",
+    "SMConvBlock",
     "NormActAttnConvBlock",
     "NormActConvDownBlock",
     "NormActConvDownsampleBlock",
@@ -100,7 +102,11 @@ __all__ = [
 ]
 
 ResidualBlockTypes = Literal[
-    "ResidualBlock", "ResidualBottleneck", "LiteResidualBlock", "GLUMBResBlock"
+    "ResidualBlock",
+    "SMConvResidualBlock",
+    "ResidualBottleneck",
+    "LiteResidualBlock",
+    "GLUMBResBlock",
 ]
 TimeInjectionTypes = Literal["add", "scale_shift"]
 
@@ -143,6 +149,7 @@ ConvBlockTypes = Literal[
     "ActAttnConvDownBlock",
     "ActAttnConvDownsampleBlock",
     "NormActConvBlock",
+    "SMConvBlock",
     "NormActAttnConvBlock",
     "NormActConvDownBlock",
     "NormActConvDownsampleBlock",
@@ -167,10 +174,14 @@ AutoencoderDownBlockTypes = Literal[
     "EfficientViTBlock",
 ]
 AutoencoderMidBlockTypes = Literal[
-    "AutoencoderMidBlock", "AttnAutoencoderMidBlock", "ConvAttnAutoencoderMidBlock"
+    "AutoencoderMidBlock",
+    "SMConvAutoencoderMidBlock",
+    "AttnAutoencoderMidBlock",
+    "ConvAttnAutoencoderMidBlock",
 ]
 AutoencoderUpBlockTypes = Literal[
     "AutoencoderUpBlock",
+    "SMConvAutoencoderUpBlock",
     "AutoencoderAttnUpBlock",
     "AutoencoderConvAttnUpBlock",
     "DCAutoencoderUpBlock",
@@ -1098,6 +1109,118 @@ class ResidualBlock(nn.Module):
         hh = self.conv2(hh)
 
         return hh + self.shortcut(x)
+
+
+class SMConvResidualBlock(ResidualBlock):
+    """Residual block whose self-modulated convolutions stand in for its normalizations.
+
+    Structurally a `ResidualBlock`, with each normalization and convolution pair
+    replaced by a single self-modulated convolution; see `SMConvND` and
+    `ResidualBlock` for the architecture arguments.
+    """
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        *args,
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            args: Further architecture arguments for `ResidualBlock`.
+            kwargs: Further architecture arguments for `ResidualBlock`.
+
+        Raises:
+            ValueError: If the time embedding modulates the normalization, which
+                a self-modulated convolution replaces rather than provides.
+        """
+        super().__init__(dimensions, in_channels, out_channels, *args, **kwargs)
+        if self.time_injection == "scale_shift":
+            raise ValueError(
+                "A self-modulated convolution replaces the normalization, so it"
+                " cannot carry a scale-shift time injection; use 'add' instead."
+            )
+        kernel_size = self.conv1.kernel_size[0]
+        stride = self.conv1.stride[0]
+        bias = self.conv1.bias is not None
+        self.norm1 = nn.Identity()
+        self.norm2 = nn.Identity()
+        self.conv1 = SMConvND(
+            dimensions,
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding="same" if stride == 1 else (kernel_size - 1) // 2,
+            bias=bias,
+        )
+        self.conv2 = SMConvND(
+            dimensions,
+            out_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding="same",
+            bias=bias,
+        )
+
+
+class SMConvBlock(nn.Module):
+    """Activation followed by a self-modulated convolution.
+
+    Mirrors the interface of the normalization, activation and convolution
+    blocks so it can stand in for one wherever a self-modulated convolution
+    should replace the normalization.
+    """
+
+    def __init__(
+        self,
+        dimensions: int,
+        in_channels: int,
+        out_channels: int,
+        act_fn: ActivationTypes | None = "silu",
+        kernel_size: int = 3,
+        stride: int = 1,
+        padding: int | str = "same",
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            dimensions: Number of spatial dimensions.
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            act_fn: Activation function; omitted if `None`.
+            kernel_size: Kernel size of the convolution.
+            stride: Stride of the convolution.
+            padding: Padding of the convolution.
+            kwargs: Additional keyword arguments for the convolution; the
+                normalization arguments a block like this usually takes are
+                accepted and ignored, since the convolution replaces it.
+        """
+        super().__init__()
+        for ignored in ("norm_type", "num_groups", "norm", "norm_first"):
+            kwargs.pop(ignored, None)
+        self.act = ACTIVATION_FUNCTIONS[act_fn]() if act_fn is not None else None
+        self.conv = SMConvND(
+            dimensions,
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            **kwargs,
+        )
+
+    def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
+        """Forward pass through the block."""
+        h = self.act(x) if self.act is not None else x
+        return self.conv(h)
 
 
 class ResidualBottleneck(nn.Module):
@@ -2624,6 +2747,33 @@ NormActAttnConvDownsampleBlock = partialclass(
 )
 
 
+SMConvAutoencoderUpBlock = partialclass(
+    "SMConvAutoencoderUpBlock",
+    AutoencoderUpBlock,
+    res_block_type="SMConvResidualBlock",
+    __doc__="""
+    Block for the decoder of an autoencoder, with self-modulated convolutions.
+
+    Includes:
+        - Residual block with self-modulated convolutions in place of the
+          normalizations (see `SMConvResidualBlock`)
+    """,
+)
+
+SMConvAutoencoderMidBlock = partialclass(
+    "SMConvAutoencoderMidBlock",
+    AutoencoderMidBlock,
+    res_block_type="SMConvResidualBlock",
+    __doc__="""
+    Block for the bottleneck of an autoencoder, with self-modulated convolutions.
+
+    Includes:
+        - Residual block with self-modulated convolutions in place of the
+          normalizations (see `SMConvResidualBlock`)
+    """,
+)
+
+
 # blocks designed for specific models such as UNet, AE, etc.
 BLOCK_MAP: dict[str, Callable] = {
     # U-Net blocks
@@ -2640,7 +2790,9 @@ BLOCK_MAP: dict[str, Callable] = {
     # Autoencoder blocks
     "AutoencoderDownBlock": AutoencoderDownBlock,
     "AutoencoderMidBlock": AutoencoderMidBlock,
+    "SMConvAutoencoderMidBlock": SMConvAutoencoderMidBlock,
     "AutoencoderUpBlock": AutoencoderUpBlock,
+    "SMConvAutoencoderUpBlock": SMConvAutoencoderUpBlock,
     "AttnAutoencoderDownBlock": AttnAutoencoderDownBlock,
     "AttnAutoencoderMidBlock": AttnAutoencoderMidBlock,
     "AttnAutoencoderUpBlock": AttnAutoencoderUpBlock,
@@ -2735,6 +2887,7 @@ CONV_BLOCK_MAP: dict[str, Callable] = {
     "ActAttnConvDownBlock": ActAttnConvDownBlock,
     "ActAttnConvDownsampleBlock": ActAttnConvDownsampleBlock,
     "NormActConvBlock": NormActConvBlock,
+    "SMConvBlock": SMConvBlock,
     "NormActAttnConvBlock": NormActAttnConvBlock,
     "NormActConvDownBlock": NormActConvDownBlock,
     "NormActConvDownsampleBlock": NormActConvDownsampleBlock,
@@ -2746,6 +2899,7 @@ CONV_BLOCK_MAP: dict[str, Callable] = {
 # blocks with residual skip connections
 RESIDUAL_BLOCK_MAP = {
     "ResidualBlock": ResidualBlock,
+    "SMConvResidualBlock": SMConvResidualBlock,
     "ResidualBottleneck": ResidualBottleneck,
     "LiteResidualBlock": LiteResidualBlock,
     "MBResBlock": MBResBlock,
