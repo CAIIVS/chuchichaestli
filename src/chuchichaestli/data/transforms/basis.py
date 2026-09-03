@@ -10,6 +10,8 @@ from typing import Any
 import torch
 from torchvision.transforms.v2 import Transform
 
+from chuchichaestli.utils import as_inexact
+
 __all__ = ["BasisProjection", "InvBasisProjection", "BASIS_REGISTRY"]
 
 
@@ -290,16 +292,9 @@ class BasisProjection(Transform):
             )
         self.lengths[key] = n
 
-    @staticmethod
-    def _as_inexact(x: torch.Tensor) -> torch.Tensor:
-        """Promote integer or boolean input, which cannot carry coefficients."""
-        if x.dtype.is_floating_point or x.dtype.is_complex:
-            return x
-        return x.to(torch.float32)
-
     def _project(self, x: torch.Tensor) -> torch.Tensor:
         """Replace each selected axis by its coefficients."""
-        x = self._as_inexact(x)
+        x = as_inexact(x)
         for key, axis in self._resolve(x.ndim):
             n = x.shape[axis]
             self._record_length(key, n)
@@ -309,7 +304,7 @@ class BasisProjection(Transform):
 
     def _reconstruct(self, x: torch.Tensor) -> torch.Tensor:
         """Expand each selected axis back from its coefficients."""
-        x = self._as_inexact(x)
+        x = as_inexact(x)
         for key, axis in self._resolve(x.ndim):
             spec = self.bases[key]
             order = spec.shape[1] if isinstance(spec, torch.Tensor) else spec[1]
