@@ -56,6 +56,38 @@ def have(program: str) -> bool:
     return True
 
 
+def cpu_features() -> set[str]:
+    """Instruction set extensions the building machine advertises.
+
+    The extensions are compiled in place for a source install and the wheel
+    target excludes the result, so the object may be tuned to this machine.
+    """
+    try:
+        with open("/proc/cpuinfo") as handle:
+            for line in handle:
+                if line.startswith("flags") or line.startswith("Features"):
+                    return set(line.split(":", 1)[1].split())
+    except OSError:
+        pass
+    return set()
+
+
+def vector_flags() -> list[str]:
+    """Compiler flags enabling the widest vector unit this machine has.
+
+    `at::vec` selects its implementation from the capability macro, and falls
+    back to a scalar one that is slower than plain scalar code, so the flags
+    are worth probing for.
+    """
+    features = cpu_features()
+    if {"avx512f", "avx512dq", "avx512vl"} <= features:
+        return ["-mavx512f", "-mavx512dq", "-mavx512vl", "-mavx512bw", "-mfma",
+                "-DCPU_CAPABILITY_AVX512"]
+    if "avx2" in features:
+        return ["-mavx2", "-mfma", "-DCPU_CAPABILITY_AVX2"]
+    return []
+
+
 def skipped(name: str) -> bool:
     """Whether one extension was switched off.
 
@@ -82,7 +114,7 @@ def discover(build_gpu: bool, use_rocm: bool) -> list:
         package = PACKAGE_OF.get(name, f"chuchichaestli.{name}")
 
         sources = sorted(str(p) for p in directory.glob("*.cpp"))
-        flags = ["-O3"]
+        flags = ["-O3", *vector_flags()]
         if build_gpu:
             if use_rocm:
                 from torch.utils.hipify.hipify_python import hipify
