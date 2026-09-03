@@ -45,6 +45,12 @@ DIM_TO_CONVT_MAP = {
     3: nn.ConvTranspose3d,
 }
 
+DIM_TO_CONVT_FN_MAP = {
+    1: nn.functional.conv_transpose1d,
+    2: nn.functional.conv_transpose2d,
+    3: nn.functional.conv_transpose3d,
+}
+
 DIM_TO_POOL_MAP = {
     1: {
         "MaxPool": nn.MaxPool1d,
