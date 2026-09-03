@@ -365,3 +365,17 @@ def test_vae_decoder_takes_the_sampled_latent_width():
     out, posterior = model(sample)
     assert out.shape == sample.shape
     assert posterior.mean.shape[1] == decoder.in_channels
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+@pytest.mark.parametrize("sample_posterior", [True, False])
+def test_forward_samples_or_takes_the_mode(dimensions, sample_posterior):
+    """Test both latent paths, the mode being deterministic."""
+    model = VAE.build(dimensions=dimensions, in_channels=1, out_channels=1, latent_dim=2)
+    x = torch.randn(1, 1, *([16] * dimensions))
+    recon, posterior = model(x, sample_posterior=sample_posterior)
+    assert recon.shape == x.shape
+    if not sample_posterior:
+        again, _ = model(x, sample_posterior=False)
+        assert torch.allclose(recon, again)
+
