@@ -524,8 +524,53 @@ def wavedecn(
     if level < 0:
         raise ValueError(f"The number of levels must not be negative; got {level}.")
 
+    from chuchichaestli.dwt import _ext
+
     approx_key = "a" * len(axes)
+    keys = subband_keys(len(axes))
     result: list = []
+
+    folded, lead, perm = _fold(data, axes)
+    shapes = [tuple(folded.shape[2:])]
+    for _ in range(level - 1):
+        shapes.append(
+            tuple(dwt_coeff_len(n, wave.dec_len, mode) for n in shapes[-1])
+        )
+    compiled = level >= 1 and not (
+        torch.is_grad_enabled() and data.requires_grad
+    ) and _ext.kernels_available(folded.device)
+
+    if compiled and _ext.fused_recursion_applies(mode, shapes) and not all(
+        _ext.fused_haar_applies(wave, mode, shape) for shape in shapes
+    ):
+        # the kernel runs the recursion for any wavelet, one call rather than
+        # one per level
+        dec_lo, dec_hi, _, _ = wave.filters(folded.dtype, folded.device)
+        for stacked in _ext.wavedec_axes(folded, dec_lo, dec_hi, mode, level):
+            bands = {
+                key: _unfold(stacked[:, i], lead, perm)
+                for i, key in enumerate(keys)
+            }
+            approx = bands.pop(approx_key)
+            result.append(bands)
+        result.append(approx)
+        return result[::-1]
+
+    if compiled and all(
+        _ext.fused_haar_applies(wave, mode, shape) for shape in shapes
+    ):
+        # the kernel runs the recursion, so there is one call rather than one
+        # per level, and no copy handing the approximation back in
+        for stacked in _ext.haar_wavedec(folded, len(axes), level):
+            bands = {
+                key: _unfold(stacked[:, i], lead, perm)
+                for i, key in enumerate(keys)
+            }
+            approx = bands.pop(approx_key)
+            result.append(bands)
+        result.append(approx)
+        return result[::-1]
+
     approx = data
     for _ in range(level):
         bands = dwtn(approx, wave, mode, axes)
