@@ -18,6 +18,8 @@ torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
                             const torch::Tensor& rec_hi, int64_t axis,
                             int64_t mode, int64_t trim, int64_t out_length);
 
+torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale);
+
 #ifdef C3LI_WITH_GPU
 torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
                             const torch::Tensor& dec_hi, int64_t axis,
@@ -53,6 +55,11 @@ torch::Tensor idwt_axis(const torch::Tensor& coeffs, const torch::Tensor& rec_lo
   return idwt_axis_cpu(coeffs, rec_lo, rec_hi, axis, mode, trim, out_length);
 }
 
+// Transform every spatial axis at once with the Haar wavelet.
+torch::Tensor haar_nd(const torch::Tensor& x, double scale) {
+  return haar_nd_cpu(x, scale);
+}
+
 // Whether the extension carries kernels for the accelerator.
 bool has_gpu() {
 #ifdef C3LI_WITH_GPU
@@ -68,5 +75,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.doc() = "Discrete wavelet transforms with CPU and GPU kernels";
   m.def("dwt_axis", &c3li::dwt_axis, "Analysis along one spatial axis");
   m.def("idwt_axis", &c3li::idwt_axis, "Synthesis along one spatial axis");
+  m.def("haar_nd", &c3li::haar_nd, "Fused Haar analysis over every axis");
   m.def("has_gpu", &c3li::has_gpu, "Whether GPU kernels were compiled in");
 }
