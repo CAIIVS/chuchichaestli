@@ -23,6 +23,9 @@ __all__ = [
     "haar_nd",
     "idwt_axis",
     "fused_haar_applies",
+    "haar_wavedec",
+    "wavedec_axes",
+    "fused_recursion_applies",
 ]
 
 
@@ -52,6 +55,25 @@ def kernels_available(device: torch.device | None = None) -> bool:
     return bool(_dwt_kernels.has_gpu())
 
 
+def _require_constant_filters(*filters: torch.Tensor) -> None:
+    """Refuse a filter bank that expects a gradient.
+
+    Saying so is better than the alternative, which is a learnable filter bank
+    that trains on a gradient the kernels never compute.
+
+    Args:
+        filters: Filters the transform was handed.
+
+    Raises:
+        ValueError: If any filter requires a gradient.
+    """
+    if any(filt.requires_grad for filt in filters):
+        raise ValueError(
+            "the wavelet filters are constants; a learnable filter bank would"
+            " need gradients the compiled kernels do not compute"
+        )
+
+
 class _AnalysisAxis(torch.autograd.Function):
     """Analysis along one axis, computed by the compiled kernel.
 
@@ -74,11 +96,6 @@ class _AnalysisAxis(torch.autograd.Function):
         out_length: int,
     ) -> torch.Tensor:
         """Run the kernel and remember what the adjoint needs."""
-        if dec_lo.requires_grad or dec_hi.requires_grad:
-            raise ValueError(
-                "the wavelet filters are constants; a learnable filter bank would"
-                " need gradients the compiled kernels do not compute"
-            )
         ctx.save_for_backward(dec_lo, dec_hi)
         ctx.config = (axis, mode, pad_lo, pad_hi, out_length, x.shape[2 + axis])
         return _dwt_kernels.dwt_axis(
@@ -135,7 +152,15 @@ def dwt_axis(
         pad_lo: Number of samples the analysis prepends.
         pad_hi: Number of samples the analysis appends.
         out_length: Length of the transformed axis.
+
+    The autograd machinery costs more than the kernel on a small transform, so
+    it is only entered when there is a gradient to record.
     """
+    _require_constant_filters(dec_lo, dec_hi)
+    if not (torch.is_grad_enabled() and x.requires_grad):
+        return _dwt_kernels.dwt_axis(
+            x.contiguous(), dec_lo, dec_hi, axis, MODE_TO_CODE[mode], pad_lo, out_length
+        )
     return _AnalysisAxis.apply(
         x, dec_lo, dec_hi, axis, mode, pad_lo, pad_hi, out_length
     )
@@ -211,8 +236,69 @@ class _FusedHaar(torch.autograd.Function):
 def haar_nd(x: torch.Tensor, dimensions: int) -> torch.Tensor:
     """Haar analysis over every spatial axis, through the compiled kernel.
 
+    The autograd machinery costs more than the kernel on a small transform, so
+    it is only entered when there is a gradient to record.
+
     Args:
         x: Input tensor, shaped `(batch, groups, spatial...)`.
         dimensions: Number of spatial axes.
     """
+    if not (torch.is_grad_enabled() and x.requires_grad):
+        return _dwt_kernels.haar_nd(x.contiguous(), 2**-0.5)
     return _FusedHaar.apply(x, dimensions)
+
+
+def haar_wavedec(x: torch.Tensor, dimensions: int, levels: int) -> list[torch.Tensor]:
+    """Multi-level Haar analysis, with the recursion run by the kernel.
+
+    Only for the path that records no gradient; with one, each level goes
+    through the single-level entry point so autograd sees every step.
+
+    Args:
+        x: Input tensor, shaped `(batch, groups, spatial...)`.
+        dimensions: Number of spatial axes.
+        levels: Number of levels.
+    """
+    return _dwt_kernels.haar_wavedec(x.contiguous(), levels, 2**-0.5)
+
+
+def wavedec_axes(
+    x: torch.Tensor,
+    dec_lo: torch.Tensor,
+    dec_hi: torch.Tensor,
+    mode: ExtensionModeTypes,
+    levels: int,
+) -> list[torch.Tensor]:
+    """Multi-level analysis over every axis, with the recursion run by the kernel.
+
+    Only for the path that records no gradient; with one, each level goes
+    through the single-level entry point so autograd sees every step.
+
+    Args:
+        x: Input tensor, shaped `(batch, groups, spatial...)`.
+        dec_lo: Decomposition low-pass filter.
+        dec_hi: Decomposition high-pass filter.
+        mode: Signal extension mode.
+        levels: Number of levels.
+    """
+    _require_constant_filters(dec_lo, dec_hi)
+    return _dwt_kernels.wavedec_axes(
+        x.contiguous(), dec_lo, dec_hi, MODE_TO_CODE[mode], levels
+    )
+
+
+def fused_recursion_applies(
+    mode: ExtensionModeTypes, shapes: list[tuple[int, ...]]
+) -> bool:
+    """Whether the kernel can run the level recursion for this decomposition.
+
+    The critically sampled mode pads an odd axis up to even, which the kernel
+    does not do, so that combination stays with the per-level path.
+
+    Args:
+        mode: Signal extension mode.
+        shapes: Length of every transformed axis, at each level.
+    """
+    if mode != "periodization":
+        return True
+    return all(n % 2 == 0 for shape in shapes for n in shape)
