@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 // SPDX-FileNotice: Part of chuchichaestli
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <ATen/cpu/vec/vec.h>
+
 #include "../common/boundary.h"
 #include "../common/dispatch.h"
 #include "../common/parallel.h"
@@ -58,6 +60,8 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
     const auto hi_filter = dec_hi.to(x.scalar_type()).contiguous();
     const auto* lo = lo_filter.data_ptr<scalar_t>();
     const auto* hi = hi_filter.data_ptr<scalar_t>();
+    using Vec = at::vec::Vectorized<scalar_t>;
+    const int64_t width = Vec::size();
 
     // one task per lane, which is everything the axis is not
     parallel_for(layout.outer, [&](int64_t begin, int64_t end) {
@@ -87,9 +91,24 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
           scalar_t* low_row = out_low + k * inner;
           scalar_t* high_row = out_high + k * inner;
 
-          if (inner == 1) {
-            // the axis is the contiguous one, so there is nothing to tile over:
-            // accumulate straight into a scalar, walking the taps
+          if (inner == 1 && interior && k + width <= interior_end) {
+            // the axis is the contiguous one, so consecutive outputs read every
+            // other sample; a pair of vector loads and one de-interleave give a
+            // whole vector of them
+            Vec acc_low(scalar_t(0));
+            Vec acc_high(scalar_t(0));
+            for (int64_t f = 0; f < filter_len; ++f) {
+              const scalar_t* p = lane + 2 * k + offset - f;
+              const auto pair =
+                  at::vec::deinterleave2(Vec::loadu(p), Vec::loadu(p + width));
+              acc_low = acc_low + Vec(lo[f]) * pair.first;
+              acc_high = acc_high + Vec(hi[f]) * pair.first;
+            }
+            acc_low.store(low_row);
+            acc_high.store(high_row);
+            k += width - 1;
+          } else if (inner == 1) {
+            // the tail, and every output whose taps reach past an end
             const scalar_t* base = lane + last;
             scalar_t acc_low = 0;
             scalar_t acc_high = 0;
@@ -115,23 +134,28 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
           } else if (interior) {
             // every tap reads a sample that exists, so no rule is consulted
             const scalar_t* base = lane + last * inner;
-            for (int64_t q0 = 0; q0 < inner; q0 += kTile) {
-              const int64_t width = std::min(kTile, inner - q0);
-              scalar_t acc_low[kTile] = {};
-              scalar_t acc_high[kTile] = {};
+            int64_t q = 0;
+            for (; q + width <= inner; q += width) {
+              Vec acc_low(scalar_t(0));
+              Vec acc_high(scalar_t(0));
               for (int64_t f = 0; f < filter_len; ++f) {
-                const scalar_t wl = lo[f];
-                const scalar_t wh = hi[f];
-                const scalar_t* row = base - f * inner + q0;
-                for (int64_t j = 0; j < width; ++j) {
-                  acc_low[j] += wl * row[j];
-                  acc_high[j] += wh * row[j];
-                }
+                const Vec value = Vec::loadu(base - f * inner + q);
+                acc_low = acc_low + Vec(lo[f]) * value;
+                acc_high = acc_high + Vec(hi[f]) * value;
               }
-              for (int64_t j = 0; j < width; ++j) {
-                low_row[q0 + j] = acc_low[j];
-                high_row[q0 + j] = acc_high[j];
+              acc_low.store(low_row + q);
+              acc_high.store(high_row + q);
+            }
+            for (; q < inner; ++q) {
+              scalar_t acc_low = 0;
+              scalar_t acc_high = 0;
+              for (int64_t f = 0; f < filter_len; ++f) {
+                const scalar_t value = base[-f * inner + q];
+                acc_low += lo[f] * value;
+                acc_high += hi[f] * value;
               }
+              low_row[q] = acc_low;
+              high_row[q] = acc_high;
             }
           } else {
             // the rules depend on the sample index alone, so they are resolved
@@ -139,7 +163,7 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
             const scalar_t* edge_lo = lane;
             const scalar_t* edge_hi = lane + (length - 1) * inner;
             for (int64_t q0 = 0; q0 < inner; q0 += kTile) {
-              const int64_t width = std::min(kTile, inner - q0);
+              const int64_t span = std::min(kTile, inner - q0);
               scalar_t acc_low[kTile] = {};
               scalar_t acc_high[kTile] = {};
               for (int64_t f = 0; f < filter_len; ++f) {
@@ -150,7 +174,7 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                 const scalar_t wl = lo[f];
                 const scalar_t wh = hi[f];
                 const scalar_t* row = lane + ref.index * inner + q0;
-                for (int64_t j = 0; j < width; ++j) {
+                for (int64_t j = 0; j < span; ++j) {
                   const scalar_t value = sign * row[j] +
                                          weight_lo * edge_lo[q0 + j] +
                                          weight_hi * edge_hi[q0 + j];
@@ -158,7 +182,7 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                   acc_high[j] += wh * value;
                 }
               }
-              for (int64_t j = 0; j < width; ++j) {
+              for (int64_t j = 0; j < span; ++j) {
                 low_row[q0 + j] = acc_low[j];
                 high_row[q0 + j] = acc_high[j];
               }
