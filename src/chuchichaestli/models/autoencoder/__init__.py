@@ -7,6 +7,15 @@ from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
 from chuchichaestli.models.autoencoder.decoder import Decoder
 from chuchichaestli.models.autoencoder.encoder import Encoder
 from chuchichaestli.models.autoencoder.traits import DecoderLike, EncoderLike
+from chuchichaestli.models.autoencoder.litevae import (
+    LiteVAE,
+    LiteVAEDecoder,
+    LiteVAEEncoder,
+    LiteVAE_B,
+    LiteVAE_L,
+    LiteVAE_M,
+    LiteVAE_S,
+)
 from chuchichaestli.models.autoencoder.vae import VAE, VAEDecoder, VAEEncoder
 from chuchichaestli.models.autoencoder.vqvae import VQVAE, VectorQuantizer
 from chuchichaestli.models.autoencoder.dcae import DCAE, DCDecoder, DCEncoder
@@ -17,6 +26,13 @@ __all__ = [
     "Encoder",
     "EncoderLike",
     "Autoencoder",
+    "LiteVAE",
+    "LiteVAEDecoder",
+    "LiteVAEEncoder",
+    "LiteVAE_B",
+    "LiteVAE_L",
+    "LiteVAE_M",
+    "LiteVAE_S",
     "VAE",
     "VAEDecoder",
     "VAEEncoder",
