@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 // SPDX-FileNotice: Part of chuchichaestli
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <ATen/cpu/vec/vec.h>
+
 #include <cmath>
 
 #include "../common/dispatch.h"
@@ -52,6 +54,12 @@ torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
     const auto* src = x.data_ptr<scalar_t>();
     auto* dst = out.data_ptr<scalar_t>();
     const scalar_t gain = static_cast<scalar_t>(std::pow(scale, dimensions));
+    // the pairs the transform reads sit next to each other on the contiguous
+    // axis, so a vector load takes two outputs' worth and `deinterleave2`
+    // separates them; the tail below the vector width stays scalar
+    using Vec = at::vec::Vectorized<scalar_t>;
+    const int64_t width = Vec::size();
+    const Vec scaling(gain);
 
     parallel_for(lanes, [&](int64_t begin, int64_t end) {
       for (int64_t lane = begin; lane < end; ++lane) {
@@ -63,7 +71,14 @@ torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
         if (dimensions == 1) {
           scalar_t* lo = base;
           scalar_t* hi = base + out_lane;
-          for (int64_t k = 0; k < last; ++k) {
+          int64_t k = 0;
+          for (; k + width <= last; k += width) {
+            const auto pair = at::vec::deinterleave2(
+                Vec::loadu(in + 2 * k), Vec::loadu(in + 2 * k + width));
+            ((pair.first + pair.second) * scaling).store(lo + k);
+            ((pair.first - pair.second) * scaling).store(hi + k);
+          }
+          for (; k < last; ++k) {
             const scalar_t a = in[2 * k];
             const scalar_t b = in[2 * k + 1];
             lo[k] = gain * (a + b);
@@ -77,7 +92,22 @@ torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
             scalar_t* ad = aa + out_lane;
             scalar_t* da = ad + out_lane;
             scalar_t* dd = da + out_lane;
-            for (int64_t k = 0; k < last; ++k) {
+            int64_t k = 0;
+            for (; k + width <= last; k += width) {
+              const auto upper = at::vec::deinterleave2(
+                  Vec::loadu(top + 2 * k), Vec::loadu(top + 2 * k + width));
+              const auto lower = at::vec::deinterleave2(
+                  Vec::loadu(bottom + 2 * k), Vec::loadu(bottom + 2 * k + width));
+              const Vec sum_top = upper.first + upper.second;
+              const Vec diff_top = upper.first - upper.second;
+              const Vec sum_bottom = lower.first + lower.second;
+              const Vec diff_bottom = lower.first - lower.second;
+              ((sum_top + sum_bottom) * scaling).store(aa + k);
+              ((diff_top + diff_bottom) * scaling).store(ad + k);
+              ((sum_top - sum_bottom) * scaling).store(da + k);
+              ((diff_top - diff_bottom) * scaling).store(dd + k);
+            }
+            for (; k < last; ++k) {
               const scalar_t a = top[2 * k];
               const scalar_t b = top[2 * k + 1];
               const scalar_t c = bottom[2 * k];
@@ -106,7 +136,34 @@ torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
               for (int64_t b = 0; b < 8; ++b) {
                 bands[b] = base + b * out_lane + (p * mid + r) * last;
               }
-              for (int64_t k = 0; k < last; ++k) {
+              int64_t k = 0;
+              for (; k + width <= last; k += width) {
+                Vec lanes[8];
+                for (int64_t q = 0; q < 4; ++q) {
+                  const auto pair = at::vec::deinterleave2(
+                      Vec::loadu(rows[q] + 2 * k),
+                      Vec::loadu(rows[q] + 2 * k + width));
+                  lanes[2 * q] = pair.first + pair.second;
+                  lanes[2 * q + 1] = pair.first - pair.second;
+                }
+                for (int64_t q = 0; q < 2; ++q) {
+                  const Vec u = lanes[q];
+                  const Vec v = lanes[q + 2];
+                  lanes[q] = u + v;
+                  lanes[q + 2] = u - v;
+                  const Vec w = lanes[q + 4];
+                  const Vec z = lanes[q + 6];
+                  lanes[q + 4] = w + z;
+                  lanes[q + 6] = w - z;
+                }
+                for (int64_t q = 0; q < 4; ++q) {
+                  const Vec u = lanes[q];
+                  const Vec v = lanes[q + 4];
+                  ((u + v) * scaling).store(bands[q] + k);
+                  ((u - v) * scaling).store(bands[q + 4] + k);
+                }
+              }
+              for (; k < last; ++k) {
                 scalar_t values[8];
                 for (int64_t q = 0; q < 4; ++q) {
                   const scalar_t a = rows[q][2 * k];
