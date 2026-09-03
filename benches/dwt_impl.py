@@ -25,6 +25,7 @@ Drop `--threads 1` for what the torch backends actually get. Further examples:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import json
 from collections.abc import Callable, Sequence
@@ -34,6 +35,7 @@ from typing import Any
 import torch
 import torch.utils.benchmark as benchmark
 
+from chuchichaestli.dwt import _ext
 from chuchichaestli.dwt.functional import wavedecn
 
 
@@ -142,16 +144,38 @@ def _numpy_input(x: torch.Tensor, case: Case):
     return x.detach().cpu().numpy()
 
 
+@contextlib.contextmanager
+def using_kernels(enabled: bool):
+    """Force the compiled kernels on or off for the duration of a call.
+
+    Args:
+        enabled: Whether the compiled kernels may serve the call.
+    """
+    previous = _ext.USE_CUSTOM_KERNELS
+    _ext.USE_CUSTOM_KERNELS = enabled
+    try:
+        yield
+    finally:
+        _ext.USE_CUSTOM_KERNELS = previous
+
+
 def _core(x: torch.Tensor, case: Case):
     """Decompose with the pure-torch core."""
-    return wavedecn(x, case.wavelet, case.mode, case.levels, case.axes)
+    with using_kernels(False):
+        return wavedecn(x, case.wavelet, case.mode, case.levels, case.axes)
 
 
 def _kernels(x: torch.Tensor, case: Case):
-    """Decompose with the compiled kernels."""
-    from chuchichaestli.dwt import _ext
+    """Decompose through the compiled kernels.
 
-    return _ext.wavedecn(x, case.wavelet, case.mode, case.levels, case.axes)
+    Raises:
+        ImportError: If the extension was not built, so the backend reports
+            itself missing rather than quietly timing the torch path again.
+    """
+    if not _ext._KERNELS_AVAILABLE:
+        raise ImportError("the extension is not built")
+    with using_kernels(True):
+        return wavedecn(x, case.wavelet, case.mode, case.levels, case.axes)
 
 
 def _pywt(x, case: Case):
