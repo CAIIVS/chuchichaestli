@@ -7,6 +7,14 @@
 
 namespace c3li {
 
+namespace {
+
+// Samples per tile of the contiguous axis; small enough for the accumulators to
+// stay in registers, large enough to fill a vector unit.
+constexpr int64_t kTile = 64;
+
+}  // namespace
+
 // Split every band of `x` along one spatial axis into a low- and a high-pass
 // half, without materializing the boundary extension.
 //
@@ -17,6 +25,10 @@ namespace c3li {
 // The output reads `out[k] = sum_f filter[f] * x_ext[2 k + offset - f]`, which
 // is the flipped, strided convolution of the padded signal that the reference
 // implementation performs, with `offset = filter_len - 1 - pad_lo`.
+//
+// The loops are nested rather than flattened so that the index arithmetic and
+// the boundary rules are hoisted out of the innermost one, which then walks the
+// contiguous axis and vectorizes.
 torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                            const torch::Tensor& dec_hi, int64_t axis,
                            int64_t mode, int64_t pad_lo, int64_t out_length) {
@@ -28,6 +40,8 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
   const AxisLayout layout = axis_layout(x, axis);
   const int64_t filter_len = dec_lo.numel();
   const int64_t offset = filter_len - 1 - pad_lo;
+  const int64_t length = layout.length;
+  const int64_t inner = layout.inner;
 
   auto sizes = x.sizes().vec();
   sizes[1] *= 2;
@@ -45,43 +59,112 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
     const auto* lo = lo_filter.data_ptr<scalar_t>();
     const auto* hi = hi_filter.data_ptr<scalar_t>();
 
-    // one task per (outer, output sample, inner) triple
-    const int64_t total = layout.outer * out_length * layout.inner;
-    parallel_for(total, [&](int64_t begin, int64_t end) {
-      for (int64_t flat = begin; flat < end; ++flat) {
-        const int64_t q = flat % layout.inner;
-        const int64_t k = (flat / layout.inner) % out_length;
-        const int64_t o = flat / (layout.inner * out_length);
-
-        // `o` runs over batch, group and the axes before this one
+    // one task per lane, which is everything the axis is not
+    parallel_for(layout.outer, [&](int64_t begin, int64_t end) {
+      for (int64_t o = begin; o < end; ++o) {
+        const int64_t pre = o % per_group;
         const int64_t group = (o / per_group) % groups;
         const int64_t batch = o / (per_group * groups);
-        const int64_t pre = o % per_group;
 
-        const scalar_t* lane =
-            src + ((batch * groups + group) * per_group + pre) * layout.length *
-                      layout.inner;
-        const scalar_t edge_lo = lane[q];
-        const scalar_t edge_hi = lane[(layout.length - 1) * layout.inner + q];
+        const scalar_t* lane = src + o * length * inner;
+        scalar_t* out_low =
+            dst + ((batch * (2 * groups) + 2 * group) * per_group + pre) *
+                      out_length * inner;
+        scalar_t* out_high = out_low + per_group * out_length * inner;
 
-        double low = 0.0;
-        double high = 0.0;
-        for (int64_t f = 0; f < filter_len; ++f) {
-          const PadRef ref = pad_resolve(2 * k + offset - f, layout.length, mode);
-          const double value = ref.sign * static_cast<double>(
-                                              lane[ref.index * layout.inner + q]) +
-                               ref.lo * static_cast<double>(edge_lo) +
-                               ref.hi * static_cast<double>(edge_hi);
-          low += static_cast<double>(lo[f]) * value;
-          high += static_cast<double>(hi[f]) * value;
+        // the taps of output `k` span `[2 k + offset - filter_len + 1, 2 k +
+        // offset]`, so the outputs whose span lies inside the signal form one
+        // contiguous run; splitting it out leaves the hot loop branch-free
+        const int64_t interior_begin =
+            std::max<int64_t>(0, (filter_len - offset) / 2);
+        const int64_t interior_end =
+            std::min(out_length, (length - offset + 1) / 2);
+
+        for (int64_t k = 0; k < out_length; ++k) {
+          const int64_t last = 2 * k + offset;
+          const int64_t first = last - (filter_len - 1);
+          const bool interior = k >= interior_begin && k < interior_end;
+          scalar_t* low_row = out_low + k * inner;
+          scalar_t* high_row = out_high + k * inner;
+
+          if (inner == 1) {
+            // the axis is the contiguous one, so there is nothing to tile over:
+            // accumulate straight into a scalar, walking the taps
+            const scalar_t* base = lane + last;
+            scalar_t acc_low = 0;
+            scalar_t acc_high = 0;
+            if (interior) {
+              for (int64_t f = 0; f < filter_len; ++f) {
+                const scalar_t value = base[-f];
+                acc_low += lo[f] * value;
+                acc_high += hi[f] * value;
+              }
+            } else {
+              for (int64_t f = 0; f < filter_len; ++f) {
+                const PadRef ref = pad_resolve(last - f, length, mode);
+                const scalar_t value =
+                    static_cast<scalar_t>(ref.sign) * lane[ref.index] +
+                    static_cast<scalar_t>(ref.lo) * lane[0] +
+                    static_cast<scalar_t>(ref.hi) * lane[length - 1];
+                acc_low += lo[f] * value;
+                acc_high += hi[f] * value;
+              }
+            }
+            *low_row = acc_low;
+            *high_row = acc_high;
+          } else if (interior) {
+            // every tap reads a sample that exists, so no rule is consulted
+            const scalar_t* base = lane + last * inner;
+            for (int64_t q0 = 0; q0 < inner; q0 += kTile) {
+              const int64_t width = std::min(kTile, inner - q0);
+              scalar_t acc_low[kTile] = {};
+              scalar_t acc_high[kTile] = {};
+              for (int64_t f = 0; f < filter_len; ++f) {
+                const scalar_t wl = lo[f];
+                const scalar_t wh = hi[f];
+                const scalar_t* row = base - f * inner + q0;
+                for (int64_t j = 0; j < width; ++j) {
+                  acc_low[j] += wl * row[j];
+                  acc_high[j] += wh * row[j];
+                }
+              }
+              for (int64_t j = 0; j < width; ++j) {
+                low_row[q0 + j] = acc_low[j];
+                high_row[q0 + j] = acc_high[j];
+              }
+            }
+          } else {
+            // the rules depend on the sample index alone, so they are resolved
+            // once per tap and reused across the contiguous axis
+            const scalar_t* edge_lo = lane;
+            const scalar_t* edge_hi = lane + (length - 1) * inner;
+            for (int64_t q0 = 0; q0 < inner; q0 += kTile) {
+              const int64_t width = std::min(kTile, inner - q0);
+              scalar_t acc_low[kTile] = {};
+              scalar_t acc_high[kTile] = {};
+              for (int64_t f = 0; f < filter_len; ++f) {
+                const PadRef ref = pad_resolve(last - f, length, mode);
+                const scalar_t sign = static_cast<scalar_t>(ref.sign);
+                const scalar_t weight_lo = static_cast<scalar_t>(ref.lo);
+                const scalar_t weight_hi = static_cast<scalar_t>(ref.hi);
+                const scalar_t wl = lo[f];
+                const scalar_t wh = hi[f];
+                const scalar_t* row = lane + ref.index * inner + q0;
+                for (int64_t j = 0; j < width; ++j) {
+                  const scalar_t value = sign * row[j] +
+                                         weight_lo * edge_lo[q0 + j] +
+                                         weight_hi * edge_hi[q0 + j];
+                  acc_low[j] += wl * value;
+                  acc_high[j] += wh * value;
+                }
+              }
+              for (int64_t j = 0; j < width; ++j) {
+                low_row[q0 + j] = acc_low[j];
+                high_row[q0 + j] = acc_high[j];
+              }
+            }
+          }
         }
-
-        const int64_t out_pre =
-            ((batch * (2 * groups) + 2 * group) * per_group + pre);
-        scalar_t* out_lane = dst + out_pre * out_length * layout.inner;
-        out_lane[k * layout.inner + q] = static_cast<scalar_t>(low);
-        out_lane[per_group * out_length * layout.inner + k * layout.inner + q] =
-            static_cast<scalar_t>(high);
       }
     });
   });
