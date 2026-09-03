@@ -196,3 +196,51 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
 }
 
 }  // namespace c3li
+
+namespace c3li {
+
+// Transform every axis, repeatedly, each level working on the approximation of
+// the one before it.
+//
+// The lengths and paddings a level needs follow from the one before it, so
+// running the recursion here saves a round trip and a copy per level.
+std::vector<torch::Tensor> wavedec_axes_cpu(const torch::Tensor& x,
+                                            const torch::Tensor& dec_lo,
+                                            const torch::Tensor& dec_hi,
+                                            int64_t mode, int64_t levels) {
+  TORCH_CHECK(levels >= 1, "a decomposition needs at least one level");
+  const int64_t dimensions = x.dim() - 2;
+  const int64_t filter_len = dec_lo.numel();
+  const int64_t corners = int64_t{1} << dimensions;
+  const int64_t groups = x.size(1);
+
+  std::vector<torch::Tensor> stacked;
+  stacked.reserve(levels);
+  torch::Tensor current = x;
+  for (int64_t level = 0; level < levels; ++level) {
+    torch::Tensor bands = current;
+    for (int64_t axis = 0; axis < dimensions; ++axis) {
+      const int64_t length = bands.size(2 + axis);
+      int64_t pad_lo;
+      int64_t out_length;
+      if (mode == kPeriodization) {
+        TORCH_CHECK(length % 2 == 0,
+                    "the fused recursion needs even axes for this mode");
+        pad_lo = filter_len / 2 - 1;
+        out_length = length / 2;
+      } else {
+        pad_lo = filter_len - 2;
+        out_length = (length + filter_len - 1) / 2;
+      }
+      bands = dwt_axis_cpu(bands, dec_lo, dec_hi, axis, mode, pad_lo, out_length);
+    }
+    stacked.push_back(bands);
+    if (level + 1 < levels) {
+      // the approximation of every group leads its block of subbands
+      current = bands.slice(1, 0, groups * corners, corners).contiguous();
+    }
+  }
+  return stacked;
+}
+
+}  // namespace c3li

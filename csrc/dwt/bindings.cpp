@@ -25,7 +25,15 @@ torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
                             const torch::Tensor& rec_hi, int64_t axis,
                             int64_t mode, int64_t trim, int64_t out_length);
 
+std::vector<torch::Tensor> wavedec_axes_cpu(const torch::Tensor& x,
+                                            const torch::Tensor& dec_lo,
+                                            const torch::Tensor& dec_hi,
+                                            int64_t mode, int64_t levels);
+
 torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale);
+
+std::vector<torch::Tensor> haar_wavedec_cpu(const torch::Tensor& x,
+                                            int64_t levels, double scale);
 
 #ifdef C3LI_WITH_GPU
 torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
@@ -70,6 +78,22 @@ torch::Tensor haar_nd(const torch::Tensor& x, double scale) {
   return haar_nd_cpu(x, scale);
 }
 
+// Transform every axis repeatedly, each level working on the last approximation.
+std::vector<torch::Tensor> wavedec_axes(const torch::Tensor& x,
+                                        const torch::Tensor& dec_lo,
+                                        const torch::Tensor& dec_hi, int64_t mode,
+                                        int64_t levels) {
+  RECORD_FUNCTION("c3li::wavedec_axes", std::vector<c10::IValue>());
+  return wavedec_axes_cpu(x, dec_lo, dec_hi, mode, levels);
+}
+
+// Transform repeatedly, each level working on the approximation of the last.
+std::vector<torch::Tensor> haar_wavedec(const torch::Tensor& x, int64_t levels,
+                                        double scale) {
+  RECORD_FUNCTION("c3li::haar_wavedec", std::vector<c10::IValue>());
+  return haar_wavedec_cpu(x, levels, scale);
+}
+
 // Whether the extension carries kernels for the accelerator.
 bool has_gpu() {
 #ifdef C3LI_WITH_GPU
@@ -86,5 +110,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("dwt_axis", &c3li::dwt_axis, "Analysis along one spatial axis");
   m.def("idwt_axis", &c3li::idwt_axis, "Synthesis along one spatial axis");
   m.def("haar_nd", &c3li::haar_nd, "Fused Haar analysis over every axis");
+  m.def("wavedec_axes", &c3li::wavedec_axes,
+        "Fused multi-level analysis over every axis");
+  m.def("haar_wavedec", &c3li::haar_wavedec,
+        "Fused multi-level Haar analysis");
   m.def("has_gpu", &c3li::has_gpu, "Whether GPU kernels were compiled in");
 }

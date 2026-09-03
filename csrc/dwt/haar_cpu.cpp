@@ -199,3 +199,34 @@ torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
 }
 
 }  // namespace c3li
+
+namespace c3li {
+
+// Transform repeatedly, each level working on the approximation of the one
+// before it.
+//
+// Running the recursion here rather than in Python saves a round trip and a
+// copy per level: the approximation band is a strided view of the stacked
+// output, which the kernel would otherwise have to be handed as a fresh
+// contiguous tensor from the caller.
+std::vector<torch::Tensor> haar_wavedec_cpu(const torch::Tensor& x,
+                                            int64_t levels, double scale) {
+  TORCH_CHECK(levels >= 1, "a decomposition needs at least one level");
+  const int64_t corners = int64_t{1} << (x.dim() - 2);
+  const int64_t groups = x.size(1);
+
+  std::vector<torch::Tensor> stacked;
+  stacked.reserve(levels);
+  torch::Tensor current = x;
+  for (int64_t level = 0; level < levels; ++level) {
+    torch::Tensor bands = haar_nd_cpu(current, scale);
+    stacked.push_back(bands);
+    if (level + 1 < levels) {
+      // the approximation of every group leads its block of subbands
+      current = bands.slice(1, 0, groups * corners, corners).contiguous();
+    }
+  }
+  return stacked;
+}
+
+}  // namespace c3li
