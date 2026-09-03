@@ -28,6 +28,8 @@ import argparse
 import contextlib
 import csv
 import json
+import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -365,6 +367,22 @@ def total_energy(coeffs: Any) -> torch.Tensor:
     return sum(total_energy(value) for value in values)
 
 
+def build_cases(args: argparse.Namespace) -> list[Case]:
+    """Expand the command line into the cases of the sweep.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    dtype = getattr(torch, args.dtype)
+    return [
+        Case(dimensions, wavelet, mode, levels, tuple(shape), dtype)
+        for dimensions, shape in zip(args.dims, args.sizes, strict=True)
+        for wavelet in args.wavelets
+        for mode in args.modes
+        for levels in args.levels
+    ]
+
+
 def timed_call(
     backend: Backend, payload: Any, case: Case, direction: str
 ) -> Callable[[], Any]:
@@ -391,14 +409,7 @@ def run(args: argparse.Namespace) -> list[Result]:
     Args:
         args: Parsed command line arguments.
     """
-    dtype = getattr(torch, args.dtype)
-    cases = [
-        Case(dimensions, wavelet, mode, levels, tuple(shape), dtype)
-        for dimensions, shape in zip(args.dims, args.sizes, strict=True)
-        for wavelet in args.wavelets
-        for mode in args.modes
-        for levels in args.levels
-    ]
+    cases = build_cases(args)
     results: list[Result] = []
 
     for case in cases:
@@ -445,6 +456,145 @@ def run(args: argparse.Namespace) -> list[Result]:
                 )
             )
     return results
+
+
+def profile_case(backend: Backend, case: Case, args: argparse.Namespace) -> None:
+    """Print where one case spends its time, per operator.
+
+    The compiled kernels carry `RECORD_FUNCTION`, so they appear by name
+    alongside the ATen operators rather than as an opaque Python frame.
+
+    Args:
+        backend: Backend to profile.
+        case: Case to run.
+        args: Parsed command line arguments.
+    """
+    from torch.profiler import ProfilerActivity, profile
+
+    activities = [ProfilerActivity.CPU]
+    if args.device == "cuda":
+        activities.append(ProfilerActivity.CUDA)
+
+    payload = backend.to_input(sample(case).to(args.device), case)
+    for _ in range(3):
+        backend.decompose(payload, case)
+
+    with profile(activities=activities, profile_memory=True) as session:
+        for _ in range(args.profile_repeats):
+            backend.decompose(payload, case)
+
+    sort = "self_cuda_time_total" if args.device == "cuda" else "self_cpu_time_total"
+    print(f"\n=== {backend.name} :: {case.label()} ===")
+    print(session.key_averages().table(sort_by=sort, row_limit=args.profile_rows))
+
+
+def traffic(case: Case) -> float:
+    """Bytes one decomposition has to move at least, read plus written.
+
+    Every level reads its input once and writes as much again, and each level
+    works on `2**-dimensions` of the one before it. Comparing this against the
+    machine's memory bandwidth says how much of the ceiling a kernel reaches,
+    which a timing on its own cannot.
+
+    Args:
+        case: Case to size.
+    """
+    itemsize = torch.empty((), dtype=case.dtype).element_size()
+    elements = 1
+    for n in case.shape:
+        elements *= n
+    total = 0.0
+    for level in range(case.levels):
+        total += 2 * elements * itemsize / (2 ** (case.dimensions * level))
+    return total
+
+
+def perf_counters(
+    backend: Backend, case: Case, args: argparse.Namespace, iterations: int
+) -> tuple[dict[str, int], float]:
+    """Run one case under `perf stat` and return its counters and wall time.
+
+    Args:
+        backend: Backend to run.
+        case: Case to run.
+        args: Parsed command line arguments.
+        iterations: Number of decompositions the worker performs.
+    """
+    command = [
+        "perf", "stat", "-e",
+        "cycles:u,instructions:u,cache-references:u,cache-misses:u",
+        sys.executable, __file__, "--perf-worker",
+        "--backends", backend.name,
+        "--device", args.device,
+        "--dims", str(case.dimensions),
+        "--sizes", "x".join(str(n) for n in case.shape),
+        "--wavelets", case.wavelet,
+        "--modes", case.mode,
+        "--levels", str(case.levels),
+        "--dtype", args.dtype,
+        "--perf-iterations", str(iterations),
+    ]
+    if args.threads is not None:
+        command += ["--threads", str(args.threads)]
+    finished = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+    counters: dict[str, int] = {}
+    seconds = 0.0
+    for line in finished.stderr.splitlines():
+        parts = line.replace("'", "").replace("\u2019", "").split()
+        # the wall time, not `task-clock`, which sums the CPU time of every thread
+        if len(parts) >= 3 and parts[1] == "seconds" and parts[2] == "time":
+            seconds = float(parts[0])
+        elif len(parts) >= 2 and parts[0].isdigit():
+            counters[parts[1]] = int(parts[0])
+    return counters, seconds
+
+
+def perf_case(backend: Backend, case: Case, args: argparse.Namespace) -> None:
+    """Report the hardware counters of one case, through `perf stat`.
+
+    Answers what a timing cannot: whether the loop issues well and hits cache,
+    and how close it runs to the memory bandwidth a transform of this size has
+    to move. Interpreter start-up and the import of torch cost far more than the
+    loop, so the counters of a run that does nothing are subtracted from those
+    of a run that does the work.
+
+    Args:
+        backend: Backend to run.
+        case: Case to run.
+        args: Parsed command line arguments.
+    """
+    print(f"\n=== {backend.name} :: {case.label()} ===")
+    try:
+        loaded, loaded_seconds = perf_counters(
+            backend, case, args, args.perf_iterations
+        )
+        idle, idle_seconds = perf_counters(backend, case, args, 0)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"  perf could not run: {exc}")
+        return
+    if not loaded:
+        print("  no counters; is /proc/sys/kernel/perf_event_paranoid too strict?")
+        return
+
+    counters = {
+        name: value - idle.get(name, 0) for name, value in loaded.items()
+    }
+    seconds = loaded_seconds - idle_seconds
+    for name, value in counters.items():
+        print(f"  {name:24s} {value:>15,}")
+
+    cycles = counters.get("cycles:u", 0)
+    instructions = counters.get("instructions:u", 0)
+    references = counters.get("cache-references:u", 0)
+    misses = counters.get("cache-misses:u", 0)
+    if cycles > 0:
+        print(f"  {'instructions per cycle':24s} {instructions / cycles:>15.2f}")
+    if references > 0:
+        print(f"  {'cache miss rate':24s} {misses / references:>14.1%}")
+    if seconds > 0:
+        moved = traffic(case) * args.perf_iterations
+        print(f"  {'per call':24s} {seconds / args.perf_iterations * 1e6:>13.1f} us")
+        print(f"  {'achieved bandwidth':24s} {moved / seconds / 1e9:>13.1f} GB/s")
 
 
 def report(results: list[Result], args: argparse.Namespace) -> None:
@@ -588,6 +738,20 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="seconds each measurement runs for; the timer picks the iteration count",
     )
     parser.add_argument("--threads", type=int, default=None)
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="print where the time goes per operator, through torch.profiler",
+    )
+    parser.add_argument("--profile-repeats", type=int, default=10)
+    parser.add_argument("--profile-rows", type=int, default=10)
+    parser.add_argument(
+        "--perf",
+        action="store_true",
+        help="report hardware counters through `perf stat`, for the headroom left",
+    )
+    parser.add_argument("--perf-iterations", type=int, default=200)
+    parser.add_argument("--perf-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--json", default=None)
     parser.add_argument("--csv", default=None)
     parser.add_argument("--plot", default=None)
@@ -605,6 +769,30 @@ def main(argv: Sequence[str] | None = None) -> None:
         torch.set_num_threads(args.threads)
     if args.device == "cuda" and not torch.cuda.is_available():
         raise SystemExit("no GPU available")
+
+    if args.perf_worker:
+        # the body `perf stat` measures: one case, nothing else
+        case = build_cases(args)[0]
+        backend = BACKENDS[args.backends[0]]
+        payload = backend.to_input(sample(case).to(args.device), case)
+        for _ in range(args.perf_iterations):
+            backend.decompose(payload, case)
+        return
+
+    if args.profile or args.perf:
+        for case in build_cases(args):
+            for name in args.backends:
+                backend = BACKENDS[name]
+                status = probe(backend, args.device, case)
+                if status != "ok":
+                    print(f"\n=== {name} :: {case.label()} === {status}")
+                    continue
+                if args.profile:
+                    profile_case(backend, case, args)
+                if args.perf:
+                    perf_case(backend, case, args)
+        return
+
     results = run(args)
     report(results, args)
     write(results, args)
