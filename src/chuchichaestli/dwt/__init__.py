@@ -3,6 +3,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Discrete wavelet transforms: filter banks, extension modes and the transforms themselves."""
 
+from chuchichaestli.dwt.functional import (
+    dwt,
+    dwt_coeff_len,
+    dwt_max_level,
+    dwtn,
+    idwt,
+    idwtn,
+    subband_keys,
+    wavedec,
+    wavedecn,
+    waverec,
+    waverecn,
+)
 from chuchichaestli.dwt.modes import (
     MODE_TO_CODE,
     ExtensionModeTypes,
@@ -24,8 +37,19 @@ __all__ = [
     "ExtensionModeTypes",
     "Wavelet",
     "WaveletTypes",
+    "dwt",
+    "dwt_coeff_len",
+    "dwt_max_level",
+    "dwtn",
     "extension_indices",
+    "idwt",
+    "idwtn",
     "pad_signal",
+    "subband_keys",
+    "wavedec",
+    "wavedecn",
+    "waverec",
+    "waverecn",
     "wavelet",
     "wavelist",
 ]
