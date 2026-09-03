@@ -12,8 +12,13 @@ in one would hand a machine-specific binary to every other machine. Whether
 torch is importable during a packaging build depends on the front end, so the
 exclusion rather than the import is what keeps a wheel portable.
 
-    uv sync --no-build-isolation      # build them alongside the install
+    python hatch_build.py             # build them in place, into the source tree
     C3LI_SKIP_EXTENSIONS=1 uv build   # or leave them out entirely
+
+Building in place is enough for a source or editable install: the objects land
+next to the modules that import them. A packaging front end reaches the same
+code through the hook, but only where its build environment carries torch and
+setuptools, which an isolated build deliberately does not.
 
 Environment:
     C3LI_SKIP_EXTENSIONS: skip every extension when set to `1`.
@@ -25,7 +30,10 @@ import os
 import subprocess
 from pathlib import Path
 
-from hatchling.builders.hooks.plugin.interface import BuildHookInterface
+try:
+    from hatchling.builders.hooks.plugin.interface import BuildHookInterface
+except ImportError:  # running this file directly, without the build backend
+    BuildHookInterface = object
 
 
 ROOT = Path(__file__).parent
@@ -113,8 +121,16 @@ def discover(build_gpu: bool, use_rocm: bool) -> list:
             continue
         package = PACKAGE_OF.get(name, f"chuchichaestli.{name}")
 
-        sources = sorted(str(p) for p in directory.glob("*.cpp"))
+        # hipify writes its output next to the source, so the byproducts of an
+        # earlier build have to stay out of a plain CPU source list
+        sources = sorted(
+            str(p) for p in directory.glob("*.cpp") if not p.stem.endswith("_hip")
+        )
+        gpu_sources = sorted(str(p) for p in directory.glob("*.cu"))
         flags = ["-O3", *vector_flags()]
+        # the dispatch only compiles its GPU branch when there is something to
+        # dispatch to; without that the branch declares kernels nothing defines
+        build_gpu = build_gpu and bool(gpu_sources)
         if build_gpu:
             if use_rocm:
                 from torch.utils.hipify.hipify_python import hipify
@@ -133,7 +149,7 @@ def discover(build_gpu: bool, use_rocm: bool) -> list:
                     if p.suffix in (".hip",) or p.name.endswith("_hip.cpp")
                 ) or sources
             else:
-                sources += sorted(str(p) for p in directory.glob("*.cu"))
+                sources += gpu_sources
             flags.append("-DC3LI_WITH_GPU")
 
         factory = CUDAExtension if build_gpu else CppExtension
@@ -155,55 +171,69 @@ def discover(build_gpu: bool, use_rocm: bool) -> list:
     return extensions
 
 
+def build() -> None:
+    """Compile the extensions in place, reporting rather than raising.
+
+    An extension is an accelerator, so anything that stops it from being built
+    is reported and the pure-torch path stands in for it.
+    """
+    if os.environ.get("C3LI_SKIP_EXTENSIONS", "0") == "1":
+        print("chuchichaestli: extensions skipped by C3LI_SKIP_EXTENSIONS")
+        return
+    try:
+        _build()
+    except Exception as exc:  # noqa: BLE001 - a build failure must not be fatal
+        print(f"chuchichaestli: extensions skipped ({exc}); pure-Python install")
+
+
+def _build() -> None:
+    """Probe the toolchain and run the extension build."""
+    try:
+        import torch
+    except ImportError:
+        print("chuchichaestli: torch is not importable here; extensions skipped")
+        return
+
+    use_rocm = torch.version.hip is not None
+    forced = os.environ.get("C3LI_FORCE_GPU", "0") == "1"
+    compiler = have("hipcc") if use_rocm else have("nvcc")
+    build_gpu = forced or (
+        compiler and (use_rocm or torch.version.cuda is not None)
+    )
+
+    extensions = discover(build_gpu, use_rocm)
+    if not extensions:
+        print("chuchichaestli: no extensions to build")
+        return
+
+    from setuptools import setup
+    from torch.utils.cpp_extension import BuildExtension
+
+    kind = "GPU" if build_gpu else "CPU"
+    names = ", ".join(e.name.rsplit(".", 1)[-1] for e in extensions)
+    print(f"chuchichaestli: building {kind} extensions: {names}")
+    setup(
+        name="chuchichaestli_extensions",
+        ext_modules=extensions,
+        cmdclass={"build_ext": BuildExtension},
+        script_args=["build_ext", "--inplace"],
+    )
+
+
 class CustomBuildHook(BuildHookInterface):
     """Compile the `csrc` extensions in place, or leave them out."""
 
     PLUGIN_NAME = "custom"
 
     def initialize(self, version: str, build_data: dict) -> None:
-        """Build the extensions, reporting rather than raising on any failure.
+        """Build the extensions.
 
         Args:
             version: Build version, unused.
             build_data: Build data, unused.
         """
-        if os.environ.get("C3LI_SKIP_EXTENSIONS", "0") == "1":
-            print("chuchichaestli: extensions skipped by C3LI_SKIP_EXTENSIONS")
-            return
-        try:
-            self._build()
-        except Exception as exc:  # noqa: BLE001 - a build failure must not be fatal
-            print(f"chuchichaestli: extensions skipped ({exc}); pure-Python install")
+        build()
 
-    def _build(self) -> None:
-        """Probe the toolchain and run the extension build."""
-        try:
-            import torch
-        except ImportError:
-            print("chuchichaestli: torch is not importable here; extensions skipped")
-            return
 
-        use_rocm = torch.version.hip is not None
-        forced = os.environ.get("C3LI_FORCE_GPU", "0") == "1"
-        compiler = have("hipcc") if use_rocm else have("nvcc")
-        build_gpu = forced or (
-            compiler and (use_rocm or torch.version.cuda is not None)
-        )
-
-        extensions = discover(build_gpu, use_rocm)
-        if not extensions:
-            print("chuchichaestli: no extensions to build")
-            return
-
-        from setuptools import setup
-        from torch.utils.cpp_extension import BuildExtension
-
-        kind = "GPU" if build_gpu else "CPU"
-        names = ", ".join(e.name.rsplit(".", 1)[-1] for e in extensions)
-        print(f"chuchichaestli: building {kind} extensions: {names}")
-        setup(
-            name="chuchichaestli_extensions",
-            ext_modules=extensions,
-            cmdclass={"build_ext": BuildExtension},
-            script_args=["build_ext", "--inplace"],
-        )
+if __name__ == "__main__":
+    build()
