@@ -21,6 +21,7 @@ from chuchichaestli.utils.modules import (
     get_chuchichaestli_block_type,
     get_layer_type,
 )
+from chuchichaestli.utils.arithmetic import Laurent, divide, reverse
 from chuchichaestli.utils.ir import build_ir
 from chuchichaestli.utils.info import summary
 from chuchichaestli.utils.visualization import (
@@ -30,6 +31,9 @@ from chuchichaestli.utils.visualization import (
 )
 
 __all__ = [
+    "Laurent",
+    "divide",
+    "reverse",
     "partialclass",
     "alias_kwargs",
     "prod",
