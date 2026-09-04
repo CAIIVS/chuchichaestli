@@ -20,6 +20,13 @@
 
 namespace c3li {
 
+torch::Tensor dwt_lift_axis_cpu(
+    const torch::Tensor& x, int64_t axis,
+    const std::vector<int64_t>& on_detail,
+    const std::vector<std::vector<double>>& coeffs,
+    const std::vector<int64_t>& lows, double approx_gain, int64_t approx_delay,
+    double detail_gain, int64_t detail_delay);
+
 torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                            const torch::Tensor& dec_hi, int64_t axis,
                            int64_t mode, int64_t pad_lo, int64_t out_length);
@@ -191,6 +198,8 @@ bool has_gpu() {
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.doc() = "Discrete wavelet transforms with CPU and GPU kernels";
+  m.def("dwt_lift_axis", &c3li::dwt_lift_axis_cpu,
+        "Decomposition along one spatial axis by lifting");
   m.def("dwt_axis", &c3li::dwt_axis, "Decomposition along one spatial axis");
   m.def("idwt_axis", &c3li::idwt_axis, "Reconstruction along one spatial axis");
   m.def("haar_nd", &c3li::haar_nd, "Fused Haar decomposition over every axis");

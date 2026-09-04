@@ -15,6 +15,7 @@ import pytest
 import torch
 
 from chuchichaestli.dwt import _ext
+from chuchichaestli.dwt import wavelet
 from chuchichaestli.dwt.functional import dwtn, idwtn, subband_keys, wavedecn
 from chuchichaestli.dwt.modes import MODE_TO_CODE
 
@@ -223,3 +224,34 @@ class TestDevices:
             sum((bands[key] ** 2).sum() for key in subband_keys(2)).backward()
             grads.append(probe.grad.cpu())
         assert torch.allclose(grads[0], grads[1], atol=1e-11)
+
+
+@needs_kernels
+class TestLifting:
+    """Tests for the lifting kernel, which nothing dispatches to yet."""
+
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4", "db8", "coif1"])
+    @pytest.mark.parametrize("shape", [(2, 1, 64), (2, 3, 32, 32)])
+    def test_lifting_matches_the_convolution(self, name, shape):
+        """Test that both routes to the transform agree."""
+        from chuchichaestli.dwt.functional import _decompose
+        from chuchichaestli.utils.arithmetic.lifting import factor
+
+        wave = wavelet(name)
+        lift = factor(wave.dec_lo, wave.dec_hi)
+        low, high, _, _ = wave.filters(torch.float64, torch.device("cpu"))
+        x = torch.randn(*shape, dtype=torch.float64)
+        for axis in range(len(shape) - 2):
+            got = _ext._dwt_kernels.dwt_lift_axis(
+                x,
+                axis,
+                [1 if s.on_detail else 0 for s in lift.steps],
+                [list(s.q.c) for s in lift.steps],
+                [s.q.low for s in lift.steps],
+                lift.approx[0],
+                lift.approx[1],
+                lift.detail[0],
+                lift.detail[1],
+            )
+            want = _decompose(x, low, high, axis, "periodization")
+            assert torch.allclose(got, want, atol=1e-9)
