@@ -3,22 +3,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Build the optional native extensions under `csrc`.
 
-The extensions are an accelerator, never a requirement: every call site falls
-back to a pure-torch path, so this hook is written to skip rather than fail.
-
-They are built in place, for a source or editable install, and the wheel target
-excludes `*.so`: a wheel carries no platform tag, so shipping a compiled object
-in one would hand a machine-specific binary to every other machine. Whether
-torch is importable during a packaging build depends on the front end, so the
-exclusion rather than the import is what keeps a wheel portable.
+The extensions are accelerators, never requirements, so this hook is written
+to skip rather than fail. It builds them in place, which serves a source or
+editable install; the wheel carries the sources instead, put there by
+`shipped()`, and `chuchichaestli/_jit.py` compiles those on first use. The
+probes are read from that module, so both routes compile alike.
 
     python hatch_build.py             # build them in place, into the source tree
     C3LI_SKIP_EXTENSIONS=1 uv build   # or leave them out entirely
-
-Building in place is enough for a source or editable install: the objects land
-next to the modules that import them. A packaging front end reaches the same
-code through the hook, but only where its build environment carries torch and
-setuptools, which an isolated build deliberately does not.
 
 Environment:
     C3LI_SKIP_EXTENSIONS: skip every extension when set to `1`.
@@ -27,7 +19,6 @@ Environment:
 """
 
 import os
-import subprocess
 from pathlib import Path
 
 try:
@@ -43,66 +34,27 @@ SHARED = CSRC / "common"
 # `csrc/<name>` builds `chuchichaestli.<package>._<name>_kernels`
 PACKAGE_OF = {"dwt": "chuchichaestli.dwt", "ode": "chuchichaestli.ode"}
 
-ROCM_ARCHS = (
-    "gfx900", "gfx906", "gfx908", "gfx90a",
-    "gfx1030", "gfx1100", "gfx1151", "gfx1200", "gfx1201",
-)
+_TOOLCHAIN = None
 
 
-def have(program: str) -> bool:
-    """Whether a compiler answers on `PATH`.
+def toolchain():
+    """The compile probes, shared with the just-in-time build.
 
-    Args:
-        program: Executable to probe.
+    Loaded by path rather than imported: the package it sits in pulls in torch,
+    which a packaging environment may not carry, while the module itself needs
+    nothing but the standard library. Loaded on demand, so that a tree without
+    it still packages as a pure-Python wheel by way of the report in `build`.
     """
-    try:
-        subprocess.run(
-            [program, "--version"], capture_output=True, check=True, timeout=30
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return True
+    global _TOOLCHAIN
+    if _TOOLCHAIN is None:
+        import importlib.util
 
-
-def cpu_features() -> set[str]:
-    """Instruction set extensions the building machine advertises.
-
-    The extensions are compiled in place for a source install and the wheel
-    target excludes the result, so the object may be tuned to this machine.
-    """
-    try:
-        with open("/proc/cpuinfo") as handle:
-            for line in handle:
-                if line.startswith("flags") or line.startswith("Features"):
-                    return set(line.split(":", 1)[1].split())
-    except OSError:
-        pass
-    return set()
-
-
-def vector_flags() -> list[str]:
-    """Compiler flags enabling the widest vector unit this machine has.
-
-    `at::vec` selects its implementation from the capability macro, and falls
-    back to a scalar one that is slower than plain scalar code, so the flags
-    are worth probing for.
-    """
-    features = cpu_features()
-    if {"avx512f", "avx512dq", "avx512vl"} <= features:
-        return ["-mavx512f", "-mavx512dq", "-mavx512vl", "-mavx512bw", "-mfma",
-                "-DCPU_CAPABILITY_AVX512"]
-    if "avx2" in features:
-        return ["-mavx2", "-mfma", "-DCPU_CAPABILITY_AVX2"]
-    return []
-
-
-def skipped(name: str) -> bool:
-    """Whether one extension was switched off.
-
-    Args:
-        name: Directory name under `csrc`.
-    """
-    return os.environ.get(f"C3LI_SKIP_{name.upper()}", "0") == "1"
+        path = ROOT / "src" / "chuchichaestli" / "_jit.py"
+        spec = importlib.util.spec_from_file_location("chuchichaestli_jit", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _TOOLCHAIN = module
+    return _TOOLCHAIN
 
 
 def discover(build_gpu: bool, use_rocm: bool) -> list:
@@ -112,71 +64,64 @@ def discover(build_gpu: bool, use_rocm: bool) -> list:
         build_gpu: Whether to compile the GPU sources too.
         use_rocm: Whether the GPU sources go through hipify first.
     """
-    from torch.utils.cpp_extension import CppExtension, CUDAExtension
+    from torch.utils.cpp_extension import IS_WINDOWS, CppExtension, CUDAExtension
+
+    jit = toolchain()
+    omp_compile, omp_link = jit.openmp_flags()
+    # `-g1` keeps line tables a profiler needs but saves size compared to `-g`
+    optimise = ["/O2"] if IS_WINDOWS else ["-O3", "-g1"]
 
     extensions = []
     for directory in sorted(p for p in CSRC.iterdir() if p.is_dir()):
         name = directory.name
-        if not (directory / "bindings.cpp").exists() or skipped(name):
+        if not (directory / "bindings.cpp").exists():
             continue
-        package = PACKAGE_OF.get(name, f"chuchichaestli.{name}")
+        if os.environ.get(f"C3LI_SKIP_{name.upper()}", "0") == "1":
+            continue
 
-        # hipify writes its output next to the source, so the byproducts of an
-        # earlier build have to stay out of a plain CPU source list
-        sources = sorted(
-            str(p) for p in directory.glob("*.cpp") if not p.stem.endswith("_hip")
-        )
-        gpu_sources = sorted(str(p) for p in directory.glob("*.cu"))
-        flags = ["-O3", *vector_flags()]
-        # the dispatch only compiles its GPU branch when there is something to
-        # dispatch to; without that the branch declares kernels nothing defines
-        build_gpu = build_gpu and bool(gpu_sources)
-        if build_gpu:
-            if use_rocm:
-                from torch.utils.hipify.hipify_python import hipify
+        with_gpu = build_gpu and any(directory.glob("*.cu"))
+        sources = jit.sources(directory, with_gpu)
+        if with_gpu and use_rocm:
+            from torch.utils.hipify.hipify_python import hipify
 
-                hipify(
-                    project_directory=str(ROOT),
-                    output_directory=str(ROOT),
-                    includes=[f"{directory}/*"],
-                    extensions=(".cu", ".cuh", ".cpp"),
-                    show_detailed=False,
-                    is_pytorch_extension=True,
-                )
-                sources = sorted(
-                    str(p)
-                    for p in directory.iterdir()
-                    if p.suffix in (".hip",) or p.name.endswith("_hip.cpp")
-                ) or sources
-            else:
-                sources += gpu_sources
+            hipify(
+                project_directory=str(ROOT),
+                output_directory=str(ROOT),
+                includes=[f"{directory}/*"],
+                extensions=(".cu", ".cuh", ".cpp"),
+                show_detailed=False,
+                is_pytorch_extension=True,
+            )
+
+            # hipify rewrites a source only where there's something to translate
+            def hipified(source: str) -> str:
+                path = Path(source)
+                stem = path.stem + (".hip" if path.suffix == ".cu" else "_hip.cpp")
+                translated = path.with_name(stem)
+                return str(translated if translated.exists() else path)
+
+            sources = [hipified(p) for p in sources]
+
+        flags = [*optimise, *omp_compile, *jit.vector_flags()]
+        gpu_flags = [*optimise]
+        if with_gpu:
             flags.append("-DC3LI_WITH_GPU")
-
-        factory = CUDAExtension if build_gpu else CppExtension
-        extra = {"cxx": flags + ["-fopenmp"]}
-        if build_gpu:
-            gpu_flags = ["-O3", "-DC3LI_WITH_GPU"]
-            if use_rocm:
-                gpu_flags += [f"--offload-arch={arch}" for arch in ROCM_ARCHS]
-            extra["nvcc"] = gpu_flags
+            gpu_flags.append("-DC3LI_WITH_GPU")
+        factory = CUDAExtension if with_gpu else CppExtension
         extensions.append(
             factory(
-                name=f"{package}._{name}_kernels",
+                name=f"{PACKAGE_OF.get(name, f'chuchichaestli.{name}')}._{name}_kernels",
                 sources=sources,
-                include_dirs=[str(SHARED)],
-                extra_compile_args=extra,
-                extra_link_args=["-fopenmp"],
+                include_dirs=[str(SHARED), *jit.pybind_include()],
+                extra_compile_args={"cxx": flags, "nvcc": gpu_flags},
+                extra_link_args=omp_link,
             )
         )
     return extensions
 
 
 def build() -> None:
-    """Compile the extensions in place, reporting rather than raising.
-
-    An extension is an accelerator, so anything that stops it from being built
-    is reported and the pure-torch path stands in for it.
-    """
+    """Compile the extensions in place, reporting rather than raising."""
     if os.environ.get("C3LI_SKIP_EXTENSIONS", "0") == "1":
         print("chuchichaestli: extensions skipped by C3LI_SKIP_EXTENSIONS")
         return
@@ -189,25 +134,17 @@ def build() -> None:
 def _build() -> None:
     """Probe the toolchain and run the extension build."""
     try:
-        import torch
+        from setuptools import setup
+        from torch.utils.cpp_extension import BuildExtension
     except ImportError:
         print("chuchichaestli: torch is not importable here; extensions skipped")
         return
 
-    use_rocm = torch.version.hip is not None
-    forced = os.environ.get("C3LI_FORCE_GPU", "0") == "1"
-    compiler = have("hipcc") if use_rocm else have("nvcc")
-    build_gpu = forced or (
-        compiler and (use_rocm or torch.version.cuda is not None)
-    )
-
+    build_gpu, use_rocm = toolchain().gpu_target()
     extensions = discover(build_gpu, use_rocm)
     if not extensions:
         print("chuchichaestli: no extensions to build")
         return
-
-    from setuptools import setup
-    from torch.utils.cpp_extension import BuildExtension
 
     kind = "GPU" if build_gpu else "CPU"
     names = ", ".join(e.name.rsplit(".", 1)[-1] for e in extensions)
@@ -220,18 +157,39 @@ def _build() -> None:
     )
 
 
+def shipped() -> dict[str, str]:
+    """The extension sources a wheel carries, keyed by their path inside it.
+
+    `force-include` bypasses the file selection the rest of the wheel goes
+    through, so the exclusions are made here instead: an object built in place
+    is machine-specific, and hipify's output is already translated.
+    """
+    carried = {}
+    for directory in sorted(p for p in CSRC.iterdir() if p.is_dir()):
+        if directory != SHARED and not (directory / "bindings.cpp").exists():
+            continue
+        for path in sorted(directory.iterdir()):
+            if path.suffix in {".cpp", ".cu", ".cuh", ".h"} and not path.stem.endswith(
+                "_hip"
+            ):
+                carried[str(path)] = f"chuchichaestli/csrc/{directory.name}/{path.name}"
+    return carried
+
+
 class CustomBuildHook(BuildHookInterface):
-    """Compile the `csrc` extensions in place, or leave them out."""
+    """Compile the `csrc` extensions in place, and ship their sources."""
 
     PLUGIN_NAME = "custom"
 
     def initialize(self, version: str, build_data: dict) -> None:
-        """Build the extensions.
+        """Build the extensions, and put their sources into the wheel.
 
         Args:
             version: Build version, unused.
-            build_data: Build data, unused.
+            build_data: Build data the sources are added to.
         """
+        if self.target_name == "wheel" and CSRC.is_dir():
+            build_data.setdefault("force_include", {}).update(shipped())
         build()
 
 
