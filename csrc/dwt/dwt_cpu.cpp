@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <ATen/cpu/vec/vec.h>
 
+#include <cstring>
 #include <vector>
 
 #include "../common/boundary.h"
@@ -86,14 +87,26 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
             std::min(out_length, (length - offset + 1) / 2);
 
         if (inner == 1) {
-          for (int64_t j = 0; j < extent; ++j) {
+          // in range every mode resolves to the sample itself, so only the
+          // two ends need a rule
+          const int64_t body = std::min(extent, pad_lo + length);
+          for (int64_t j = 0; j < std::min(pad_lo, extent); ++j) {
             const PadRef ref = pad_resolve(j - pad_lo, length, mode);
             ext[j] = static_cast<scalar_t>(ref.sign) * lane[ref.index] +
                      static_cast<scalar_t>(ref.lo) * lane[0] +
                      static_cast<scalar_t>(ref.hi) * lane[length - 1];
           }
-          int64_t k = 0;
-          for (; k < out_length; ++k) {
+          if (body > pad_lo) {
+            std::memcpy(ext.data() + pad_lo, lane,
+                        (body - pad_lo) * sizeof(scalar_t));
+          }
+          for (int64_t j = std::max<int64_t>(body, 0); j < extent; ++j) {
+            const PadRef ref = pad_resolve(j - pad_lo, length, mode);
+            ext[j] = static_cast<scalar_t>(ref.sign) * lane[ref.index] +
+                     static_cast<scalar_t>(ref.lo) * lane[0] +
+                     static_cast<scalar_t>(ref.hi) * lane[length - 1];
+          }
+          for (int64_t k = 0; k < out_length; k += width) {
             const scalar_t* tap = ext.data() + 2 * k + offset + pad_lo;
             const int64_t rest = std::min<int64_t>(width, out_length - k);
             Vec acc_low(scalar_t(0));
@@ -106,7 +119,6 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
             }
             acc_low.store(out_low + k, rest);
             acc_high.store(out_high + k, rest);
-            k += rest - 1;
           }
           continue;
         }
