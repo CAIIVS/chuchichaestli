@@ -46,6 +46,10 @@ python313Packages.buildPythonPackage {
     torchvisionPackage
   ];
 
+  # The csrc extensions are tuned to the machine that compiles them, so the
+  # package stays pure Python and the kernels are built from a dev shell.
+  C3LI_SKIP_EXTENSIONS = "1";
+
   doCheck = false;
 
   meta = with lib; {
