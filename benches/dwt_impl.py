@@ -28,7 +28,9 @@ import argparse
 import contextlib
 import csv
 import json
+import os
 import subprocess
+import tempfile
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -759,11 +761,94 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="report hardware counters through `perf stat`, for the headroom left",
     )
     parser.add_argument("--perf-iterations", type=int, default=200)
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help=(
+            "measure the whole sweep this many times, each in a fresh process,"
+            " and report the median of the medians"
+        ),
+    )
     parser.add_argument("--perf-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--json", default=None)
     parser.add_argument("--csv", default=None)
     parser.add_argument("--plot", default=None)
     return parser.parse_args(argv)
+
+
+def repeated(args: argparse.Namespace) -> None:
+    """Measure the sweep several times over, each in its own process.
+
+    A timer only ever sees the process it runs in, and some cases settle into
+    one of two speeds for a whole process at a time -- page placement, the
+    allocator's arena. Those show a tight spread within a run and differ by
+    more than two between runs, so a single run cannot be compared against
+    another. Repeating in fresh processes is what makes the difference visible.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    # a child measures once and writes json; the flags that would make it
+    # repeat, or write the caller's files, stay behind
+    skip = {"--repeats", "--json", "--csv", "--plot"}
+    trimmed: list[str] = []
+    drop = False
+    for a in sys.argv[1:]:
+        if drop:
+            drop = False
+            continue
+        if a in skip:
+            drop = True
+            continue
+        if a.split("=")[0] in skip:
+            continue
+        trimmed.append(a)
+
+    runs: list[list[dict]] = []
+    for attempt in range(args.repeats):
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as handle:
+            path = handle.name
+        command = [sys.executable, __file__, *trimmed, "--json", path]
+        finished = subprocess.run(command, capture_output=True, text=True)
+        if finished.returncode != 0:
+            print(finished.stdout[-2000:])
+            raise SystemExit(f"run {attempt + 1} failed:\n{finished.stderr[-2000:]}")
+        with open(path) as fh:
+            runs.append(json.load(fh))
+        os.unlink(path)
+
+    merged: dict[tuple, list[float]] = {}
+    labels: dict[tuple, dict] = {}
+    for rows in runs:
+        for row in rows:
+            if row["status"] != "ok" or row["median_ms"] is None:
+                continue
+            key = (row["backend"], row["dimensions"], row["wavelet"], row["mode"],
+                   row["levels"], row["shape"])
+            merged.setdefault(key, []).append(row["median_ms"])
+            labels[key] = row
+
+    print(f"\n{args.repeats} runs, each in its own process; times in microseconds")
+    print(f"{'case':34s} {'backend':12s} {'median':>9s} {'spread':>8s}")
+    rows_out = []
+    for key in sorted(merged):
+        times = sorted(merged[key])
+        middle = times[len(times) // 2]
+        spread = max(times) / min(times) if min(times) else float("nan")
+        row = dict(labels[key])
+        row["median_ms"] = middle
+        row["spread"] = spread
+        row["runs"] = times
+        rows_out.append(row)
+        tag = (f"{key[1]}d {key[2]} {key[3]} L{key[4]} {key[5]}")
+        flag = "  <- unstable" if spread > 1.15 else ""
+        print(f"{tag:34s} {key[0]:12s} {middle * 1000:9.0f} {spread:7.2f}x{flag}")
+
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump(rows_out, fh, indent=2)
+        print(f"\nwrote {args.json}")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -799,6 +884,10 @@ def main(argv: Sequence[str] | None = None) -> None:
                     profile_case(backend, case, args)
                 if args.perf:
                     perf_case(backend, case, args)
+        return
+
+    if args.repeats > 1:
+        repeated(args)
         return
 
     results = run(args)

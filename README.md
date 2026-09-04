@@ -45,13 +45,16 @@ Run `chuchichaestli-build-kernels` to compile up front instead, or set
 
 `benches/dwt_impl.py` times the kernels against the pure-torch path,
 PyWavelets, ptwt and pytorch_wavelets, checking each against a reference before
-timing it. Run one backend per process and pin the run, or the numbers wander
-by more than the differences being measured:
+timing it. Pin the run, take one backend per process, and repeat: some cases
+settle into one of two speeds for a whole process at a time, so a single run
+looks steady and still disagrees with the next one by more than the difference
+being measured. `--repeats` reports the median across processes and marks the
+rows whose spread makes them untrustworthy.
 
 ```bash
 taskset -c 0-15 uv run --with pywavelets --with ptwt \
   python benches/dwt_impl.py --device cuda --backends c3li-kernel \
-  --min-run-time 3.0 --json bench.json
+  --min-run-time 3.0 --repeats 5 --json bench.json
 ```
 
 On an AMD gfx1151 (ROCm 7.2, float32, 3 levels, forward, batch `2x1`) the
