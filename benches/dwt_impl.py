@@ -13,7 +13,7 @@ single-threaded C on numpy:
 Drop `--threads 1` for what the torch backends actually get. Further examples:
 
     # the torch libraries on the GPU, where PyWavelets cannot follow
-    python benches/dwt_impl.py --device cuda --backends torch ptwt ptwavelets
+    python benches/dwt_impl.py --device cuda --backends c3li-torch ptwt ptwavelets
 
     # one case, backward, in double precision
     python benches/dwt_impl.py --dims 2 --sizes 512x512 --levels 3 --dtype float64 --direction backward
@@ -174,7 +174,7 @@ def _kernels(x: torch.Tensor, case: Case):
         ImportError: If the extension was not built, so the backend reports
             itself missing rather than quietly timing the torch path again.
     """
-    if not _ext._KERNELS_AVAILABLE:
+    if not _ext.kernels_built():
         raise ImportError("the extension is not built")
     with using_kernels(True):
         return wavedecn(x, case.wavelet, case.mode, case.levels, case.axes)
@@ -243,9 +243,13 @@ def _pytorch_wavelets_arrays(coeffs: Any) -> list:
     return [band.detach().cpu().numpy() for band in flat]
 
 
+# the `c3li-` prefix marks what this package provides, against the external
+# libraries it is measured with
 BACKENDS: dict[str, Backend] = {
-    "torch": Backend("torch", _core, _torch_input),
-    "kernel": Backend("kernel", _kernels, _torch_input, note="compiled extension"),
+    "c3li-torch": Backend("c3li-torch", _core, _torch_input),
+    "c3li-kernel": Backend(
+        "c3li-kernel", _kernels, _torch_input, note="compiled extension"
+    ),
     "pywt": Backend(
         "pywt",
         _pywt,
@@ -717,7 +721,11 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--device", default="cpu", choices=("cpu", "cuda"))
-    parser.add_argument("--backends", nargs="+", default=["torch", "kernel", "pywt", "ptwt", "ptwavelets"])
+    parser.add_argument(
+        "--backends",
+        nargs="+",
+        default=["c3li-torch", "c3li-kernel", "pywt", "ptwt", "ptwavelets"],
+    )
     parser.add_argument("--dims", nargs="+", type=int, default=[1, 2, 3])
     parser.add_argument(
         "--sizes",

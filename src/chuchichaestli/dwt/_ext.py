@@ -19,6 +19,7 @@ _HAAR = Wavelet.from_name("haar")
 __all__ = [
     "USE_CUSTOM_KERNELS",
     "kernels_available",
+    "kernels_built",
     "dwt_axis",
     "haar_nd",
     "idwt_axis",
@@ -29,17 +30,30 @@ __all__ = [
 ]
 
 
-try:
-    from chuchichaestli.dwt import _dwt_kernels
-except ImportError:  # no cov
-    _dwt_kernels = None
-
-# Whether the extension was compiled and imported, which says nothing about
-# whether an accelerator is present: it carries CPU kernels either way.
-_KERNELS_AVAILABLE = _dwt_kernels is not None
-
 # Global switch, so a benchmark or a test can force the pure-torch path.
 USE_CUSTOM_KERNELS: bool = True
+
+_dwt_kernels = None
+_looked_for_kernels = False
+
+
+def kernels_built() -> bool:
+    """Whether the compiled kernels can be had, compiling them if need be.
+
+    A wheel ships the sources rather than a compiled object, so the first call
+    here is where a lazy just-in-time build happens.
+    """
+    global _dwt_kernels, _looked_for_kernels
+    if not _looked_for_kernels:
+        _looked_for_kernels = True
+        try:
+            from chuchichaestli.dwt import _dwt_kernels as built
+        except ImportError:  # no cov
+            from chuchichaestli import _jit
+
+            built = _jit.load("dwt")
+        _dwt_kernels = built
+    return _dwt_kernels is not None
 
 
 def kernels_available(device: torch.device | None = None) -> bool:
@@ -48,7 +62,7 @@ def kernels_available(device: torch.device | None = None) -> bool:
     Args:
         device: Device to check; any device if omitted.
     """
-    if not (_KERNELS_AVAILABLE and USE_CUSTOM_KERNELS):
+    if not (USE_CUSTOM_KERNELS and kernels_built()):
         return False
     if device is None or device.type == "cpu":
         return True
@@ -57,9 +71,6 @@ def kernels_available(device: torch.device | None = None) -> bool:
 
 def _require_constant_filters(*filters: torch.Tensor) -> None:
     """Refuse a filter bank that expects a gradient.
-
-    Saying so is better than the alternative, which is a learnable filter bank
-    that trains on a gradient the kernels never compute.
 
     Args:
         filters: Filters the transform was handed.
@@ -74,13 +85,11 @@ def _require_constant_filters(*filters: torch.Tensor) -> None:
         )
 
 
-class _AnalysisAxis(torch.autograd.Function):
-    """Analysis along one axis, computed by the compiled kernel.
+class _DwtAxis(torch.autograd.Function):
+    """Wavelet decomposition of one axis, computed by the compiled kernel.
 
-    The transform is linear, so the backward pass is its adjoint: undo the
-    strided convolution, then scatter through the transpose of the boundary
-    extension. Both are written with differentiable operations, so a second
-    derivative works too.
+    The transform is linear, so the backward pass is its adjoint, written with
+    differentiable operations so that a second derivative works too.
     """
 
     @staticmethod
@@ -104,7 +113,7 @@ class _AnalysisAxis(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_out: torch.Tensor):
-        """Apply the adjoint of the analysis."""
+        """Apply the adjoint of the decomposition."""
         dec_lo, dec_hi = ctx.saved_tensors
         axis, mode, pad_lo, pad_hi, _, length = ctx.config
         from chuchichaestli.dwt.functional import _bank, DIM_TO_CONVT_FN_MAP
@@ -141,27 +150,27 @@ def dwt_axis(
     pad_hi: int,
     out_length: int,
 ) -> torch.Tensor:
-    """Analysis along one spatial axis, through the compiled kernel.
+    """Decomposition along one spatial axis, through the compiled kernel.
 
+    The autograd machinery costs more than the kernel on a small transform,
+    so it is only entered when there is a gradient to record.
+    
     Args:
         x: Bands so far, shaped `(batch, groups, spatial...)`.
         dec_lo: Decomposition low-pass filter.
         dec_hi: Decomposition high-pass filter.
         axis: Spatial axis to transform.
         mode: Signal extension mode.
-        pad_lo: Number of samples the analysis prepends.
-        pad_hi: Number of samples the analysis appends.
+        pad_lo: Number of samples the decomposition prepends.
+        pad_hi: Number of samples the decomposition appends.
         out_length: Length of the transformed axis.
-
-    The autograd machinery costs more than the kernel on a small transform, so
-    it is only entered when there is a gradient to record.
     """
     _require_constant_filters(dec_lo, dec_hi)
     if not (torch.is_grad_enabled() and x.requires_grad):
         return _dwt_kernels.dwt_axis(
             x.contiguous(), dec_lo, dec_hi, axis, MODE_TO_CODE[mode], pad_lo, out_length
         )
-    return _AnalysisAxis.apply(
+    return _DwtAxis.apply(
         x, dec_lo, dec_hi, axis, mode, pad_lo, pad_hi, out_length
     )
 
@@ -175,14 +184,14 @@ def idwt_axis(
     trim: int,
     out_length: int,
 ) -> torch.Tensor:
-    """Synthesis along one spatial axis, through the compiled kernel.
+    """Reconstruction along one spatial axis, through the compiled kernel.
 
     Args:
         coeffs: Band pairs, shaped `(batch, 2 * groups, spatial...)`.
         rec_lo: Reconstruction low-pass filter.
         rec_hi: Reconstruction high-pass filter.
         axis: Spatial axis to reconstruct.
-        mode: Signal extension mode the analysis used.
+        mode: Signal extension mode the decomposition used.
         trim: Number of samples the reconstruction leads by.
         out_length: Length the reconstructed axis is trimmed to.
     """
@@ -197,8 +206,7 @@ def fused_haar_applies(
     """Whether the fused Haar transform can serve this call.
 
     Haar has two taps, so on an even axis it consumes no boundary extension at
-    all and every mode agrees; that is what lets one butterfly replace the pass
-    per axis.
+    all and every mode agrees.
 
     Args:
         wave: Wavelet the transform was asked for.
@@ -213,11 +221,7 @@ def fused_haar_applies(
 
 
 class _FusedHaar(torch.autograd.Function):
-    """Haar analysis over every axis at once, computed by the compiled kernel.
-
-    The transform is orthogonal, so its adjoint is the same butterfly run
-    backwards, which is what the synthesis kernel already does.
-    """
+    """Haar decomposition over every axis, computed by the compiled kernel."""
 
     @staticmethod
     def forward(ctx, x: torch.Tensor, dimensions: int) -> torch.Tensor:
@@ -234,7 +238,7 @@ class _FusedHaar(torch.autograd.Function):
 
 
 def haar_nd(x: torch.Tensor, dimensions: int) -> torch.Tensor:
-    """Haar analysis over every spatial axis, through the compiled kernel.
+    """Haar decomposition over every spatial axis, through the compiled kernel.
 
     The autograd machinery costs more than the kernel on a small transform, so
     it is only entered when there is a gradient to record.
@@ -249,7 +253,7 @@ def haar_nd(x: torch.Tensor, dimensions: int) -> torch.Tensor:
 
 
 def haar_wavedec(x: torch.Tensor, dimensions: int, levels: int) -> list[torch.Tensor]:
-    """Multi-level Haar analysis, with the recursion run by the kernel.
+    """Multi-level Haar decomposition, with the recursion run by the kernel.
 
     Only for the path that records no gradient; with one, each level goes
     through the single-level entry point so autograd sees every step.
@@ -269,7 +273,7 @@ def wavedec_axes(
     mode: ExtensionModeTypes,
     levels: int,
 ) -> list[torch.Tensor]:
-    """Multi-level analysis over every axis, with the recursion run by the kernel.
+    """Multi-level decomposition over every axis, with the recursion run by the kernel.
 
     Only for the path that records no gradient; with one, each level goes
     through the single-level entry point so autograd sees every step.
