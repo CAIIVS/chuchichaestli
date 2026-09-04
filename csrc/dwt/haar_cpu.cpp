@@ -12,16 +12,13 @@ namespace c3li {
 
 // Transform every spatial axis at once with the Haar wavelet.
 //
-// Haar has two taps and consumes no boundary extension on an even axis, so the
-// whole separable transform collapses to one butterfly over the `2**d` corners
-// of each `2 x ... x 2` tile: the corners are read once and every subband is
-// written once, instead of one pass over the array per axis.
+// Two taps consume no boundary extension on an even axis, so the separable
+// transform collapses to one butterfly over the `2**d` corners of each
+// `2 x ... x 2` tile, read once and written once. The nest is spelled out per
+// rank so the innermost loop walks the contiguous axis.
 //
-// The loop nest is written out per rank so the innermost one walks the
-// contiguous axis, reading pairs and writing each subband in order.
-//
-// Band `b` of group `g` lands in channel `g * 2**d + b`, matching what the
-// per-axis transform produces, with the first axis the most significant bit.
+// Band `b` of group `g` lands in channel `g * 2**d + b`, first axis most
+// significant, as the per-axis transform produces.
 torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
   C3LI_CHECK_CONTIGUOUS(x);
   C3LI_CHECK_FLOATING(x);
@@ -54,9 +51,8 @@ torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
     const auto* src = x.data_ptr<scalar_t>();
     auto* dst = out.data_ptr<scalar_t>();
     const scalar_t gain = static_cast<scalar_t>(std::pow(scale, dimensions));
-    // the pairs the transform reads sit next to each other on the contiguous
-    // axis, so a vector load takes two outputs' worth and `deinterleave2`
-    // separates them; the tail below the vector width stays scalar
+    // the pairs sit side by side, so one vector load covers two outputs and
+    // `deinterleave2` separates them; the tail stays scalar
     using Vec = at::vec::Vectorized<scalar_t>;
     const int64_t width = Vec::size();
     const Vec scaling(gain);
@@ -196,37 +192,6 @@ torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
     });
   });
   return out;
-}
-
-}  // namespace c3li
-
-namespace c3li {
-
-// Transform repeatedly, each level working on the approximation of the one
-// before it.
-//
-// Running the recursion here rather than in Python saves a round trip and a
-// copy per level: the approximation band is a strided view of the stacked
-// output, which the kernel would otherwise have to be handed as a fresh
-// contiguous tensor from the caller.
-std::vector<torch::Tensor> haar_wavedec_cpu(const torch::Tensor& x,
-                                            int64_t levels, double scale) {
-  TORCH_CHECK(levels >= 1, "a decomposition needs at least one level");
-  const int64_t corners = int64_t{1} << (x.dim() - 2);
-  const int64_t groups = x.size(1);
-
-  std::vector<torch::Tensor> stacked;
-  stacked.reserve(levels);
-  torch::Tensor current = x;
-  for (int64_t level = 0; level < levels; ++level) {
-    torch::Tensor bands = haar_nd_cpu(current, scale);
-    stacked.push_back(bands);
-    if (level + 1 < levels) {
-      // the approximation of every group leads its block of subbands
-      current = bands.slice(1, 0, groups * corners, corners).contiguous();
-    }
-  }
-  return stacked;
 }
 
 }  // namespace c3li

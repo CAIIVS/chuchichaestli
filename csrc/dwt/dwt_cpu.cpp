@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <ATen/cpu/vec/vec.h>
 
+#include <vector>
+
 #include "../common/boundary.h"
 #include "../common/dispatch.h"
 #include "../common/parallel.h"
@@ -17,19 +19,13 @@ constexpr int64_t kTile = 64;
 
 }  // namespace
 
-// Split every band of `x` along one spatial axis into a low- and a high-pass
-// half, without materializing the boundary extension.
+// Split every band of `x` along one spatial axis, without materializing the
+// boundary extension. `(batch, groups, ...)` in, `(batch, 2 * groups, ...)`
+// out, low-pass of group `g` at channel `2 g` and high-pass at `2 g + 1`.
 //
-// `x` is `(batch, groups, spatial...)` and the result is
-// `(batch, 2 * groups, spatial...)` with the low-pass half of group `g` at
-// channel `2 g` and its high-pass half at `2 g + 1`.
-//
-// The output reads `out[k] = sum_f filter[f] * x_ext[2 k + offset - f]`, which
-// is the flipped, strided convolution of the padded signal that the reference
-// implementation performs, with `offset = filter_len - 1 - pad_lo`.
-//
-// The loops are nested rather than flattened so that the index arithmetic and
-// the boundary rules are hoisted out of the innermost one, which then walks the
+// `out[k] = sum_f filter[f] * x_ext[2 k + offset - f]`, with
+// `offset = filter_len - 1 - pad_lo`, matching the reference implementation.
+// The nest keeps index arithmetic out of the innermost loop, which walks the
 // contiguous axis and vectorizes.
 torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                            const torch::Tensor& dec_hi, int64_t axis,
@@ -63,8 +59,14 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
     using Vec = at::vec::Vectorized<scalar_t>;
     const int64_t width = Vec::size();
 
-    // one task per lane, which is everything the axis is not
+    // Writing the extension out per lane leaves every output interior, so one
+    // loop serves the axis; the slack keeps every load a whole vector.
+    const int64_t extent = pad_lo + 2 * out_length + offset;
+
+    // one task per lane: every index but the transformed axis
     parallel_for(layout.outer, [&](int64_t begin, int64_t end) {
+      std::vector<scalar_t> ext(
+          inner == 1 ? std::max<int64_t>(extent, 0) + 2 * width : 0);
       for (int64_t o = begin; o < end; ++o) {
         const int64_t pre = o % per_group;
         const int64_t group = (o / per_group) % groups;
@@ -76,13 +78,38 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                       out_length * inner;
         scalar_t* out_high = out_low + per_group * out_length * inner;
 
-        // the taps of output `k` span `[2 k + offset - filter_len + 1, 2 k +
-        // offset]`, so the outputs whose span lies inside the signal form one
-        // contiguous run; splitting it out leaves the hot loop branch-free
+        // outputs whose taps all land inside the signal form one contiguous
+        // run; splitting it out leaves the hot loop branch-free
         const int64_t interior_begin =
             std::max<int64_t>(0, (filter_len - offset) / 2);
         const int64_t interior_end =
             std::min(out_length, (length - offset + 1) / 2);
+
+        if (inner == 1) {
+          for (int64_t j = 0; j < extent; ++j) {
+            const PadRef ref = pad_resolve(j - pad_lo, length, mode);
+            ext[j] = static_cast<scalar_t>(ref.sign) * lane[ref.index] +
+                     static_cast<scalar_t>(ref.lo) * lane[0] +
+                     static_cast<scalar_t>(ref.hi) * lane[length - 1];
+          }
+          int64_t k = 0;
+          for (; k < out_length; ++k) {
+            const scalar_t* tap = ext.data() + 2 * k + offset + pad_lo;
+            const int64_t rest = std::min<int64_t>(width, out_length - k);
+            Vec acc_low(scalar_t(0));
+            Vec acc_high(scalar_t(0));
+            for (int64_t f = 0; f < filter_len; ++f) {
+              const auto pair = at::vec::deinterleave2(
+                  Vec::loadu(tap - f), Vec::loadu(tap - f + width));
+              acc_low = acc_low + Vec(lo[f]) * pair.first;
+              acc_high = acc_high + Vec(hi[f]) * pair.first;
+            }
+            acc_low.store(out_low + k, rest);
+            acc_high.store(out_high + k, rest);
+            k += rest - 1;
+          }
+          continue;
+        }
 
         for (int64_t k = 0; k < out_length; ++k) {
           const int64_t last = 2 * k + offset;
@@ -91,22 +118,26 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
           scalar_t* low_row = out_low + k * inner;
           scalar_t* high_row = out_high + k * inner;
 
-          if (inner == 1 && interior && k + width <= interior_end) {
-            // the axis is the contiguous one, so consecutive outputs read every
-            // other sample; a pair of vector loads and one de-interleave give a
-            // whole vector of them
+          if (inner == 1 && interior) {
+            // consecutive outputs read every other sample, so two loads and
+            // a de-interleave give a whole vector of them
+            const int64_t rest = std::min<int64_t>(width, interior_end - k);
+            const int64_t take = 2 * rest;
             Vec acc_low(scalar_t(0));
             Vec acc_high(scalar_t(0));
             for (int64_t f = 0; f < filter_len; ++f) {
               const scalar_t* p = lane + 2 * k + offset - f;
-              const auto pair =
-                  at::vec::deinterleave2(Vec::loadu(p), Vec::loadu(p + width));
+              const Vec first = Vec::loadu(p, std::min<int64_t>(width, take));
+              const Vec second = take > width
+                                     ? Vec::loadu(p + width, take - width)
+                                     : Vec(scalar_t(0));
+              const auto pair = at::vec::deinterleave2(first, second);
               acc_low = acc_low + Vec(lo[f]) * pair.first;
               acc_high = acc_high + Vec(hi[f]) * pair.first;
             }
-            acc_low.store(low_row);
-            acc_high.store(high_row);
-            k += width - 1;
+            acc_low.store(low_row, rest);
+            acc_high.store(high_row, rest);
+            k += rest - 1;
           } else if (inner == 1) {
             // the tail, and every output whose taps reach past an end
             const scalar_t* base = lane + last;
@@ -158,8 +189,8 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
               high_row[q] = acc_high;
             }
           } else {
-            // the rules depend on the sample index alone, so they are resolved
-            // once per tap and reused across the contiguous axis
+            // the rules depend on the sample index alone, so each tap
+            // resolves once and is reused across the contiguous axis
             const scalar_t* edge_lo = lane;
             const scalar_t* edge_hi = lane + (length - 1) * inner;
             for (int64_t q0 = 0; q0 < inner; q0 += kTile) {
@@ -173,6 +204,10 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                 const scalar_t weight_hi = static_cast<scalar_t>(ref.hi);
                 const scalar_t wl = lo[f];
                 const scalar_t wh = hi[f];
+                // a zero-extended tap contributes nothing
+                if (sign == 0 && weight_lo == 0 && weight_hi == 0) {
+                  continue;
+                }
                 const scalar_t* row = lane + ref.index * inner + q0;
                 for (int64_t j = 0; j < span; ++j) {
                   const scalar_t value = sign * row[j] +
@@ -193,54 +228,6 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
     });
   });
   return out;
-}
-
-}  // namespace c3li
-
-namespace c3li {
-
-// Transform every axis, repeatedly, each level working on the approximation of
-// the one before it.
-//
-// The lengths and paddings a level needs follow from the one before it, so
-// running the recursion here saves a round trip and a copy per level.
-std::vector<torch::Tensor> wavedec_axes_cpu(const torch::Tensor& x,
-                                            const torch::Tensor& dec_lo,
-                                            const torch::Tensor& dec_hi,
-                                            int64_t mode, int64_t levels) {
-  TORCH_CHECK(levels >= 1, "a decomposition needs at least one level");
-  const int64_t dimensions = x.dim() - 2;
-  const int64_t filter_len = dec_lo.numel();
-  const int64_t corners = int64_t{1} << dimensions;
-  const int64_t groups = x.size(1);
-
-  std::vector<torch::Tensor> stacked;
-  stacked.reserve(levels);
-  torch::Tensor current = x;
-  for (int64_t level = 0; level < levels; ++level) {
-    torch::Tensor bands = current;
-    for (int64_t axis = 0; axis < dimensions; ++axis) {
-      const int64_t length = bands.size(2 + axis);
-      int64_t pad_lo;
-      int64_t out_length;
-      if (mode == kPeriodization) {
-        TORCH_CHECK(length % 2 == 0,
-                    "the fused recursion needs even axes for this mode");
-        pad_lo = filter_len / 2 - 1;
-        out_length = length / 2;
-      } else {
-        pad_lo = filter_len - 2;
-        out_length = (length + filter_len - 1) / 2;
-      }
-      bands = dwt_axis_cpu(bands, dec_lo, dec_hi, axis, mode, pad_lo, out_length);
-    }
-    stacked.push_back(bands);
-    if (level + 1 < levels) {
-      // the approximation of every group leads its block of subbands
-      current = bands.slice(1, 0, groups * corners, corners).contiguous();
-    }
-  }
-  return stacked;
 }
 
 }  // namespace c3li

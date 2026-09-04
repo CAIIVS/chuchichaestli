@@ -7,14 +7,13 @@
 
 namespace c3li {
 
-// Merge low- and high-pass band pairs of `coeffs` back along one spatial axis.
+// Merge low- and high-pass band pairs back along one spatial axis.
+// `(batch, 2 * groups, ...)` in, `(batch, groups, ...)` out.
 //
-// `coeffs` is `(batch, 2 * groups, spatial...)` and the result is
-// `(batch, groups, spatial...)`. The transposed convolution places the
-// contribution of coefficient `k` and tap `f` at `2 k + f`, so gathering the
-// output at `t` means collecting every `(k, f)` with `2 k + f == t + trim`.
-// The critically sampled mode wraps that sum around the output instead, which
-// is what folds the overhang back in rather than discarding it.
+// A transposed convolution puts the contribution of coefficient `k` and tap
+// `f` at `2 k + f`, so gathering the output at `t` means collecting every
+// `(k, f)` with `2 k + f == t + trim`. The critically sampled mode wraps that
+// sum around the output instead of discarding the overhang.
 torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
                             const torch::Tensor& rec_lo,
                             const torch::Tensor& rec_hi, int64_t axis,

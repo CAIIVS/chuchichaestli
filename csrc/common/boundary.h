@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-#ifdef __CUDACC__
+#if defined(__CUDACC__) || defined(__HIPCC__)
 #define C3LI_HD __host__ __device__
 #else
 #define C3LI_HD
@@ -38,11 +38,10 @@ struct PadRef {
 
 // Fold an index back into `[0, n)` by the given extension mode.
 //
-// The folding rules are applied from the outside in, so the affine transform
-// each one contributes is composed onto what is already accumulated rather
-// than the other way round: a rule mapping `v -> -v + 2 x[edge]` turns
-// `a v + b_lo x[0] + b_hi x[n-1]` into `-a v' + (b_lo + 2 a [edge is lo]) x[0]
-// + (b_hi + 2 a [edge is hi]) x[n-1]`.
+// Rules apply from the outside in, so each one composes its affine transform
+// onto what is already accumulated: `v -> -v + 2 x[edge]` turns
+// `a v + b_lo x[0] + b_hi x[n-1]` into
+// `-a v' + (b_lo + 2 a [edge is lo]) x[0] + (b_hi + 2 a [edge is hi]) x[n-1]`.
 C3LI_HD inline PadRef pad_resolve(int64_t i, int64_t n, int64_t mode) {
   if (i >= 0 && i < n) {
     return {i, 1.0, 0.0, 0.0};

@@ -1,0 +1,109 @@
+// SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+// SPDX-FileNotice: Part of chuchichaestli
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
+
+#include "../common/boundary.h"
+#include "../common/dispatch.h"
+
+namespace c3li {
+
+namespace {
+
+// One thread per output sample, indexed so neighbouring threads differ in the
+// contiguous axis and coalesce; a stride of two where that axis is transformed.
+template <typename scalar_t>
+__global__ void dwt_axis_kernel(
+    const scalar_t* __restrict__ src, scalar_t* __restrict__ dst,
+    const scalar_t* __restrict__ lo, const scalar_t* __restrict__ hi,
+    int64_t length, int64_t inner, int64_t out_length, int64_t filter_len,
+    int64_t offset, int64_t mode, int64_t groups, int64_t per_group,
+    int64_t total) {
+  const int64_t stride = int64_t(blockDim.x) * gridDim.x;
+  for (int64_t flat = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+       flat < total; flat += stride) {
+    const int64_t q = flat % inner;
+    const int64_t k = (flat / inner) % out_length;
+    const int64_t o = flat / (inner * out_length);
+
+    const int64_t pre = o % per_group;
+    const int64_t group = (o / per_group) % groups;
+    const int64_t batch = o / (per_group * groups);
+
+    const scalar_t* lane = src + o * length * inner;
+    const int64_t last = 2 * k + offset;
+    const int64_t first = last - (filter_len - 1);
+
+    scalar_t low = 0;
+    scalar_t high = 0;
+    if (first >= 0 && last < length) {
+      const scalar_t* base = lane + last * inner + q;
+      for (int64_t f = 0; f < filter_len; ++f) {
+        const scalar_t value = base[-f * inner];
+        low += lo[f] * value;
+        high += hi[f] * value;
+      }
+    } else {
+      const scalar_t edge_lo = lane[q];
+      const scalar_t edge_hi = lane[(length - 1) * inner + q];
+      for (int64_t f = 0; f < filter_len; ++f) {
+        const PadRef ref = pad_resolve(last - f, length, mode);
+        const scalar_t value = static_cast<scalar_t>(ref.sign) *
+                                   lane[ref.index * inner + q] +
+                               static_cast<scalar_t>(ref.lo) * edge_lo +
+                               static_cast<scalar_t>(ref.hi) * edge_hi;
+        low += lo[f] * value;
+        high += hi[f] * value;
+      }
+    }
+
+    scalar_t* out_low =
+        dst + ((batch * (2 * groups) + 2 * group) * per_group + pre) *
+                  out_length * inner;
+    out_low[k * inner + q] = low;
+    out_low[per_group * out_length * inner + k * inner + q] = high;
+  }
+}
+
+}  // namespace
+
+torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
+                            const torch::Tensor& dec_hi, int64_t axis,
+                            int64_t mode, int64_t pad_lo, int64_t out_length) {
+  C3LI_CHECK_CONTIGUOUS(x);
+  C3LI_CHECK_FLOATING(x);
+  const at::cuda::CUDAGuard guard(x.device());
+
+  const AxisLayout layout = axis_layout(x, axis);
+  const int64_t filter_len = dec_lo.numel();
+  const int64_t offset = filter_len - 1 - pad_lo;
+
+  auto sizes = x.sizes().vec();
+  sizes[1] *= 2;
+  sizes[2 + axis] = out_length;
+  torch::Tensor out = torch::empty(sizes, x.options());
+
+  const int64_t groups = x.size(1);
+  const int64_t per_group = layout.outer / (x.size(0) * groups);
+  const int64_t total = layout.outer * out_length * layout.inner;
+  if (total == 0) {
+    return out;
+  }
+
+  C3LI_DISPATCH_FLOATING(x.scalar_type(), "dwt_axis_cuda", [&] {
+    const auto lo_filter = dec_lo.to(x.options()).contiguous();
+    const auto hi_filter = dec_hi.to(x.options()).contiguous();
+    dwt_axis_kernel<scalar_t>
+        <<<blocks_for(total), kThreadsPerBlock, 0,
+           at::cuda::getCurrentCUDAStream()>>>(
+            x.data_ptr<scalar_t>(), out.data_ptr<scalar_t>(),
+            lo_filter.data_ptr<scalar_t>(), hi_filter.data_ptr<scalar_t>(),
+            layout.length, layout.inner, out_length, filter_len, offset, mode,
+            groups, per_group, total);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
+  return out;
+}
+
+}  // namespace c3li

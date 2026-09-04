@@ -24,11 +24,8 @@ inline int64_t blocks_for(int64_t total, int64_t threads = kThreadsPerBlock) {
   return (total + threads - 1) / threads;
 }
 
-// Split `(batch, groups, spatial...)` into the strides one axis needs.
-//
-// `outer` counts everything before the axis, `length` is the axis itself and
-// `inner` counts everything after it, so a sample sits at
-// `((o * length) + i) * inner + q`.
+// Split `(batch, groups, spatial...)` into the strides one axis needs: a
+// sample sits at `((o * length) + i) * inner + q`.
 struct AxisLayout {
   int64_t outer;
   int64_t length;
