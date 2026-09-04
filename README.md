@@ -64,8 +64,11 @@ kernels are the fastest of the four in all 54 cases, in microseconds:
 | 3d haar zero 64x64x64 | 930 | **163** | 639 | -- |
 | 3d db8 zero 64x64x64 | 2222 | **318** | 46857 | -- |
 
-On 16 CPU cores they lead in 49 of 54. All five they do not are `zero` mode,
-where torch pads with a constant rather than gathering indices.
+On CPU with one thread they are fastest in all 54 too, by a median of 5.8x over
+the pure-torch path and 3.3x over PyWavelets. On 16 cores they lead in 49 of
+54: the five they do not are all `zero` mode, where torch pads with a constant
+rather than gathering indices, and where its convolution parallelizes better
+than these kernels do.
 
 ## Development
 
