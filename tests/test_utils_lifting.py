@@ -9,13 +9,15 @@ steps but that multiplying them back gives the bank they came from.
 
 import pytest
 
-from chuchichaestli.dwt import wavelet, wavelist
+import torch
+
+from chuchichaestli.dwt import dwt, wavelet, wavelist
 from chuchichaestli.utils.arithmetic.laurent import Laurent
 from chuchichaestli.utils.arithmetic.lifting import factor, matrix, polyphase, rebuild
 
 
-# the one bank whose factorization does not yet reconstruct to tolerance
-UNFACTORED = {"bior4.4"}
+# the banks whose factorization does not yet reconstruct to tolerance
+UNFACTORED = {"sym6", "sym7"}
 
 FACTORABLE = [name for name in wavelist() if name not in UNFACTORED]
 
@@ -39,11 +41,46 @@ def apart(a: Laurent, b: Laurent) -> float:
 class TestPolyphase:
     """Tests for splitting a filter into phases."""
 
-    def test_a_filter_splits_into_its_phases(self):
-        """Test that the even and odd phases interleave back to the filter."""
-        even, odd = polyphase([1.0, 2.0, 3.0, 4.0])
-        assert even.c == (1.0, 3.0)
-        assert odd.c == (2.0, 4.0)
+    def test_a_tap_lands_in_the_phase_the_alignment_gives_it(self):
+        """Test that `offset - f` decides which phase a tap belongs to."""
+        # out[k] = sum_f filt[f] x[2k + 3 - f], so taps 1 and 3 read even samples
+        even, odd = polyphase([1.0, 2.0, 3.0, 4.0], 3)
+        assert even.c == (4.0, 2.0)
+        assert odd.c == (3.0, 1.0)
+
+    def test_the_centred_alignment_is_the_default(self):
+        """Test that a bank is split the way a critically sampled transform reads it."""
+        filt = [1.0, 2.0, 3.0, 4.0]
+        assert matrix(filt, filt)[:2] == polyphase(filt, len(filt) // 2)
+
+
+class TestAgainstTheTransform:
+    """Tests that the factorization computes the transform it came from."""
+
+    @pytest.mark.parametrize("name", FACTORABLE)
+    def test_lifting_reproduces_the_wavelet_transform(self, name):
+        """Test that the steps carry a signal to the same coefficients."""
+        torch.manual_seed(0)
+        x = torch.randn(64, dtype=torch.float64)
+        wave = wavelet(name)
+        lift = factor(wave.dec_lo, wave.dec_hi)
+        approx, detail = x[0::2].clone(), x[1::2].clone()
+        gain, delay = lift.approx
+        approx = gain * torch.roll(approx, -delay)
+        gain, delay = lift.detail
+        detail = gain * torch.roll(detail, -delay)
+        for step in lift.steps:
+            filtered = sum(
+                c * torch.roll(approx if step.on_detail else detail, -(step.q.low + i))
+                for i, c in enumerate(step.q.c)
+            )
+            if step.on_detail:
+                detail = detail + filtered
+            else:
+                approx = approx + filtered
+        want_approx, want_detail = dwt(x, name, mode="periodization")
+        assert torch.allclose(approx, want_approx, atol=1e-9)
+        assert torch.allclose(detail, want_detail, atol=1e-9)
 
 
 class TestFactor:

@@ -23,16 +23,33 @@ from chuchichaestli.utils.arithmetic.laurent import Laurent, divide
 __all__ = ["Lifting", "Step", "factor", "matrix", "polyphase", "rebuild"]
 
 
-def polyphase(filt: Sequence[float]) -> tuple[Laurent, Laurent]:
+def polyphase(filt: Sequence[float], offset: int) -> tuple[Laurent, Laurent]:
     """Split a filter into its even and odd phases.
+
+    A transform reads the filter as `out[k] = sum_f filt[f] x[2 k + offset - f]`,
+    so which phase a tap belongs to depends on the alignment: tap `f` reads an
+    even sample exactly when `offset - f` is even.
 
     Args:
         filt: Filter coefficients.
+        offset: Alignment the transform reads the filter at.
 
     Returns:
         The even and the odd phase.
     """
-    return Laurent.of(list(filt[0::2])), Laurent.of(list(filt[1::2]))
+    even: dict[int, float] = {}
+    odd: dict[int, float] = {}
+    for f, c in enumerate(filt):
+        gap = offset - f
+        (even if gap % 2 == 0 else odd)[gap // 2] = c
+
+    def build(phase: dict[int, float]) -> Laurent:
+        if not phase:
+            return Laurent((), 0)
+        low, high = min(phase), max(phase)
+        return Laurent.of([phase.get(i, 0.0) for i in range(low, high + 1)], low)
+
+    return build(even), build(odd)
 
 
 @dataclass(frozen=True)
@@ -64,16 +81,20 @@ class Lifting:
 
 
 def matrix(
-    low: Sequence[float], high: Sequence[float]
+    low: Sequence[float], high: Sequence[float], offset: int | None = None
 ) -> tuple[Laurent, Laurent, Laurent, Laurent]:
     """The polyphase matrix of a filter bank, row by row.
 
     Args:
         low: Low-pass analysis filter.
         high: High-pass analysis filter.
+        offset: Alignment the transform reads the filters at; centred if
+            omitted, which is what a critically sampled transform uses.
     """
-    he, ho = polyphase(low)
-    ge, go = polyphase(high)
+    if offset is None:
+        offset = len(low) // 2
+    he, ho = polyphase(low, offset)
+    ge, go = polyphase(high, offset)
     return he, ho, ge, go
 
 
@@ -124,7 +145,9 @@ def _monomial(p: Laurent) -> tuple[float, int]:
     return p.c[0], p.low
 
 
-def factor(low: Sequence[float], high: Sequence[float]) -> Lifting:
+def factor(
+    low: Sequence[float], high: Sequence[float], offset: int | None = None
+) -> Lifting:
     """Factor a filter bank into lifting steps.
 
     Row operations on the polyphase matrix are lifting steps, so reducing it to
@@ -135,6 +158,7 @@ def factor(low: Sequence[float], high: Sequence[float]) -> Lifting:
     Args:
         low: Low-pass analysis filter.
         high: High-pass analysis filter.
+        offset: Alignment the transform reads the filters at.
 
     Returns:
         The scaling and the steps that follow it.
@@ -142,7 +166,7 @@ def factor(low: Sequence[float], high: Sequence[float]) -> Lifting:
     Raises:
         ValueError: If the bank does not reduce to a diagonal.
     """
-    he, ho, ge, go = matrix(low, high)
+    he, ho, ge, go = matrix(low, high, offset)
     row1, row2 = [he, ho], [ge, go]
     one = Laurent((1.0,), 0)
     undone: list[Step] = []
