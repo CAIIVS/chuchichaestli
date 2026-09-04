@@ -19,7 +19,7 @@ from chuchichaestli.dwt.functional import dwtn, idwtn, subband_keys, wavedecn
 from chuchichaestli.dwt.modes import MODE_TO_CODE
 
 needs_kernels = pytest.mark.skipif(
-    not _ext._KERNELS_AVAILABLE, reason="the extension is not built"
+    not _ext.kernels_built(), reason="the extension is not built"
 )
 needs_gpu = pytest.mark.skipif(
     not torch.cuda.is_available(), reason="needs a GPU"
@@ -35,7 +35,7 @@ class TestFallback:
     def test_the_guard_reports_what_is_available(self):
         """Test that availability is about the extension, not about a device."""
         assert _ext.kernels_available() is (
-            _ext._KERNELS_AVAILABLE and _ext.USE_CUSTOM_KERNELS
+            _ext.kernels_built() and _ext.USE_CUSTOM_KERNELS
         )
 
     def test_the_switch_forces_the_torch_path(self, monkeypatch):
@@ -170,15 +170,56 @@ class TestAgreement:
 class TestDevices:
     """Tests that the compiled path agrees across devices."""
 
-    @pytest.mark.parametrize(
-        "name,mode", list(itertools.product(["haar", "db4"], ["zero", "symmetric"]))
-    )
-    def test_the_gpu_matches_the_cpu(self, name, mode):
-        """Test that the two compiled paths produce the same coefficients."""
+    @pytest.fixture(autouse=True)
+    def _needs_gpu_kernels(self):
+        """Skip when the extension was built without the GPU sources."""
         if not _ext._dwt_kernels.has_gpu():
             pytest.skip("the extension carries no GPU kernels")
-        x = torch.randn(2, 3, 16, 16, dtype=torch.float64)
-        on_cpu = dwtn(x, name, mode, (-2, -1))
-        on_gpu = dwtn(x.cuda(), name, mode, (-2, -1))
+
+    @pytest.mark.parametrize(
+        "name,mode,shape",
+        [
+            (name, mode, shape)
+            for name, mode in itertools.product(WAVELETS, MODES)
+            for shape in [(2, 3, 32), (2, 3, 16, 16), (1, 2, 8, 8, 8)]
+        ],
+    )
+    def test_the_gpu_matches_the_cpu(self, name, mode, shape):
+        """Test that the two compiled paths produce the same coefficients."""
+        axes = tuple(range(2 - len(shape), 0))
+        x = torch.randn(*shape, dtype=torch.float64)
+        on_cpu = dwtn(x, name, mode, axes)
+        on_gpu = dwtn(x.cuda(), name, mode, axes)
         for key in on_cpu:
             assert torch.allclose(on_cpu[key], on_gpu[key].cpu(), atol=1e-11)
+
+    @pytest.mark.parametrize("name,mode", itertools.product(WAVELETS, MODES))
+    def test_the_gpu_reconstructs_what_it_decomposed(self, name, mode):
+        """Test that the synthesis kernel inverts the analysis kernel."""
+        x = torch.randn(2, 3, 16, 16, dtype=torch.float64, device="cuda")
+        bands = dwtn(x, name, mode, (-2, -1))
+        assert torch.allclose(idwtn(bands, name, mode, (-2, -1), (16, 16)), x, atol=1e-10)
+
+    @pytest.mark.parametrize("name,levels", itertools.product(WAVELETS, [1, 3]))
+    def test_the_gpu_runs_the_level_recursion(self, name, levels):
+        """Test that the fused recursion agrees with the one on the host."""
+        x = torch.randn(2, 3, 32, 32, dtype=torch.float64)
+        on_cpu = wavedecn(x, name, "symmetric", levels, (-2, -1))
+        on_gpu = wavedecn(x.cuda(), name, "symmetric", levels, (-2, -1))
+        assert torch.allclose(on_cpu[0], on_gpu[0].cpu(), atol=1e-11)
+        for ours, theirs in zip(on_cpu[1:], on_gpu[1:], strict=True):
+            for key in ours:
+                assert torch.allclose(ours[key], theirs[key].cpu(), atol=1e-11)
+
+    @pytest.mark.parametrize("name,mode", itertools.product(["haar", "db4"], MODES))
+    def test_the_gpu_gradient_matches_the_cpu(self, name, mode):
+        """Test that the adjoint agrees with the one the host computes."""
+        x = torch.randn(2, 3, 16, 16, dtype=torch.float64)
+        grads = []
+        for device in ("cpu", "cuda"):
+            probe = x.clone().to(device).requires_grad_(True)
+            bands = dwtn(probe, name, mode, (-2, -1))
+            # squared so the cotangent varies with the coefficients themselves
+            sum((bands[key] ** 2).sum() for key in subband_keys(2)).backward()
+            grads.append(probe.grad.cpu())
+        assert torch.allclose(grads[0], grads[1], atol=1e-11)
