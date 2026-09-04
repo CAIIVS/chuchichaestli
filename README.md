@@ -54,7 +54,7 @@ taskset -c 0-15 uv run --with pywavelets --with ptwt \
   --min-run-time 3.0 --json bench.json
 ```
 
-On an AMD gfx1151 (ROCm 7.2, float32, 3 levels, forward, batch `2x3`) the
+On an AMD gfx1151 (ROCm 7.2, float32, 3 levels, forward, batch `2x1`) the
 kernels are the fastest of the four in all 54 cases, in microseconds:
 
 | case | c3li-torch | c3li-kernel | ptwt | pytorch_wavelets |
