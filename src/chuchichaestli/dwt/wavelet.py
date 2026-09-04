@@ -218,7 +218,7 @@ class Wavelet:
             )
         if family == "rbio":
             # A reverse-biorthogonal bank is its biorthogonal partner with the
-            # analysis and synthesis sides swapped and every filter reversed.
+            # decomposition and reconstruction sides swapped and every filter reversed.
             partner = cls.from_name(key.replace("rbio", "bior"))
             return cls(
                 partner.rec_lo[::-1],

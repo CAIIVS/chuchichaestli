@@ -159,10 +159,10 @@ def _bank(
     return pair.repeat(groups, 1, *([1] * dimensions))
 
 
-def _pad_for_analysis(
+def _pad_for_decomposition(
     h: torch.Tensor, axis: int, filter_len: int, mode: ExtensionModeTypes
 ) -> torch.Tensor:
-    """Extend one spatial axis by what the analysis convolution consumes.
+    """Extend one spatial axis by what the decomposition convolution consumes.
 
     Args:
         h: Input tensor, shaped `(B, G, *spatial)`.
@@ -179,7 +179,7 @@ def _pad_for_analysis(
     return pad_signal(h, 2 + axis, filter_len - 2, filter_len - 2 + (length % 2), mode)
 
 
-def _analysis(
+def _decompose(
     h: torch.Tensor,
     lo: torch.Tensor,
     hi: torch.Tensor,
@@ -223,7 +223,7 @@ def _analysis(
     return DIM_TO_CONV_FN_MAP[dimensions](h, weight, stride=stride, groups=groups)
 
 
-def _analysis_lowpass(
+def _decompose_lowpass(
     h: torch.Tensor, lo: torch.Tensor, axis: int, mode: ExtensionModeTypes
 ) -> torch.Tensor:
     """Keep only the low-pass half of every band of `h` along one spatial axis.
@@ -236,7 +236,7 @@ def _analysis_lowpass(
     """
     dimensions = h.ndim - 2
     groups = h.shape[1]
-    h = _pad_for_analysis(h, axis, lo.numel(), mode)
+    h = _pad_for_decomposition(h, axis, lo.numel(), mode)
     shape = [1] * dimensions
     shape[axis] = lo.numel()
     weight = lo.flip(0).reshape(1, 1, *shape).repeat(groups, 1, *([1] * dimensions))
@@ -245,7 +245,7 @@ def _analysis_lowpass(
     return DIM_TO_CONV_FN_MAP[dimensions](h, weight, stride=stride, groups=groups)
 
 
-def _synthesis(
+def _reconstruct(
     h: torch.Tensor,
     lo: torch.Tensor,
     hi: torch.Tensor,
@@ -260,7 +260,7 @@ def _synthesis(
         lo: Reconstruction low-pass filter.
         hi: Reconstruction high-pass filter.
         axis: Spatial axis to reconstruct.
-        mode: Signal extension mode the analysis used.
+        mode: Signal extension mode the decomposition used.
         length: Length the reconstructed axis is trimmed to.
     """
     dimensions = h.ndim - 2
@@ -272,8 +272,6 @@ def _synthesis(
     out = DIM_TO_CONVT_FN_MAP[dimensions](h, weight, stride=stride, groups=groups)
     if mode == "periodization":
         # Critically sampled: what spills past either end belongs to the other.
-        # The fold reconstructs the even-length signal the analysis padded an odd
-        # axis up to, so an odd target length is taken from its front.
         even = 2 * h.shape[2 + axis]
         out = _wrap(out, 2 + axis, filter_len // 2 - 1, even)
         return out.narrow(2 + axis, 0, length)
@@ -281,7 +279,7 @@ def _synthesis(
 
 
 def _wrap(x: torch.Tensor, axis: int, trim: int, length: int) -> torch.Tensor:
-    """Add the overhang of a circular synthesis back in before trimming.
+    """Add the overhang of a circular reconstruction back in before trimming.
 
     Args:
         x: Reconstruction including its overhang.
@@ -298,7 +296,7 @@ def _wrap(x: torch.Tensor, axis: int, trim: int, length: int) -> torch.Tensor:
 
 
 def _HAAR_ADJOINT(grad: torch.Tensor, dimensions: int) -> torch.Tensor:
-    """Adjoint of the fused Haar analysis, used by its backward pass.
+    """Adjoint of the fused Haar decomposition, used by its backward pass.
 
     Args:
         grad: Gradient with respect to the stacked subbands.
@@ -309,7 +307,7 @@ def _HAAR_ADJOINT(grad: torch.Tensor, dimensions: int) -> torch.Tensor:
     groups = grad.shape[1] // 2**dimensions
     h = grad
     for axis in reversed(range(dimensions)):
-        h = _synthesis(h, rec_lo, rec_hi, axis, "zero", 2 * h.shape[2 + axis])
+        h = _reconstruct(h, rec_lo, rec_hi, axis, "zero", 2 * h.shape[2 + axis])
     return h if groups == h.shape[1] else h
 
 
@@ -342,7 +340,7 @@ def dwtn(
         h = _ext.haar_nd(h, len(axes))
     else:
         for axis in range(len(axes)):
-            h = _analysis(h, dec_lo, dec_hi, axis, mode)
+            h = _decompose(h, dec_lo, dec_hi, axis, mode)
     keys = subband_keys(len(axes))
     return {key: _unfold(h[:, i], lead, perm) for i, key in enumerate(keys)}
 
@@ -366,7 +364,7 @@ def dwtn_approx(
     dec_lo, _, _, _ = wavelet(wave).filters(data.dtype, data.device)
     h, lead, perm = _fold(data, axes)
     for axis in range(len(axes)):
-        h = _analysis_lowpass(h, dec_lo, axis, mode)
+        h = _decompose_lowpass(h, dec_lo, axis, mode)
     return _unfold(h[:, 0], lead, perm)
 
 
@@ -382,7 +380,7 @@ def idwtn(
     Args:
         coeffs: Subbands keyed by their `'a'`/`'d'` names.
         wave: Wavelet, by name or as a `Wavelet`.
-        mode: Signal extension mode the analysis used.
+        mode: Signal extension mode the decomposition used.
         axes: Axes that were transformed; the trailing one if omitted.
         output_size: Length of each transformed axis in the reconstruction;
             an even length is assumed if omitted.
@@ -410,11 +408,10 @@ def idwtn(
     _, _, rec_lo, rec_hi = wave.filters(h.dtype, h.device)
 
     sizes = _reconstruction_sizes(h.shape[2:], wave.filter_len, mode, output_size)
-    # Analysis appends one character per axis, so the axis transformed last
-    # varies fastest and its band pairs are adjacent. Merging the axes in
-    # reverse preserves that, so no reordering is ever needed.
+    # Decomposition appends one character per axis, so the axis transformed last
+    # varies fastest and its band pairs are adjacent.
     for axis in reversed(range(len(axes))):
-        h = _synthesis(h, rec_lo, rec_hi, axis, mode, sizes[axis])
+        h = _reconstruct(h, rec_lo, rec_hi, axis, mode, sizes[axis])
     return _unfold(h[:, 0], lead, perm)
 
 
@@ -429,7 +426,7 @@ def _reconstruction_sizes(
     Args:
         coeff_shape: Spatial shape of one subband.
         filter_len: Length of the filters.
-        mode: Signal extension mode the analysis used.
+        mode: Signal extension mode the decomposition used.
         output_size: Explicit lengths, if the caller recorded them.
 
     Raises:
@@ -482,7 +479,7 @@ def idwt(
         approx: Approximation coefficients.
         detail: Detail coefficients.
         wave: Wavelet, by name or as a `Wavelet`.
-        mode: Signal extension mode the analysis used.
+        mode: Signal extension mode the decomposition used.
         axis: Axis that was transformed.
         output_size: Length of the reconstructed axis.
     """
@@ -543,8 +540,7 @@ def wavedecn(
     if compiled and _ext.fused_recursion_applies(mode, shapes) and not all(
         _ext.fused_haar_applies(wave, mode, shape) for shape in shapes
     ):
-        # the kernel runs the recursion for any wavelet, one call rather than
-        # one per level
+        # the kernel runs the recursion for any wavelet
         dec_lo, dec_hi, _, _ = wave.filters(folded.dtype, folded.device)
         for stacked in _ext.wavedec_axes(folded, dec_lo, dec_hi, mode, level):
             bands = {
@@ -559,8 +555,7 @@ def wavedecn(
     if compiled and all(
         _ext.fused_haar_applies(wave, mode, shape) for shape in shapes
     ):
-        # the kernel runs the recursion, so there is one call rather than one
-        # per level, and no copy handing the approximation back in
+        # the kernel runs the recursion
         for stacked in _ext.haar_wavedec(folded, len(axes), level):
             bands = {
                 key: _unfold(stacked[:, i], lead, perm)
@@ -592,7 +587,7 @@ def waverecn(
     Args:
         coeffs: `[approx, details_level, ..., details_1]`, as `wavedecn` returns.
         wave: Wavelet, by name or as a `Wavelet`.
-        mode: Signal extension mode the analysis used.
+        mode: Signal extension mode the decomposition used.
         axes: Axes that were transformed; the trailing one if omitted.
         output_size: Per level, the length of each transformed axis, coarsest
             level first.
@@ -648,7 +643,7 @@ def waverec(
     Args:
         coeffs: `[approx, detail_level, ..., detail_1]`, as `wavedec` returns.
         wave: Wavelet, by name or as a `Wavelet`.
-        mode: Signal extension mode the analysis used.
+        mode: Signal extension mode the decomposition used.
         axis: Axis that was transformed.
         output_size: Length of the axis at each level, coarsest level first.
 

@@ -360,7 +360,7 @@ class TestDifferentiability:
 
     @pytest.mark.parametrize("name", ["haar", "db2"])
     @pytest.mark.parametrize("mode", MODES)
-    def test_gradcheck_of_the_analysis(self, name, mode):
+    def test_gradcheck_of_the_decomposition(self, name, mode):
         """Test the analysis gradients against finite differences."""
         x = torch.randn(1, 2, 6, 8, dtype=torch.float64, requires_grad=True)
 
@@ -371,7 +371,7 @@ class TestDifferentiability:
 
     @pytest.mark.parametrize("name", ["haar", "db2"])
     @pytest.mark.parametrize("mode", MODES)
-    def test_gradcheck_of_the_synthesis(self, name, mode):
+    def test_gradcheck_of_the_reconstruction(self, name, mode):
         """Test the synthesis gradients against finite differences."""
         keys = subband_keys(2)
         bands = [torch.randn(1, 2, 5, 6, dtype=torch.float64, requires_grad=True) for _ in keys]
