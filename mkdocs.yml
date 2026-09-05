@@ -10,6 +10,7 @@ nav:
   - Home: index.md
   - Install: install.md
   - Usage: usage.md
+  - Benchmarks: benchmarks.md
   - API Reference: reference
 
 theme:
@@ -42,6 +43,8 @@ theme:
 markdown_extensions:
   - admonition
   - attr_list
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.extra
   - pymdownx.highlight
   - pymdownx.snippets:
