@@ -1,17 +1,22 @@
 # chuchichaestli
 
-`chuchichaestli` is a collection of model architectures and other useful bits of code in use at the Intelligent Vision Systems group at the University of Applied Sciences Zurich (ZHAW).
+`chuchichaestli` is a collection of model architectures and other
+useful bits of code in use at the Intelligent Vision Systems group at
+the University of Applied Sciences Zurich (ZHAW).
 
 
 ## Installation
 
-Tagged releases are available as PyPI packages. To install the latest package, run:
+Tagged releases are available as PyPI packages. To install the latest
+package, run:
 
 ```bash
 pip install chuchichaestli
 ```
 
-For the bleeding-edge package directly from the git main, clone the repository and run the following command in the root directory of the repository:
+For the bleeding-edge package directly from a git branch, clone the
+repository and run the following command in the root directory of the
+repository:
 
 ```bash
 pip install -e .
@@ -23,55 +28,47 @@ Alternatively, you can install the package directly from GitHub:
 pip install git+https://github.com/CAIIVS/chuchichaestli.git
 ```
 
+Note: we recommend [`uv`](https://docs.astral.sh/uv/) for running
+examples in
+[`examples/`](https://github.com/CAIIVS/chuchichaestli/tree/main/examples)
+or benchmarks in
+[`benches/`](https://github.com/CAIIVS/chuchichaestli/tree/main/benches).
+
+
 ### Native kernels
 
-`chuchichaestli` provides optional, optimized, custom CPU and GPU kernels.
-Without them everything still works, just a little slower.
+`chuchichaestli` provides optional, optimized, custom CPU and GPU
+kernels.  Without them everything still works, just a little slower.
 
-They are compiled on first use, against the installed torch, which takes a C++
-compiler plus:
+They are compiled on first use, against the installed torch, which
+takes a C++ compiler (`gcc` on Linux, `clang` on macOS, MSVC on
+Windows) plus:
 
 ```bash
 pip install chuchichaestli[jit]
 ```
 
-That yields the CPU kernels. The custom GPU kernels additionally need `nvcc` or
-`hipcc`; without one the build quietly settles for CPU.
+That yields the CPU kernels. The custom GPU kernels additionally need
+`nvcc` or `hipcc`; without one the build quietly settles for CPU.
 
-Run `chuchichaestli-build-kernels` to compile up front instead, or set
-`C3LI_JIT_KERNELS=0` to skip them entirely.
+Run 
+
+```bash
+chuchichaestli-build-kernels
+```
+
+to compile up front instead, or set `C3LI_JIT_KERNELS=0` to skip them
+entirely.
+
 
 #### Benchmarks
 
-`benches/dwt_impl.py` times the kernels against the pure-torch path,
-PyWavelets, ptwt and pytorch_wavelets, checking each against a reference before
-timing it. Pin the run, take one backend per process, and repeat: some cases
-settle into one of two speeds for a whole process at a time, so a single run
-looks steady and still disagrees with the next one by more than the difference
-being measured. `--repeats` reports the median across processes and marks the
-rows whose spread makes them untrustworthy.
+The native kernels are benchmarked against the pure-torch path and against
+external packages, on both CPU and GPU, with every backend
+checked against a reference before it is timed; see
+[Benchmarks](https://github.com/CAIIVS/chuchichaestli/blob/main/docs/benchmarks.md#dwt)
+for how to run them and benchmark results.
 
-```bash
-taskset -c 0-15 uv run --with pywavelets --with ptwt \
-  python benches/dwt_impl.py --device cuda --backends c3li-kernel \
-  --min-run-time 3.0 --repeats 5 --json bench.json
-```
-
-On an AMD gfx1151 (ROCm 7.2, float32, 3 levels, forward, batch `2x1`) the
-kernels are the fastest of the four in all 54 cases, in microseconds:
-
-| case | c3li-torch | c3li-kernel | ptwt | pytorch_wavelets |
-| --- | --- | --- | --- | --- |
-| 1d db8 symmetric 4096 | 847 | **70** | 499 | -- |
-| 2d db4 symmetric 256x256 | 1474 | **108** | 518 | 1208 |
-| 3d haar zero 64x64x64 | 930 | **163** | 639 | -- |
-| 3d db8 zero 64x64x64 | 2222 | **318** | 46857 | -- |
-
-On CPU with one thread they are fastest in all 54 too, by a median of 5.8x over
-the pure-torch path and 3.3x over PyWavelets. On 16 cores they lead in 49 of
-54: the five they do not are all `zero` mode, where torch pads with a constant
-rather than gathering indices, and where its convolution parallelizes better
-than these kernels do.
 
 ## Development
 
