@@ -196,6 +196,8 @@ def factor(
             q, _ = divide(row2[1], row1[1])
             take(True, q)
         lead = row2[0]
+        if not lead.c:
+            raise ValueError("The filter bank does not factor into lifting steps.")
         take(False, -Laurent((1.0 / lead.c[0],), -lead.low))
         take(True, lead)
     if row1[1]:

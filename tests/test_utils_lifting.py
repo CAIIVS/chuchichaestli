@@ -113,3 +113,12 @@ class TestFactor:
         wave = wavelet(name)
         with pytest.raises(ValueError):
             factor(wave.dec_lo, wave.dec_hi)
+
+
+class TestUnfactorable:
+    """Tests for the banks that do not factor into lifting steps."""
+
+    def test_an_all_zero_bank_raises(self):
+        """Test the contract an empty lead would otherwise break."""
+        with pytest.raises(ValueError, match="does not factor"):
+            factor([0.0], [0.0])
