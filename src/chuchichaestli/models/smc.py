@@ -55,14 +55,25 @@ class SMConvND(nn.Module):
             bias: Whether the convolution learns a bias.
             eps: Small constant keeping the demodulation finite.
             kwargs: Additional keyword arguments for the convolution.
+
+        Raises:
+            ValueError: If a keyword argument the forward pass cannot honour is
+                given.
         """
         super().__init__()
+        unsupported = {"groups", "padding_mode"} & kwargs.keys()
+        if unsupported:
+            raise ValueError(
+                f"A self-modulated convolution cannot honour {sorted(unsupported)};"
+                f" its weight is modulated per input channel."
+            )
         out_channels = in_channels if out_channels is None else out_channels
         self.dimensions = dimensions
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.stride = stride
         self.padding = padding
+        self.dilation = kwargs.get("dilation", 1)
         self.eps = eps
         conv = DIM_TO_CONV_MAP[dimensions](
             in_channels,
@@ -82,8 +93,10 @@ class SMConvND(nn.Module):
         """Return the weight after modulation, demodulation and the gain."""
         axes = tuple(range(1, self.dimensions + 2))
         broadcast = (1, -1) + (1,) * self.dimensions
-        weight = self.weight * self.weight.pow(2).mean(dim=axes, keepdim=True).rsqrt()
-        scales = self.scales * self.scales.pow(2).mean().rsqrt()
+        weight = self.weight * (
+            self.weight.pow(2).mean(dim=axes, keepdim=True).add(self.eps).rsqrt()
+        )
+        scales = self.scales * self.scales.pow(2).mean().add(self.eps).rsqrt()
         weight = weight * scales.view(broadcast)
         weight = weight * weight.pow(2).sum(dim=axes, keepdim=True).add(self.eps).rsqrt()
         return weight * self.gain.expand(self.in_channels).view(broadcast)
@@ -91,7 +104,11 @@ class SMConvND(nn.Module):
     def forward(self, x: torch.Tensor, *args) -> torch.Tensor:
         """Forward pass through the self-modulated convolution."""
         out = DIM_TO_CONV_FN_MAP[self.dimensions](
-            x, self.modulated_weight(), stride=self.stride, padding=self.padding
+            x,
+            self.modulated_weight(),
+            stride=self.stride,
+            padding=self.padding,
+            dilation=self.dilation,
         )
         if self.bias is None:
             return out

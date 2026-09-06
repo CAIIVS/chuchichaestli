@@ -86,6 +86,37 @@ class TestSMConvND:
         assert "6, 8" in repr(SMConvND(2, 6, 8))
 
 
+    def test_a_dilated_convolution_is_actually_dilated(self):
+        """Test that a convolution keyword survives into the forward pass."""
+        import torch.nn.functional as F
+
+        conv = SMConvND(2, 4, 4, kernel_size=3, padding=1, dilation=2)
+        x = torch.randn(1, 4, 16, 16)
+        want = F.conv2d(x, conv.modulated_weight(), stride=1, padding=1, dilation=2)
+        if conv.bias is not None:
+            want = want + conv.bias.view(1, -1, 1, 1)
+        assert torch.allclose(conv(x, torch.zeros(1, 4)), want, atol=1e-6)
+
+    @pytest.mark.parametrize("kwargs", [{"groups": 2}, {"padding_mode": "reflect"}])
+    def test_a_keyword_the_forward_pass_drops_raises(self, kwargs):
+        """Test that a silently ignored convolution keyword is refused."""
+        with pytest.raises(ValueError, match="cannot honour"):
+            SMConvND(2, 4, 4, kernel_size=3, **kwargs)
+
+    @pytest.mark.parametrize("collapse", ["scales", "all"])
+    def test_collapsed_weights_do_not_make_nan(self, collapse):
+        """Test the demodulation where an inverse square root would divide by zero."""
+        conv = SMConvND(2, 4, 4, kernel_size=3, padding=1)
+        with torch.no_grad():
+            if collapse == "scales":
+                conv.scales.zero_()
+            else:
+                for parameter in conv.parameters():
+                    parameter.zero_()
+        out = conv(torch.randn(1, 4, 8, 8), torch.zeros(1, 4))
+        assert not torch.isnan(out).any()
+
+
 class TestSMConvBlock:
     """Tests for the block wrapping the self-modulated convolution."""
 
