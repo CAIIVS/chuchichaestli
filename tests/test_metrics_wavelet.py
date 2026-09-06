@@ -46,6 +46,20 @@ class TestCharbonnier:
         assert charbonnier(x, y, reduction=torch.sum).ndim == 0
 
 
+    @pytest.mark.parametrize("eps", [0.0, -1e-3])
+    def test_a_non_positive_constant_raises(self, eps):
+        """Test that the constant keeping the penalty differentiable is required."""
+        x = torch.randn(4)
+        with pytest.raises(ValueError, match="must be positive"):
+            charbonnier(x, x, eps=eps)
+
+    def test_the_gradient_is_finite_where_the_two_agree(self):
+        """Test the differentiability the penalty is chosen for."""
+        x = torch.ones(4, requires_grad=True)
+        charbonnier(x, torch.ones(4), eps=1e-3).sum().backward()
+        assert torch.isfinite(x.grad).all()
+
+
 class TestWaveletLoss:
     """Tests for the penalty on the detail subbands."""
 

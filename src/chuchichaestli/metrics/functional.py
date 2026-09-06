@@ -46,6 +46,8 @@ def charbonnier(
         reduction: Reduction function, e.g. `torch.mean` or `torch.sum`;
             `None` leaves the penalty unreduced.
     """
+    if eps <= 0:
+        raise ValueError(f"The Charbonnier constant must be positive; got {eps}.")
     penalty = torch.sqrt((data - prediction) ** 2 + eps**2)
     return penalty if reduction is None else reduction(penalty)
 
