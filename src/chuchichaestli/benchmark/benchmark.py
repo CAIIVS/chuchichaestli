@@ -207,6 +207,6 @@ class Benchmark:
         elif args.profile or args.perf:
             self.inspect(args)
         elif args.repeats > 1:
-            repeated(self.script, args)
+            repeated(self.script, args, self.group)
         else:
             self.measure(args)

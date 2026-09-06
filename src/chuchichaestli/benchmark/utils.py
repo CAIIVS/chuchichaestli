@@ -605,7 +605,9 @@ def pin_allocator() -> None:
     )
 
 
-def repeated(script: str, args) -> None:
+def repeated(
+    script: str, args, group: Callable[[dict], str] | None = None
+) -> None:
     """Measure the sweep several times over, each in its own process.
 
     A timer only sees its own process, so fresh ones expose a case whose speed
@@ -614,6 +616,8 @@ def repeated(script: str, args) -> None:
     Args:
         script: Benchmark to run, normally the caller's `__file__`.
         args: Parsed command line arguments.
+        group: Bars sharing a value of this are drawn side by side; the whole
+            case label if omitted.
 
     Raises:
         SystemExit: If any of the runs fails, since a missing run would
@@ -673,7 +677,4 @@ def repeated(script: str, args) -> None:
         for row in unstable:
             print(f"  {row['case']:34s} {row['backend']:12s} {row['spread']:5.2f}x")
 
-    if args.json:
-        with open(args.json, "w") as fh:
-            json.dump(rows_out, fh, indent=2)
-        print(f"\nwrote {args.json}")
+    write_rows(rows_out, args, group)
