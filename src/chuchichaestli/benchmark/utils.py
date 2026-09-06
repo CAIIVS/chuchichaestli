@@ -159,7 +159,7 @@ class Backend:
         if reason := self.supports(case):
             return reason
         try:
-            x = torch.zeros_like(case.sample())
+            x = torch.zeros_like(case.sample()).to(device)
             self.apply(self.prepare(x, case), case)
         except ImportError:
             return "not installed"
