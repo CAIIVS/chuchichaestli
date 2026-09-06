@@ -145,3 +145,26 @@ comparison against PyWavelets; the GPU runs are on an AMD gfx1151 under ROCm
 </figure>
 
 </div>
+
+
+### Profiling { #dwt-profiling }
+
+`--profile` attributes the time to operators, so the compiled kernels appear by
+name next to the ATen internals. `--trace DIR` additionally writes a Chrome
+trace per case, providing a richer profiling interface.
+
+```bash
+python benches/dwt_impl.py \
+  --device cuda --backends c3li-kernel \
+  --dims 2 --sizes 1024x1024 --wavelets haar --modes zero --levels 3 \
+  --profile --trace traces/
+```
+
+Open the result at [ui.perfetto.dev](https://ui.perfetto.dev), or look at
+[this one](https://ui.perfetto.dev/#!/?url=https://caiivs.github.io/chuchichaestli/assets/dwt-trace-litevae-cuda-amd-gfx1151.json){ target=_blank }, from the command above. It shows the LiteVAE path: one
+`c3li::haar_wavedec` per call wrapping three `c3li::haar_nd` launches, one per
+level, since the fused Haar kernel does both axes at once. Search for
+`haar_nd` to inspect them.
+
+The traces carry profiling overhead (on ROCm roughly twice the measured time),
+so read them for structure and the tables/plots above for timings.
