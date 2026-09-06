@@ -119,7 +119,7 @@ class LiteVAEEncoder(nn.Module):
         self.out_channels = 2 * out_channels
         self.levels = dwt_levels
         self.channel_mults = prod(aggregator_channel_mults)
-        self.bottleneck_channels = aggregator_channels * aggregator_channel_mults[0]
+        self.bottleneck_channels = aggregator_channels * self.channel_mults
 
         self.dwt = MultilevelWaveletTransformND(
             dimensions, wavelet, mode, "subband", levels=dwt_levels

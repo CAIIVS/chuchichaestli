@@ -69,6 +69,19 @@ class TestEncoder:
         out = encoder(torch.randn(1, 2, *([size] * dimensions)))
         assert out.shape == (1, 8, *([size // 2**dwt_levels] * dimensions))
 
+    @pytest.mark.parametrize("mults", [(2, 1), (3, 1), (2, 2), (2, 3, 2)])
+    def test_the_bottleneck_width_is_the_one_the_aggregator_reaches(self, mults):
+        """Test that the reported bottleneck matches the aggregator's widest block."""
+        encoder = LiteVAEEncoder(
+            dimensions=2,
+            in_channels=2,
+            out_channels=4,
+            aggregator_channels=8,
+            aggregator_channel_mults=mults,
+        )
+        mid = encoder.aggregator.mid_block.res_block.conv1
+        assert encoder.bottleneck_channels == mid.weight.shape[1]
+
     @pytest.mark.parametrize("dimensions", DIMENSIONS)
     def test_it_doubles_its_latent_channels(self, dimensions):
         """Test the mean and variance packing a variational encoder owes."""
