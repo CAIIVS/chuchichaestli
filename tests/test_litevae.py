@@ -83,6 +83,15 @@ class TestEncoder:
         assert encoder.bottleneck_channels == mid.weight.shape[1]
 
     @pytest.mark.parametrize("dimensions", DIMENSIONS)
+    def test_the_input_keeps_its_gradient(self, dimensions):
+        """Test that the transform does not cut the encoder off from its input."""
+        encoder = LiteVAEEncoder(dimensions=dimensions, in_channels=2, out_channels=4)
+        x = torch.randn(1, 2, *([16] * dimensions), requires_grad=True)
+        encoder(x).sum().backward()
+        assert x.grad is not None
+        assert x.grad.abs().max() > 0
+
+    @pytest.mark.parametrize("dimensions", DIMENSIONS)
     def test_it_doubles_its_latent_channels(self, dimensions):
         """Test the mean and variance packing a variational encoder owes."""
         encoder = LiteVAEEncoder(dimensions=dimensions, in_channels=2, out_channels=5)

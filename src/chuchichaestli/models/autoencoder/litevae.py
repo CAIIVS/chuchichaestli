@@ -191,10 +191,9 @@ class LiteVAEEncoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the encoder."""
-        with torch.no_grad():
-            bands = self.dwt(x)
+        bands = self.dwt(x)
         features = [
-            pool(extractor(band.detach()))
+            pool(extractor(band))
             for extractor, pool, band in zip(
                 self.extractors, self.pools, bands, strict=True
             )
