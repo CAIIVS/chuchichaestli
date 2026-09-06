@@ -138,6 +138,18 @@ class TestExtensionIndices:
         with pytest.raises(ValueError, match="must not be negative"):
             extension_indices(4, -1, 1, "zero")
 
+    @pytest.mark.parametrize("mode", ["zero", "symmetric", "reflect", "periodic"])
+    def test_a_negative_width_raises_whatever_the_mode(self, mode):
+        """Test that no mode crops a signal it was asked to extend."""
+        x = torch.arange(8.0).reshape(1, 8)
+        with pytest.raises(ValueError, match="must not be negative"):
+            pad_signal(x, -1, -2, 0, mode)
+
+    @pytest.mark.parametrize("mode", ["symmetric", "reflect", "antisymmetric", "antireflect"])
+    def test_a_fold_far_past_the_signal_resolves(self, mode):
+        """Test the folding modes past the depth a recursion could reach."""
+        assert len(extension_indices(2, 5000, 5000, mode)[0]) == 10002
+
     def test_an_unknown_mode_raises(self):
         """Test that an unsupported extension mode is reported."""
         with pytest.raises(ValueError, match="Unsupported signal extension mode"):

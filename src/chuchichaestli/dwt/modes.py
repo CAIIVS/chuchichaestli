@@ -58,34 +58,39 @@ def _sample(i: int, n: int, mode: str) -> tuple[float, int, float, float]:
     Raises:
         ValueError: If `mode` is not a known extension mode.
     """
+    if mode not in MODE_TO_CODE:
+        raise ValueError(
+            f"Unsupported signal extension mode: {mode!r}."
+            f" Use one of {sorted(MODE_TO_CODE)}."
+        )
     if 0 <= i < n:
         return (1.0, i, 0.0, 0.0)
+    if mode == "zero":
+        return (0.0, 0, 0.0, 0.0)
+    if mode == "constant":
+        return (1.0, 0 if i < 0 else n - 1, 0.0, 0.0)
+    if mode in ("periodic", "periodization"):
+        return (1.0, i % n, 0.0, 0.0)
     if n == 1 and mode in ("reflect", "antireflect"):
         # whole-sample folding needs two samples to step between
         return (1.0, 0, 0.0, 0.0)
-    match mode:
-        case "zero":
-            return (0.0, 0, 0.0, 0.0)
-        case "constant":
-            return (1.0, 0 if i < 0 else n - 1, 0.0, 0.0)
-        case "periodic" | "periodization":
-            return _sample(i % n, n, mode)
-        case "symmetric":
-            return _sample(-i - 1 if i < 0 else 2 * n - 1 - i, n, mode)
-        case "reflect":
-            return _sample(-i if i < 0 else 2 * (n - 1) - i, n, mode)
-        case "antisymmetric":
-            sign, idx, lo, hi = _sample(-i - 1 if i < 0 else 2 * n - 1 - i, n, mode)
-            return (-sign, idx, -lo, -hi)
-        case "antireflect":
-            sign, idx, lo, hi = _sample(-i if i < 0 else 2 * (n - 1) - i, n, mode)
-            anchor = (2.0, 0.0) if i < 0 else (0.0, 2.0)
-            return (-sign, idx, anchor[0] - lo, anchor[1] - hi)
-        case _:
-            raise ValueError(
-                f"Unsupported signal extension mode: {mode!r}."
-                f" Use one of {sorted(MODE_TO_CODE)}."
-            )
+
+    whole = mode in ("reflect", "antireflect")
+    flips = mode in ("antisymmetric", "antireflect")
+    sign, lo, hi = 1.0, 0.0, 0.0
+    while not 0 <= i < n:
+        if mode == "antireflect":
+            if i < 0:
+                lo += 2.0 * sign
+            else:
+                hi += 2.0 * sign
+        if flips:
+            sign = -sign
+        if i < 0:
+            i = -i if whole else -i - 1
+        else:
+            i = 2 * (n - 1) - i if whole else 2 * n - 1 - i
+    return (sign, i, lo, hi)
 
 
 @lru_cache(maxsize=512)
@@ -136,7 +141,14 @@ def pad_signal(
         pad_lo: Number of samples prepended.
         pad_hi: Number of samples appended.
         mode: Signal extension mode.
+
+    Raises:
+        ValueError: If a padding is negative.
     """
+    if pad_lo < 0 or pad_hi < 0:
+        raise ValueError(
+            f"Signal extension widths must not be negative; got ({pad_lo}, {pad_hi})."
+        )
     if pad_lo == 0 and pad_hi == 0:
         return x
     axis = axis % x.ndim
