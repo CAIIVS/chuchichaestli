@@ -51,6 +51,32 @@ class TestProfileCase:
         assert len(calls) == 5
 
 
+    def test_it_writes_a_trace_when_asked(self, tmp_path, capsys):
+        """A timeline needs the trace file; the table alone cannot show overlap."""
+        import json
+
+        x = torch.randn(32, 32)
+        profile_case(lambda: x @ x, "matmul :: 32x32", "cpu", repeats=2, rows=3, trace=str(tmp_path))
+        written = list(tmp_path.glob("*.json"))
+        assert len(written) == 1
+        assert written[0].name == "matmul-32x32.json"
+        events = json.loads(written[0].read_text())
+        assert events["traceEvents"] if isinstance(events, dict) else events
+
+    def test_it_writes_nothing_without_a_trace_directory(self, tmp_path, capsys):
+        """Profiling should not litter the tree by default."""
+        x = torch.randn(32, 32)
+        profile_case(lambda: x @ x, "matmul :: 32x32", "cpu", repeats=2, rows=3)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_each_case_gets_its_own_file(self, tmp_path, capsys):
+        """A sweep profiles several cases; one must not overwrite the next."""
+        x = torch.randn(32, 32)
+        for title in ("a :: 1d haar", "b :: 2d db4"):
+            profile_case(lambda: x @ x, title, "cpu", repeats=1, rows=3, trace=str(tmp_path))
+        assert sorted(p.name for p in tmp_path.glob("*.json")) == ["a-1d-haar.json", "b-2d-db4.json"]
+
+
 class TestPerfCounters:
     """Reading what `perf stat` wrote to stderr."""
 

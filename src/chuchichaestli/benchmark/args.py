@@ -85,6 +85,15 @@ def base_parser(
         action="store_true",
         help="print where the time goes per operator, through torch.profiler",
     )
+    parser.add_argument(
+        "--trace",
+        default=None,
+        metavar="DIR",
+        help=(
+            "with --profile, also write a Chrome trace per case into this"
+            " directory, for a timeline view at https://ui.perfetto.dev"
+        ),
+    )
     parser.add_argument("--profile-repeats", type=int, default=10)
     parser.add_argument("--profile-rows", type=int, default=10)
     parser.add_argument(

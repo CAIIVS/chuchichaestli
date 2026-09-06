@@ -137,6 +137,7 @@ class Benchmark:
                         args.device,
                         args.profile_repeats,
                         args.profile_rows,
+                        trace=args.trace,
                     )
                 if args.perf:
                     perf_case(

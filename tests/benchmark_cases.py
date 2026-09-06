@@ -80,6 +80,7 @@ def namespace(**overrides) -> argparse.Namespace:
         profile=False,
         profile_repeats=1,
         profile_rows=3,
+        trace=None,
         perf=False,
         perf_worker=False,
         perf_iterations=10,

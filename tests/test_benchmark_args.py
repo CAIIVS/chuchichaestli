@@ -55,6 +55,11 @@ class TestBaseParser:
         with pytest.raises(SystemExit):
             parser.parse_args(["--dtype", "float32"])
 
+    def test_trace_is_off_by_default(self):
+        """Profiling writes a trace only when a directory is asked for."""
+        assert base_parser(backends=["a"]).parse_args([]).trace is None
+        assert base_parser(backends=["a"]).parse_args(["--trace", "out"]).trace == "out"
+
     def test_extends_with_its_own_axes(self):
         """The caller's sweep axes land in the same namespace as the shared ones."""
         parser = base_parser(backends=["a"])
