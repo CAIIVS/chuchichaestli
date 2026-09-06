@@ -1095,6 +1095,44 @@ def test_throws_error_on_mirrored_sampling_type_mismatch():
         UNet(**PER_LEVEL_CONF, upsample_type=("Upsample", "UpsampleShuffle"))
 
 
+@pytest.mark.parametrize(
+    "down,up",
+    [("ChannelResample", "UpsampleShuffle"), ("DownsampleUnshuffle", "ChannelResample")],
+)
+def test_throws_error_on_mirrored_sampling_factor_mismatch(down, up):
+    """Test that the halves must agree on the resolution a level changes by."""
+    with pytest.raises(ValueError, match="resolution"):
+        UNet(
+            dimensions=2,
+            in_channels=1,
+            out_channels=1,
+            n_channels=8,
+            down_block_types=("DownBlock", "DownBlock"),
+            up_block_types=("UpBlock", "UpBlock"),
+            block_out_channel_mults=(1, 2),
+            downsample_type=down,
+            upsample_type=up,
+            time_embedding=None,
+        )
+
+
+def test_a_constant_resolution_unet_still_builds():
+    """Test that the factor check leaves a matched pair alone."""
+    model = UNet(
+        dimensions=2,
+        in_channels=1,
+        out_channels=1,
+        n_channels=8,
+        down_block_types=("DownBlock", "DownBlock"),
+        up_block_types=("UpBlock", "UpBlock"),
+        block_out_channel_mults=(1, 2),
+        downsample_type="ChannelResample",
+        upsample_type="ChannelResample",
+        time_embedding=None,
+    )
+    assert model(torch.randn(1, 1, 32, 32)).shape == (1, 1, 32, 32)
+
+
 @pytest.mark.parametrize("dimensions", [1, 2, 3])
 @pytest.mark.parametrize("pool", ["AdaptiveMaxPool", "AdaptiveAvgPool"])
 def test_adaptive_pooling_downsamples_a_unet(dimensions, pool):
