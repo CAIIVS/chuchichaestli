@@ -304,11 +304,10 @@ def _HAAR_ADJOINT(grad: torch.Tensor, dimensions: int) -> torch.Tensor:
     """
     haar = as_wavelet("haar")
     _, _, rec_lo, rec_hi = haar.filters(grad.dtype, grad.device)
-    groups = grad.shape[1] // 2**dimensions
     h = grad
     for axis in reversed(range(dimensions)):
         h = _reconstruct(h, rec_lo, rec_hi, axis, "zero", 2 * h.shape[2 + axis])
-    return h if groups == h.shape[1] else h
+    return h
 
 
 def dwtn(
