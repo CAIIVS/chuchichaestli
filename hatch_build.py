@@ -188,7 +188,9 @@ class CustomBuildHook(BuildHookInterface):
             version: Build version, unused.
             build_data: Build data the sources are added to.
         """
-        if self.target_name == "wheel" and CSRC.is_dir():
+        if self.target_name != "wheel":
+            return
+        if CSRC.is_dir():
             build_data.setdefault("force_include", {}).update(shipped())
         build()
 
