@@ -96,7 +96,7 @@ torch::Tensor dwt_lift_axis_cpu(const torch::Tensor& x, int64_t axis,
           for (int64_t j = 0; j < std::min(begin_in, half); ++j) {
             wrapped(j);
           }
-          for (int64_t j = std::max<int64_t>(end_in, 0); j < half; ++j) {
+          for (int64_t j = std::max(end_in, begin_in); j < half; ++j) {
             wrapped(j);
           }
 

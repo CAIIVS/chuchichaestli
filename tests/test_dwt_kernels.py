@@ -230,6 +230,42 @@ class TestDevices:
 class TestLifting:
     """Tests for the lifting kernel, which nothing dispatches to yet."""
 
+    @staticmethod
+    def _lifted(x, axis, on_detail, coeffs, lows):
+        """Split one axis by lifting, in torch, as the kernel defines it."""
+        moved = x.movedim(2 + axis, -1)
+        half = moved.shape[-1] // 2
+        approx, detail = moved[..., 0::2], moved[..., 1::2]
+        for side, filt, low in zip(on_detail, coeffs, lows, strict=True):
+            target, source = (detail, approx) if side else (approx, detail)
+            acc = torch.zeros_like(target)
+            for i, c in enumerate(filt):
+                idx = (torch.arange(half) + low + i) % half
+                acc = acc + c * source.index_select(-1, idx)
+            if side:
+                detail = target + acc
+            else:
+                approx = target + acc
+        stacked = torch.stack([approx, detail], dim=2).flatten(1, 2)
+        return stacked.movedim(-1, 2 + axis)
+
+    @pytest.mark.parametrize("length", [2, 4, 6, 8])
+    @pytest.mark.parametrize("taps", [1, 2, 3, 4, 6])
+    @pytest.mark.parametrize("low", [-3, -2, -1, 0, 1])
+    @pytest.mark.parametrize("side", [0, 1])
+    def test_a_step_wider_than_the_axis_is_applied_once(
+        self, length, taps, low, side
+    ):
+        """Test the taps that wrap, where the boundary runs can overlap."""
+        torch.manual_seed(0)
+        x = torch.randn(2, 3, length, dtype=torch.float64)
+        filt = torch.randn(taps, dtype=torch.float64).tolist()
+        got = _ext._dwt_kernels.dwt_lift_axis(
+            x.contiguous(), 0, [side], [filt], [low], 1.0, 0, 1.0, 0
+        )
+        want = self._lifted(x, 0, [side], [filt], [low])
+        assert torch.allclose(got, want, atol=1e-12)
+
     @pytest.mark.parametrize("name", ["haar", "db2", "db4", "db8", "coif1"])
     @pytest.mark.parametrize("shape", [(2, 1, 64), (2, 3, 32, 32)])
     def test_lifting_matches_the_convolution(self, name, shape):
