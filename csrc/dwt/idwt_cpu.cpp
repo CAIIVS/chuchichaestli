@@ -64,7 +64,7 @@ torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
         const scalar_t* high_lane =
             low_lane + per_group * coeff_length * layout.inner;
 
-        double value = 0.0;
+        acc_t<scalar_t> value = acc_t<scalar_t>(0);
         for (int64_t f = 0; f < filter_len; ++f) {
           int64_t shifted = t + trim - f;
           if (circular) {
@@ -77,10 +77,10 @@ torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
           if (k >= coeff_length) {
             continue;
           }
-          value += static_cast<double>(lo[f]) *
-                       static_cast<double>(low_lane[k * layout.inner + q]) +
-                   static_cast<double>(hi[f]) *
-                       static_cast<double>(high_lane[k * layout.inner + q]);
+          value += static_cast<acc_t<scalar_t>>(lo[f]) *
+                       static_cast<acc_t<scalar_t>>(low_lane[k * layout.inner + q]) +
+                   static_cast<acc_t<scalar_t>>(hi[f]) *
+                       static_cast<acc_t<scalar_t>>(high_lane[k * layout.inner + q]);
         }
 
         const int64_t out_pre = (batch * groups + group) * per_group + pre;

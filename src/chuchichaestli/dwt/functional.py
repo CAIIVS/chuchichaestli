@@ -211,7 +211,7 @@ def _decompose(
         pad_lo, pad_hi = filter_len - 2, filter_len - 2 + (length % 2)
     out_length = (length + pad_lo + pad_hi - filter_len) // 2 + 1
 
-    if _ext.kernels_available(h.device):
+    if _ext.kernels_available(h.device, h.dtype):
         return _ext.dwt_axis(h, lo, hi, axis, mode, pad_lo, pad_hi, out_length)
 
     extension = "periodic" if mode == "periodization" else mode
@@ -335,7 +335,9 @@ def dwtn(
 
     h, lead, perm = _fold(data, axes)
     spatial = tuple(h.shape[2:])
-    if _ext.kernels_available(h.device) and _ext.fused_haar_applies(wavelet, mode, spatial):
+    if _ext.kernels_available(h.device, h.dtype) and _ext.fused_haar_applies(
+        wavelet, mode, spatial
+    ):
         h = _ext.haar_nd(h, len(axes))
     else:
         for axis in range(len(axes)):
@@ -534,7 +536,7 @@ def wavedecn(
         )
     compiled = level >= 1 and not (
         torch.is_grad_enabled() and data.requires_grad
-    ) and _ext.kernels_available(folded.device)
+    ) and _ext.kernels_available(folded.device, folded.dtype)
 
     if compiled and _ext.fused_recursion_applies(mode, shapes) and not all(
         _ext.fused_haar_applies(wavelet, mode, shape) for shape in shapes

@@ -106,19 +106,35 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                      static_cast<scalar_t>(ref.lo) * lane[0] +
                      static_cast<scalar_t>(ref.hi) * lane[length - 1];
           }
-          for (int64_t k = 0; k < out_length; k += width) {
-            const scalar_t* tap = ext.data() + 2 * k + offset + pad_lo;
-            const int64_t rest = std::min<int64_t>(width, out_length - k);
-            Vec acc_low(scalar_t(0));
-            Vec acc_high(scalar_t(0));
-            for (int64_t f = 0; f < filter_len; ++f) {
-              const auto pair = at::vec::deinterleave2(
-                  Vec::loadu(tap - f), Vec::loadu(tap - f + width));
-              acc_low = acc_low + Vec(lo[f]) * pair.first;
-              acc_high = acc_high + Vec(hi[f]) * pair.first;
+          if constexpr (vectorizable<scalar_t>) {
+            for (int64_t k = 0; k < out_length; k += width) {
+              const scalar_t* tap = ext.data() + 2 * k + offset + pad_lo;
+              const int64_t rest = std::min<int64_t>(width, out_length - k);
+              Vec acc_low(scalar_t(0));
+              Vec acc_high(scalar_t(0));
+              for (int64_t f = 0; f < filter_len; ++f) {
+                const auto pair = at::vec::deinterleave2(
+                    Vec::loadu(tap - f), Vec::loadu(tap - f + width));
+                acc_low = acc_low + Vec(lo[f]) * pair.first;
+                acc_high = acc_high + Vec(hi[f]) * pair.first;
+              }
+              acc_low.store(out_low + k, rest);
+              acc_high.store(out_high + k, rest);
             }
-            acc_low.store(out_low + k, rest);
-            acc_high.store(out_high + k, rest);
+          } else {
+            using acc = acc_t<scalar_t>;
+            for (int64_t k = 0; k < out_length; ++k) {
+              const scalar_t* tap = ext.data() + 2 * k + offset + pad_lo;
+              acc acc_low = acc(0);
+              acc acc_high = acc(0);
+              for (int64_t f = 0; f < filter_len; ++f) {
+                const acc value = static_cast<acc>(tap[-f]);
+                acc_low += static_cast<acc>(lo[f]) * value;
+                acc_high += static_cast<acc>(hi[f]) * value;
+              }
+              out_low[k] = static_cast<scalar_t>(acc_low);
+              out_high[k] = static_cast<scalar_t>(acc_high);
+            }
           }
           continue;
         }
@@ -130,7 +146,7 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
           scalar_t* low_row = out_low + k * inner;
           scalar_t* high_row = out_high + k * inner;
 
-          if (inner == 1 && interior) {
+          if (vectorizable<scalar_t> && inner == 1 && interior) {
             // consecutive outputs read every other sample, so two loads and
             // a de-interleave give a whole vector of them
             const int64_t rest = std::min<int64_t>(width, interior_end - k);
@@ -152,86 +168,92 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
             k += rest - 1;
           } else if (inner == 1) {
             // the tail, and every output whose taps reach past an end
+            using acc = acc_t<scalar_t>;
             const scalar_t* base = lane + last;
-            scalar_t acc_low = 0;
-            scalar_t acc_high = 0;
+            acc acc_low = acc(0);
+            acc acc_high = acc(0);
             if (interior) {
               for (int64_t f = 0; f < filter_len; ++f) {
-                const scalar_t value = base[-f];
-                acc_low += lo[f] * value;
-                acc_high += hi[f] * value;
+                const acc value = static_cast<acc>(base[-f]);
+                acc_low += static_cast<acc>(lo[f]) * value;
+                acc_high += static_cast<acc>(hi[f]) * value;
               }
             } else {
               for (int64_t f = 0; f < filter_len; ++f) {
                 const PadRef ref = pad_resolve(last - f, length, mode);
-                const scalar_t value =
-                    static_cast<scalar_t>(ref.sign) * lane[ref.index] +
-                    static_cast<scalar_t>(ref.lo) * lane[0] +
-                    static_cast<scalar_t>(ref.hi) * lane[length - 1];
-                acc_low += lo[f] * value;
-                acc_high += hi[f] * value;
+                const acc value =
+                    static_cast<acc>(ref.sign) * static_cast<acc>(lane[ref.index]) +
+                    static_cast<acc>(ref.lo) * static_cast<acc>(lane[0]) +
+                    static_cast<acc>(ref.hi) * static_cast<acc>(lane[length - 1]);
+                acc_low += static_cast<acc>(lo[f]) * value;
+                acc_high += static_cast<acc>(hi[f]) * value;
               }
             }
-            *low_row = acc_low;
-            *high_row = acc_high;
+            *low_row = static_cast<scalar_t>(acc_low);
+            *high_row = static_cast<scalar_t>(acc_high);
           } else if (interior) {
             // every tap reads a sample that exists, so no rule is consulted
+            using acc = acc_t<scalar_t>;
             const scalar_t* base = lane + last * inner;
             int64_t q = 0;
-            for (; q + width <= inner; q += width) {
-              Vec acc_low(scalar_t(0));
-              Vec acc_high(scalar_t(0));
-              for (int64_t f = 0; f < filter_len; ++f) {
-                const Vec value = Vec::loadu(base - f * inner + q);
-                acc_low = acc_low + Vec(lo[f]) * value;
-                acc_high = acc_high + Vec(hi[f]) * value;
+            if constexpr (vectorizable<scalar_t>) {
+              for (; q + width <= inner; q += width) {
+                Vec acc_low(scalar_t(0));
+                Vec acc_high(scalar_t(0));
+                for (int64_t f = 0; f < filter_len; ++f) {
+                  const Vec value = Vec::loadu(base - f * inner + q);
+                  acc_low = acc_low + Vec(lo[f]) * value;
+                  acc_high = acc_high + Vec(hi[f]) * value;
+                }
+                acc_low.store(low_row + q);
+                acc_high.store(high_row + q);
               }
-              acc_low.store(low_row + q);
-              acc_high.store(high_row + q);
             }
             for (; q < inner; ++q) {
-              scalar_t acc_low = 0;
-              scalar_t acc_high = 0;
+              acc acc_low = acc(0);
+              acc acc_high = acc(0);
               for (int64_t f = 0; f < filter_len; ++f) {
-                const scalar_t value = base[-f * inner + q];
-                acc_low += lo[f] * value;
-                acc_high += hi[f] * value;
+                const acc value = static_cast<acc>(base[-f * inner + q]);
+                acc_low += static_cast<acc>(lo[f]) * value;
+                acc_high += static_cast<acc>(hi[f]) * value;
               }
-              low_row[q] = acc_low;
-              high_row[q] = acc_high;
+              low_row[q] = static_cast<scalar_t>(acc_low);
+              high_row[q] = static_cast<scalar_t>(acc_high);
             }
           } else {
             // the rules depend on the sample index alone, so each tap
             // resolves once and is reused across the contiguous axis
             const scalar_t* edge_lo = lane;
             const scalar_t* edge_hi = lane + (length - 1) * inner;
+            using acc = acc_t<scalar_t>;
             for (int64_t q0 = 0; q0 < inner; q0 += kTile) {
               const int64_t span = std::min(kTile, inner - q0);
-              scalar_t acc_low[kTile] = {};
-              scalar_t acc_high[kTile] = {};
+              acc acc_low[kTile] = {};
+              acc acc_high[kTile] = {};
               for (int64_t f = 0; f < filter_len; ++f) {
                 const PadRef ref = pad_resolve(last - f, length, mode);
-                const scalar_t sign = static_cast<scalar_t>(ref.sign);
-                const scalar_t weight_lo = static_cast<scalar_t>(ref.lo);
-                const scalar_t weight_hi = static_cast<scalar_t>(ref.hi);
-                const scalar_t wl = lo[f];
-                const scalar_t wh = hi[f];
+                const acc sign = static_cast<acc>(ref.sign);
+                const acc weight_lo = static_cast<acc>(ref.lo);
+                const acc weight_hi = static_cast<acc>(ref.hi);
+                const acc wl = static_cast<acc>(lo[f]);
+                const acc wh = static_cast<acc>(hi[f]);
                 // a zero-extended tap contributes nothing
-                if (sign == 0 && weight_lo == 0 && weight_hi == 0) {
+                if (sign == acc(0) && weight_lo == acc(0) &&
+                    weight_hi == acc(0)) {
                   continue;
                 }
                 const scalar_t* row = lane + ref.index * inner + q0;
                 for (int64_t j = 0; j < span; ++j) {
-                  const scalar_t value = sign * row[j] +
-                                         weight_lo * edge_lo[q0 + j] +
-                                         weight_hi * edge_hi[q0 + j];
+                  const acc value = sign * static_cast<acc>(row[j]) +
+                                    weight_lo * static_cast<acc>(edge_lo[q0 + j]) +
+                                    weight_hi * static_cast<acc>(edge_hi[q0 + j]);
                   acc_low[j] += wl * value;
                   acc_high[j] += wh * value;
                 }
               }
               for (int64_t j = 0; j < span; ++j) {
-                low_row[q0 + j] = acc_low[j];
-                high_row[q0 + j] = acc_high[j];
+                low_row[q0 + j] = static_cast<scalar_t>(acc_low[j]);
+                high_row[q0 + j] = static_cast<scalar_t>(acc_high[j]);
               }
             }
           }

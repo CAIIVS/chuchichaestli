@@ -59,6 +59,40 @@ class TestFallback:
 class TestAgreement:
     """Tests that the compiled path matches the pure-torch one."""
 
+    @pytest.mark.parametrize(
+        "dtype,tol",
+        [
+            (torch.float64, 1e-12),
+            (torch.float32, 1e-5),
+            (torch.float16, 2e-2),
+            (torch.bfloat16, 1e-1),
+            (torch.complex64, 1e-5),
+            (torch.complex128, 1e-12),
+        ],
+    )
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4"])
+    def test_every_dtype_agrees_with_the_torch_path(
+        self, dtype, tol, name, monkeypatch
+    ):
+        """Test that the kernels serve the reduced and complex types too."""
+        assert _ext.kernels_available(torch.device("cpu"), dtype)
+        x = torch.randn(2, 3, 16, 16, dtype=torch.float64).to(dtype)
+        compiled = dwtn(x, name, "symmetric", (-2, -1))
+        monkeypatch.setattr(_ext, "USE_CUSTOM_KERNELS", False)
+        fallback = dwtn(x, name, "symmetric", (-2, -1))
+        for key in subband_keys(2):
+            assert compiled[key].dtype == dtype
+            assert torch.allclose(
+                compiled[key].to(torch.complex128),
+                fallback[key].to(torch.complex128),
+                atol=tol,
+                rtol=tol,
+            )
+
+    def test_an_exact_dtype_falls_back(self):
+        """Test that a type the kernels cannot serve is left to torch."""
+        assert not _ext.kernels_available(torch.device("cpu"), torch.int32)
+
     @pytest.mark.parametrize("name", WAVELETS)
     @pytest.mark.parametrize("mode", MODES)
     @pytest.mark.parametrize("dimensions", [1, 2, 3])

@@ -5,17 +5,34 @@
 
 #include <torch/extension.h>
 
+#include <ATen/OpMathType.h>
+
+#include <type_traits>
+
 #define C3LI_CHECK_CONTIGUOUS(x)                                              \
   TORCH_CHECK((x).is_contiguous(), #x " must be contiguous")
 
 #define C3LI_CHECK_FLOATING(x)                                                \
-  TORCH_CHECK((x).is_floating_point(), #x " must be a floating point tensor")
+  TORCH_CHECK((x).is_floating_point() || (x).is_complex(),                    \
+              #x " must be a floating point or complex tensor")
 
-// Dispatch over the floating point types the transform supports.
+// Dispatch over every inexact type the transform supports. Reduced precision
+// and complex ride along; `c3li::acc_t` is what each accumulates in.
 #define C3LI_DISPATCH_FLOATING(TYPE, NAME, ...)                               \
-  AT_DISPATCH_FLOATING_TYPES(TYPE, NAME, __VA_ARGS__)
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::kHalf, at::kBFloat16, TYPE, \
+                                              NAME, __VA_ARGS__)
 
 namespace c3li {
+
+// What a tap sum is accumulated in: the type itself where that loses nothing,
+// and the widened one where it would.
+template <typename scalar_t>
+using acc_t = at::opmath_type<scalar_t>;
+
+// Whether the vector unit may serve this type. Reduced precision is excluded
+// so its sums keep the width `acc_t` gives them.
+template <typename scalar_t>
+inline constexpr bool vectorizable = std::is_same_v<scalar_t, acc_t<scalar_t>>;
 
 constexpr int kThreadsPerBlock = 256;
 

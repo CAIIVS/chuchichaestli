@@ -17,6 +17,7 @@ _HAAR = Wavelet.from_name("haar")
 
 
 __all__ = [
+    "KERNEL_DTYPES",
     "USE_CUSTOM_KERNELS",
     "kernels_available",
     "kernels_built",
@@ -56,14 +57,31 @@ def kernels_built() -> bool:
     return _dwt_kernels is not None
 
 
-def kernels_available(device: torch.device | str | None = None) -> bool:
-    """Whether the compiled kernels can serve a tensor on this device.
+KERNEL_DTYPES: frozenset[torch.dtype] = frozenset(
+    {
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    }
+)
+
+
+def kernels_available(
+    device: torch.device | str | None = None, dtype: torch.dtype | None = None
+) -> bool:
+    """Whether the compiled kernels can serve a tensor of this device and dtype.
 
     Args:
         device: Device to check, by name or as a `torch.device`; any device if
             omitted.
+        dtype: Dtype to check; any dtype the kernels accept if omitted.
     """
     if not (USE_CUSTOM_KERNELS and kernels_built()):
+        return False
+    if dtype is not None and dtype not in KERNEL_DTYPES:
         return False
     if device is not None and not isinstance(device, torch.device):
         device = torch.device(device)
