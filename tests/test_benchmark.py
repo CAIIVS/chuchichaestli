@@ -131,8 +131,11 @@ class TestBenchmark:
         out = capsys.readouterr().out
         assert "good :: 8x8" in out and "bad :: 8x8" in out
 
-    def test_inspect_reports_a_backend_it_cannot_run(self, capsys):
+    def test_inspect_reports_a_backend_it_cannot_run(self, monkeypatch, capsys):
         """Why a backend is missing belongs in the profile output too."""
+        # the reporting is what is under test, not the guard `main` runs first,
+        # so the gpu is asserted present rather than left to the machine
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
         cpu_only = Backend("gpuless", halve, torch_input, devices=("cpu",))
         args = namespace(profile=True, device="cuda", backends=["gpuless"])
         declare(backends={"gpuless": cpu_only}).main(args)
