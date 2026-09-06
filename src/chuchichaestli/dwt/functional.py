@@ -11,7 +11,7 @@ and `'d'` for the detail branch, so a two-dimensional transform yields `aa`,
 import torch
 
 from chuchichaestli.dwt.modes import ExtensionModeTypes, pad_signal
-from chuchichaestli.dwt.wavelet import Wavelet, wavelet
+from chuchichaestli.dwt.wavelet import Wavelet, wavelet as as_wavelet
 from chuchichaestli.models.maps import DIM_TO_CONV_FN_MAP, DIM_TO_CONVT_FN_MAP
 from chuchichaestli.utils import as_inexact
 from collections.abc import Sequence
@@ -302,8 +302,8 @@ def _HAAR_ADJOINT(grad: torch.Tensor, dimensions: int) -> torch.Tensor:
         grad: Gradient with respect to the stacked subbands.
         dimensions: Number of spatial axes.
     """
-    wave = wavelet("haar")
-    _, _, rec_lo, rec_hi = wave.filters(grad.dtype, grad.device)
+    haar = as_wavelet("haar")
+    _, _, rec_lo, rec_hi = haar.filters(grad.dtype, grad.device)
     groups = grad.shape[1] // 2**dimensions
     h = grad
     for axis in reversed(range(dimensions)):
@@ -313,7 +313,7 @@ def _HAAR_ADJOINT(grad: torch.Tensor, dimensions: int) -> torch.Tensor:
 
 def dwtn(
     data: torch.Tensor,
-    wave: str | Wavelet = "haar",
+    wavelet: str | Wavelet = "haar",
     mode: ExtensionModeTypes = "zero",
     axes: Sequence[int] | None = None,
 ) -> dict[str, torch.Tensor]:
@@ -321,7 +321,7 @@ def dwtn(
 
     Args:
         data: Input tensor of any rank.
-        wave: Wavelet, by name or as a `Wavelet`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode.
         axes: Axes to transform; the trailing one if omitted.
 
@@ -330,13 +330,13 @@ def dwtn(
     """
     data = as_inexact(data)
     axes = _resolve_axes(data.ndim, axes)
-    wave = wavelet(wave)
-    dec_lo, dec_hi, _, _ = wave.filters(data.dtype, data.device)
+    wavelet = as_wavelet(wavelet)
+    dec_lo, dec_hi, _, _ = wavelet.filters(data.dtype, data.device)
     from chuchichaestli.dwt import _ext
 
     h, lead, perm = _fold(data, axes)
     spatial = tuple(h.shape[2:])
-    if _ext.kernels_available(h.device) and _ext.fused_haar_applies(wave, mode, spatial):
+    if _ext.kernels_available(h.device) and _ext.fused_haar_applies(wavelet, mode, spatial):
         h = _ext.haar_nd(h, len(axes))
     else:
         for axis in range(len(axes)):
@@ -347,7 +347,7 @@ def dwtn(
 
 def dwtn_approx(
     data: torch.Tensor,
-    wave: str | Wavelet = "haar",
+    wavelet: str | Wavelet = "haar",
     mode: ExtensionModeTypes = "zero",
     axes: Sequence[int] | None = None,
 ) -> torch.Tensor:
@@ -355,13 +355,13 @@ def dwtn_approx(
 
     Args:
         data: Input tensor of any rank.
-        wave: Wavelet, by name or as a `Wavelet`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode.
         axes: Axes to transform; the trailing one if omitted.
     """
     data = as_inexact(data)
     axes = _resolve_axes(data.ndim, axes)
-    dec_lo, _, _, _ = wavelet(wave).filters(data.dtype, data.device)
+    dec_lo, _, _, _ = as_wavelet(wavelet).filters(data.dtype, data.device)
     h, lead, perm = _fold(data, axes)
     for axis in range(len(axes)):
         h = _decompose_lowpass(h, dec_lo, axis, mode)
@@ -370,7 +370,7 @@ def dwtn_approx(
 
 def idwtn(
     coeffs: dict[str, torch.Tensor],
-    wave: str | Wavelet = "haar",
+    wavelet: str | Wavelet = "haar",
     mode: ExtensionModeTypes = "zero",
     axes: Sequence[int] | None = None,
     output_size: Sequence[int] | None = None,
@@ -379,7 +379,7 @@ def idwtn(
 
     Args:
         coeffs: Subbands keyed by their `'a'`/`'d'` names.
-        wave: Wavelet, by name or as a `Wavelet`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode the decomposition used.
         axes: Axes that were transformed; the trailing one if omitted.
         output_size: Length of each transformed axis in the reconstruction;
@@ -401,13 +401,13 @@ def idwtn(
     if len(shapes) != 1:
         raise ValueError(f"All subbands must have the same shape; got {sorted(shapes)}.")
 
-    wave = wavelet(wave)
+    wavelet = as_wavelet(wavelet)
     stacked = [_fold(as_inexact(coeffs[key]), axes) for key in keys]
     lead, perm = stacked[0][1], stacked[0][2]
     h = torch.cat([band for band, _, _ in stacked], dim=1)
-    _, _, rec_lo, rec_hi = wave.filters(h.dtype, h.device)
+    _, _, rec_lo, rec_hi = wavelet.filters(h.dtype, h.device)
 
-    sizes = _reconstruction_sizes(h.shape[2:], wave.filter_len, mode, output_size)
+    sizes = _reconstruction_sizes(h.shape[2:], wavelet.filter_len, mode, output_size)
     # Decomposition appends one character per axis, so the axis transformed last
     # varies fastest and its band pairs are adjacent.
     for axis in reversed(range(len(axes))):
@@ -446,7 +446,7 @@ def _reconstruction_sizes(
 
 def dwt(
     data: torch.Tensor,
-    wave: str | Wavelet = "haar",
+    wavelet: str | Wavelet = "haar",
     mode: ExtensionModeTypes = "zero",
     axis: int = -1,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -454,21 +454,21 @@ def dwt(
 
     Args:
         data: Input tensor of any rank.
-        wave: Wavelet, by name or as a `Wavelet`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode.
         axis: Axis to transform.
 
     Returns:
         The approximation and the detail coefficients.
     """
-    bands = dwtn(data, wave, mode, (axis,))
+    bands = dwtn(data, wavelet, mode, (axis,))
     return bands["a"], bands["d"]
 
 
 def idwt(
     approx: torch.Tensor,
     detail: torch.Tensor,
-    wave: str | Wavelet = "haar",
+    wavelet: str | Wavelet = "haar",
     mode: ExtensionModeTypes = "zero",
     axis: int = -1,
     output_size: int | None = None,
@@ -478,18 +478,18 @@ def idwt(
     Args:
         approx: Approximation coefficients.
         detail: Detail coefficients.
-        wave: Wavelet, by name or as a `Wavelet`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode the decomposition used.
         axis: Axis that was transformed.
         output_size: Length of the reconstructed axis.
     """
     sizes = None if output_size is None else (output_size,)
-    return idwtn({"a": approx, "d": detail}, wave, mode, (axis,), sizes)
+    return idwtn({"a": approx, "d": detail}, wavelet, mode, (axis,), sizes)
 
 
 def wavedecn(
     data: torch.Tensor,
-    wave: str | Wavelet = "haar",
+    wavelet: str | Wavelet = "haar",
     mode: ExtensionModeTypes = "zero",
     level: int | None = None,
     axes: Sequence[int] | None = None,
@@ -498,7 +498,7 @@ def wavedecn(
 
     Args:
         data: Input tensor of any rank.
-        wave: Wavelet, by name or as a `Wavelet`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode.
         level: Number of levels; the maximum the shortest axis supports if omitted.
         axes: Axes to transform; the trailing one if omitted.
@@ -512,10 +512,10 @@ def wavedecn(
     """
     data = as_inexact(data)
     axes = _resolve_axes(data.ndim, axes)
-    wave = wavelet(wave)
+    wavelet = as_wavelet(wavelet)
     if level is None:
         level = min(
-            dwt_max_level(data.shape[axis], wave.dec_len) for axis in axes
+            dwt_max_level(data.shape[axis], wavelet.dec_len) for axis in axes
         )
         level = max(level, 1)
     if level < 0:
@@ -531,17 +531,17 @@ def wavedecn(
     shapes = [tuple(folded.shape[2:])]
     for _ in range(level - 1):
         shapes.append(
-            tuple(dwt_coeff_len(n, wave.dec_len, mode) for n in shapes[-1])
+            tuple(dwt_coeff_len(n, wavelet.dec_len, mode) for n in shapes[-1])
         )
     compiled = level >= 1 and not (
         torch.is_grad_enabled() and data.requires_grad
     ) and _ext.kernels_available(folded.device)
 
     if compiled and _ext.fused_recursion_applies(mode, shapes) and not all(
-        _ext.fused_haar_applies(wave, mode, shape) for shape in shapes
+        _ext.fused_haar_applies(wavelet, mode, shape) for shape in shapes
     ):
         # the kernel runs the recursion for any wavelet
-        dec_lo, dec_hi, _, _ = wave.filters(folded.dtype, folded.device)
+        dec_lo, dec_hi, _, _ = wavelet.filters(folded.dtype, folded.device)
         for stacked in _ext.wavedec_axes(folded, dec_lo, dec_hi, mode, level):
             bands = {
                 key: _unfold(stacked[:, i], lead, perm)
@@ -553,7 +553,7 @@ def wavedecn(
         return result[::-1]
 
     if compiled and all(
-        _ext.fused_haar_applies(wave, mode, shape) for shape in shapes
+        _ext.fused_haar_applies(wavelet, mode, shape) for shape in shapes
     ):
         # the kernel runs the recursion
         for stacked in _ext.haar_wavedec(folded, len(axes), level):
@@ -568,7 +568,7 @@ def wavedecn(
 
     approx = data
     for _ in range(level):
-        bands = dwtn(approx, wave, mode, axes)
+        bands = dwtn(approx, wavelet, mode, axes)
         approx = bands.pop(approx_key)
         result.append(bands)
     result.append(approx)
@@ -597,7 +597,7 @@ def _trim_to_band(
 
 def waverecn(
     coeffs: list,
-    wave: str | Wavelet = "haar",
+    wavelet: str | Wavelet = "haar",
     mode: ExtensionModeTypes = "zero",
     axes: Sequence[int] | None = None,
     output_size: Sequence[Sequence[int]] | None = None,
@@ -606,7 +606,7 @@ def waverecn(
 
     Args:
         coeffs: `[approx, details_level, ..., details_1]`, as `wavedecn` returns.
-        wave: Wavelet, by name or as a `Wavelet`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode the decomposition used.
         axes: Axes that were transformed; the trailing one if omitted.
         output_size: Per level, the length of each transformed axis, coarsest
@@ -626,13 +626,13 @@ def waverecn(
         sizes = None if output_size is None else output_size[i]
         if sizes is None and band:
             approx = _trim_to_band(approx, next(iter(band.values())), axes)
-        approx = idwtn({approx_key: approx, **band}, wave, mode, axes, sizes)
+        approx = idwtn({approx_key: approx, **band}, wavelet, mode, axes, sizes)
     return approx
 
 
 def wavedec(
     data: torch.Tensor,
-    wave: str | Wavelet = "haar",
+    wavelet: str | Wavelet = "haar",
     mode: ExtensionModeTypes = "zero",
     level: int | None = None,
     axis: int = -1,
@@ -641,7 +641,7 @@ def wavedec(
 
     Args:
         data: Input tensor of any rank.
-        wave: Wavelet, by name or as a `Wavelet`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode.
         level: Number of levels; the maximum the axis supports if omitted.
         axis: Axis to transform.
@@ -649,13 +649,13 @@ def wavedec(
     Returns:
         `[approx, detail_level, ..., detail_1]`, coarsest first.
     """
-    parts = wavedecn(data, wave, mode, level, (axis,))
+    parts = wavedecn(data, wavelet, mode, level, (axis,))
     return [parts[0]] + [band["d"] for band in parts[1:]]
 
 
 def waverec(
     coeffs: Sequence[torch.Tensor],
-    wave: str | Wavelet = "haar",
+    wavelet: str | Wavelet = "haar",
     mode: ExtensionModeTypes = "zero",
     axis: int = -1,
     output_size: Sequence[int] | None = None,
@@ -664,7 +664,7 @@ def waverec(
 
     Args:
         coeffs: `[approx, detail_level, ..., detail_1]`, as `wavedec` returns.
-        wave: Wavelet, by name or as a `Wavelet`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
         mode: Signal extension mode the decomposition used.
         axis: Axis that was transformed.
         output_size: Length of the axis at each level, coarsest level first.
@@ -676,4 +676,4 @@ def waverec(
         raise ValueError("`coeffs` must hold at least the approximation band.")
     sizes = None if output_size is None else [(n,) for n in output_size]
     parts = [coeffs[0]] + [{"d": band} for band in coeffs[1:]]
-    return waverecn(parts, wave, mode, (axis,), sizes)
+    return waverecn(parts, wavelet, mode, (axis,), sizes)
