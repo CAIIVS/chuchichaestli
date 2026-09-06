@@ -56,14 +56,17 @@ def kernels_built() -> bool:
     return _dwt_kernels is not None
 
 
-def kernels_available(device: torch.device | None = None) -> bool:
+def kernels_available(device: torch.device | str | None = None) -> bool:
     """Whether the compiled kernels can serve a tensor on this device.
 
     Args:
-        device: Device to check; any device if omitted.
+        device: Device to check, by name or as a `torch.device`; any device if
+            omitted.
     """
     if not (USE_CUSTOM_KERNELS and kernels_built()):
         return False
+    if device is not None and not isinstance(device, torch.device):
+        device = torch.device(device)
     if device is None or device.type == "cpu":
         return True
     return bool(_dwt_kernels.has_gpu())
