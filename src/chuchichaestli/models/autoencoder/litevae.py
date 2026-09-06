@@ -102,11 +102,18 @@ class LiteVAEEncoder(nn.Module):
             aggregator_args: Further architecture arguments for the aggregator.
 
         Raises:
-            ValueError: If fewer than one wavelet level is requested.
+            ValueError: If fewer than one wavelet level is requested, or if the
+                extension mode is not critically sampled.
         """
         super().__init__()
         if dwt_levels < 1:
             raise ValueError(f"A wavelet encoder needs at least one level; got {dwt_levels}.")
+        if mode != "periodization":
+            raise ValueError(
+                f"A wavelet encoder pools every level to the resolution of the"
+                f" coarsest, which only a critically sampled transform reaches;"
+                f" got {mode!r} instead of 'periodization'."
+            )
         aggregator_channels = (
             n_channels if aggregator_channels is None else aggregator_channels
         )

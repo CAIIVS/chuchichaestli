@@ -91,6 +91,22 @@ class TestEncoder:
         assert x.grad is not None
         assert x.grad.abs().max() > 0
 
+    @pytest.mark.parametrize(
+        "mode", ["zero", "symmetric", "reflect", "periodic", "antireflect"]
+    )
+    def test_a_mode_that_does_not_halve_each_axis_raises(self, mode):
+        """Test that the pooling assumption is checked rather than discovered."""
+        with pytest.raises(ValueError, match="critically sampled"):
+            LiteVAEEncoder(dimensions=2, in_channels=2, out_channels=4, mode=mode)
+
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4", "bior2.2"])
+    def test_the_default_mode_serves_every_wavelet(self, name):
+        """Test that the supported mode carries any wavelet through."""
+        encoder = LiteVAEEncoder(
+            dimensions=2, in_channels=2, out_channels=4, wavelet=name, dwt_levels=3
+        )
+        assert encoder(torch.randn(1, 2, 32, 32)).shape == (1, 8, 4, 4)
+
     @pytest.mark.parametrize("dimensions", DIMENSIONS)
     def test_it_doubles_its_latent_channels(self, dimensions):
         """Test the mean and variance packing a variational encoder owes."""
