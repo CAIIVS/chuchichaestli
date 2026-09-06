@@ -10,6 +10,8 @@ from chuchichaestli.dwt.modes import ExtensionModeTypes
 from chuchichaestli.dwt.wavelet import Wavelet, wavelet as as_wavelet
 from chuchichaestli.models.dwt.functional import (
     SubbandOrderTypes,
+    _stack,
+    _unstack,
     dwt_nd,
     dwt_nd_approx,
     idwt_nd,
@@ -191,7 +193,7 @@ class _NamedWaveletTransform(WaveletTransformND):
     def forward(self, x: torch.Tensor, *args) -> tuple[torch.Tensor, ...]:
         """Forward pass returning one tensor per subband, in `subband_names` order."""
         stacked = super().forward(x)
-        return stacked.chunk(2**self.dimensions, dim=1)
+        return _unstack(stacked, self.dimensions, self.subband_order)
 
     @property
     def subbands(self) -> tuple[str, ...]:
@@ -220,7 +222,7 @@ class _NamedInverseWaveletTransform(InverseWaveletTransformND):
                 f"A {self.dimensions}-dimensional transform has {expected} subbands;"
                 f" got {len(subbands)}."
             )
-        return super().forward(torch.cat(subbands, dim=1), output_size)
+        return super().forward(_stack(subbands, self.subband_order), output_size)
 
     @property
     def subbands(self) -> tuple[str, ...]:

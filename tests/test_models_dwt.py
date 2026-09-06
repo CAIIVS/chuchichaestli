@@ -236,6 +236,31 @@ class TestNamedSubbandLayers:
         out = inverse(*forward(x), output_size=(12, 12))
         assert torch.allclose(out, x, atol=1e-9)
 
+    @pytest.mark.parametrize("order", ["subband", "channel"])
+    @pytest.mark.parametrize("channels", [1, 3])
+    def test_the_named_subbands_do_not_depend_on_the_storage_order(
+        self, order, channels
+    ):
+        """Test that a band matches its name whichever way the channels are laid out."""
+        layer = WaveletTransform2D(wavelet="db2", mode="symmetric", subband_order=order)
+        x = torch.randn(1, channels, 12, 12, dtype=torch.float64)
+        bands = dict(zip(layer.subbands, layer(x), strict=True))
+        reference = dwtn(x, "db2", "symmetric", (-2, -1))
+        for key, band in bands.items():
+            assert torch.allclose(band, reference[key], atol=1e-12)
+
+    @pytest.mark.parametrize("order", ["subband", "channel"])
+    @pytest.mark.parametrize("channels", [1, 3])
+    def test_the_named_inverse_takes_its_subbands_by_name(self, order, channels):
+        """Test that the inverse reads the bands by name, not by channel position."""
+        inverse = InverseWaveletTransform2D(
+            wavelet="db2", mode="symmetric", subband_order=order
+        )
+        x = torch.randn(1, channels, 12, 12, dtype=torch.float64)
+        reference = dwtn(x, "db2", "symmetric", (-2, -1))
+        out = inverse(*(reference[key] for key in inverse.subbands), output_size=(12, 12))
+        assert torch.allclose(out, x, atol=1e-9)
+
     def test_the_inverse_reports_the_subbands_it_expects(self):
         """Test that the inverse names the subbands it takes, in order."""
         assert InverseWaveletTransform2D(wavelet="haar").subbands == ("aa", "ad", "da", "dd")
