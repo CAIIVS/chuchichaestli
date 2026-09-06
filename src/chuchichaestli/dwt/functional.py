@@ -575,6 +575,26 @@ def wavedecn(
     return result[::-1]
 
 
+def _trim_to_band(
+    approx: torch.Tensor, band: torch.Tensor, axes: Sequence[int]
+) -> torch.Tensor:
+    """Drop the odd sample a coarser level carries past its detail bands.
+
+    An axis of odd length decomposes to bands the reconstruction cannot tell
+    from an even one, so a level rebuilt without a recorded size comes back one
+    sample too long. That sample belongs to no detail band.
+
+    Args:
+        approx: Approximation reconstructed from the coarser level.
+        band: A detail band of the level being reconstructed.
+        axes: Axes that were transformed.
+    """
+    for axis in axes:
+        if approx.shape[axis] == band.shape[axis] + 1:
+            approx = approx.narrow(axis, 0, band.shape[axis])
+    return approx
+
+
 def waverecn(
     coeffs: list,
     wave: str | Wavelet = "haar",
@@ -604,6 +624,8 @@ def waverecn(
     approx_key = "a" * len(axes)
     for i, band in enumerate(details):
         sizes = None if output_size is None else output_size[i]
+        if sizes is None and band:
+            approx = _trim_to_band(approx, next(iter(band.values())), axes)
         approx = idwtn({approx_key: approx, **band}, wave, mode, axes, sizes)
     return approx
 

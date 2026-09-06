@@ -191,6 +191,30 @@ class TestPerfectReconstruction:
         sizes = [s[0] for s in sizes_per_level((32,), filter_len, mode, 3)][::-1]
         assert torch.allclose(waverec(coeffs, name, mode, output_size=sizes), x, atol=1e-8)
 
+    @pytest.mark.parametrize("name", ["haar", "db2", "bior2.2"])
+    @pytest.mark.parametrize("mode", MODES)
+    @pytest.mark.parametrize("length", [17, 30, 31])
+    def test_multi_level_one_axis_without_recorded_sizes(self, name, mode, length):
+        """Test that an odd level length inverts without an `output_size`."""
+        x = torch.randn(3, length, dtype=torch.float64)
+        coeffs = wavedec(x, name, mode, 3)
+        out = waverec(coeffs, name, mode)
+        assert out.shape[-1] >= length
+        assert torch.allclose(out[..., :length], x, atol=1e-8)
+
+    @pytest.mark.parametrize("name", ["haar", "db3"])
+    @pytest.mark.parametrize("mode", MODES)
+    @pytest.mark.parametrize("dimensions", [1, 2])
+    def test_multi_level_without_recorded_sizes(self, name, mode, dimensions):
+        """Test that odd axes invert when no `output_size` was recorded."""
+        shape = tuple(17 + 2 * i for i in range(dimensions))
+        axes = tuple(range(-dimensions, 0))
+        x = torch.randn(2, *shape, dtype=torch.float64)
+        coeffs = wavedecn(x, name, mode, 3, axes)
+        out = waverecn(coeffs, name, mode, axes)
+        crop = (slice(None),) + tuple(slice(0, n) for n in shape)
+        assert torch.allclose(out[crop], x, atol=1e-8)
+
     def test_a_decomposition_of_no_levels_round_trips_trivially(self):
         """Test the degenerate decomposition with nothing to invert."""
         x = torch.randn(4, 8, dtype=torch.float64)

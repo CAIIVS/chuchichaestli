@@ -283,6 +283,17 @@ class TestBatchedFunctions:
         out = waverec_nd(coeffs, dimensions, name, "symmetric", order, sizes[::-1])
         assert torch.allclose(out, x, atol=1e-8)
 
+    @pytest.mark.parametrize("name", ["haar", "db2"])
+    @pytest.mark.parametrize("dimensions", [1, 2])
+    def test_multi_level_round_trip_without_recorded_sizes(self, name, dimensions):
+        """Test that odd spatial axes invert without an `output_size`."""
+        shape = tuple([17] * dimensions)
+        x = torch.randn(2, 3, *shape, dtype=torch.float64)
+        coeffs = wavedec_nd(x, dimensions, name, "symmetric", 2)
+        out = waverec_nd(coeffs, dimensions, name, "symmetric")
+        crop = (slice(None), slice(None)) + tuple(slice(0, n) for n in shape)
+        assert torch.allclose(out[crop], x, atol=1e-8)
+
     def test_an_unknown_subband_order_raises(self):
         """Test that the subband order is validated."""
         with pytest.raises(ValueError, match="Unsupported subband order"):

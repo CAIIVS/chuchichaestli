@@ -5,7 +5,13 @@
 
 import torch
 
-from chuchichaestli.dwt.functional import dwtn, dwtn_approx, idwtn, subband_keys
+from chuchichaestli.dwt.functional import (
+    _trim_to_band,
+    dwtn,
+    dwtn_approx,
+    idwtn,
+    subband_keys,
+)
 from chuchichaestli.dwt.modes import ExtensionModeTypes
 from chuchichaestli.dwt.wavelet import Wavelet
 from collections.abc import Sequence
@@ -238,10 +244,12 @@ def waverec_nd(
         raise ValueError("`coeffs` must hold at least one level.")
     approx = None
     for i, level in enumerate(reversed(coeffs)):
+        sizes = None if output_size is None else output_size[i]
         if approx is not None:
             parts = list(_unstack(level, dimensions, subband_order))
+            if sizes is None:
+                approx = _trim_to_band(approx, parts[0], _spatial_axes(dimensions))
             parts[0] = approx
             level = _stack(parts, subband_order)
-        sizes = None if output_size is None else output_size[i]
         approx = idwt_nd(level, dimensions, wavelet, mode, subband_order, sizes)
     return approx
