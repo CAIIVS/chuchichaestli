@@ -142,6 +142,49 @@ class TestAgreement:
             served.add(dtype)
         assert served == _ext.kernel_dtypes()
 
+    @needs_gpu
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4", "bior2.2"])
+    @pytest.mark.parametrize("mode", MODES)
+    def test_the_reconstruction_kernel_matches_the_transposed_convolution(
+        self, name, mode, monkeypatch
+    ):
+        """Test the compiled inverse against the one it stands in for."""
+        device = torch.device("cuda")
+        if not _ext.kernels_available(device):
+            pytest.skip("the extension carries no GPU kernels")
+        x = torch.randn(2, 2, 8, 8, dtype=torch.float64, device=device)
+        bands = dwtn(x, name, mode, (-2, -1))
+        compiled = idwtn(bands, name, mode, (-2, -1), output_size=(8, 8))
+        monkeypatch.setattr(_ext, "USE_CUSTOM_KERNELS", False)
+        fallback = idwtn(bands, name, mode, (-2, -1), output_size=(8, 8))
+        assert torch.allclose(compiled, fallback, atol=1e-11)
+
+    @needs_gpu
+    @pytest.mark.parametrize("name", ["haar", "db2"])
+    @pytest.mark.parametrize("mode", ["zero", "symmetric", "periodization"])
+    def test_the_reconstruction_kernel_carries_a_gradient(
+        self, name, mode, monkeypatch
+    ):
+        """Test that the compiled inverse agrees with the torch path on gradients."""
+        device = torch.device("cuda")
+        if not _ext.kernels_available(device):
+            pytest.skip("the extension carries no GPU kernels")
+        base = torch.randn(2, 2, 8, 8, dtype=torch.float64)
+        grads = []
+        for use in (False, True):
+            monkeypatch.setattr(_ext, "USE_CUSTOM_KERNELS", use)
+            x = base.clone().to(device).requires_grad_(True)
+            out = idwtn(dwtn(x, name, mode, (-2, -1)), name, mode, (-2, -1),
+                        output_size=(8, 8))
+            (out**2).sum().backward()
+            grads.append(x.grad.detach().clone())
+        assert torch.allclose(grads[0], grads[1], atol=1e-10)
+
+    def test_the_host_keeps_the_transposed_convolution(self):
+        """Test that the inverse kernel is not used where it loses to torch."""
+        assert not _ext.idwt_kernel_applies(torch.device("cpu"))
+        assert _ext.idwt_kernel_applies(torch.device("cuda"))
+
     def test_an_exact_dtype_falls_back(self):
         """Test that a type the kernels cannot serve is left to torch."""
         assert not _ext.kernels_available(torch.device("cpu"), torch.int32)

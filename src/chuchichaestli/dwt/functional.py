@@ -266,6 +266,13 @@ def _reconstruct(
     dimensions = h.ndim - 2
     groups = h.shape[1] // 2
     filter_len = lo.numel()
+    from chuchichaestli.dwt import _ext
+
+    if _ext.idwt_kernel_applies(h.device) and _ext.kernels_available(
+        h.device, h.dtype
+    ):
+        trim = filter_len // 2 - 1 if mode == "periodization" else filter_len - 2
+        return _ext.idwt_axis(h, lo, hi, axis, mode, trim, length)
     weight = _bank(lo, hi, groups, axis, dimensions)
     stride = [1] * dimensions
     stride[axis] = 2
