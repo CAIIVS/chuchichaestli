@@ -195,6 +195,10 @@ class Benchmark:
             raise SystemExit("no GPU available")
         if args.perf and self.case_argv is None:
             raise SystemExit(f"{self.label} does not support --perf: it supplies no case_argv")
+        # the idle run the counters are measured against passes 0 to the worker,
+        # so the flag itself has to keep accepting it; asking for it is the error
+        if args.perf and args.perf_iterations < 1:
+            raise SystemExit("--perf needs --perf-iterations of at least 1")
         # both of these re-run the benchmark (using `script`)
         if (args.repeats > 1 or args.perf) and not Path(self.script).is_file():
             raise SystemExit(f"cannot re-run {self.label} as {self.script!r}; pass script= explicitly")

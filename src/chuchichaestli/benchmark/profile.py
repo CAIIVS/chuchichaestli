@@ -178,7 +178,7 @@ def perf_case(
         print(f"  {'instructions per cycle':24s} {instructions / cycles:>15.2f}")
     if references > 0 and misses > 0:
         print(f"  {'cache miss rate':24s} {misses / references:>14.1%}")
-    if seconds > 0:
+    if seconds > 0 and iterations > 0:
         print(f"  {'per call':24s} {seconds / iterations * 1e6:>13.1f} us")
         if moved_bytes == moved_bytes:  # not nan
             moved = moved_bytes * iterations

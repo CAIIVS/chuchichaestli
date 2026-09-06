@@ -197,6 +197,16 @@ class TestPerfCase:
         out = capsys.readouterr().out
         assert "instructions per cycle" in out and "per call" in out
 
+    def test_zero_iterations_does_not_divide_by_them(self, monkeypatch, capsys):
+        """The idle run passes 0 to the worker, so the guard cannot be in the flag."""
+        outputs = iter([PERF_OUTPUT, IDLE_OUTPUT])
+        monkeypatch.setattr(
+            subprocess, "run", lambda command, **kw: subprocess.CompletedProcess(command, 0, "", next(outputs))
+        )
+        perf_case("case", lambda n: ["true"], 0, moved_bytes=1024.0)
+        out = capsys.readouterr().out
+        assert "per call" not in out and "achieved bandwidth" not in out
+
     def test_a_missing_perf_is_reported_not_raised(self, monkeypatch, capsys):
         """`perf` is not installed everywhere; that is not a reason to stop."""
 

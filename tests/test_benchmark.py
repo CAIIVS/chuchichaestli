@@ -103,6 +103,12 @@ class TestBenchmark:
         assert torch.get_num_threads() == before
         assert "8x8" in capsys.readouterr().out
 
+    def test_perf_needs_at_least_one_iteration(self):
+        """Dividing the counters by zero calls would be a crash, not a report."""
+        for count in (0, -5):
+            with pytest.raises(SystemExit, match="at least 1"):
+                declare(case_argv=lambda case: []).main(namespace(perf=True, perf_iterations=count))
+
     def test_perf_without_case_argv_says_so(self):
         """A benchmark that cannot name a case on a command line cannot count."""
         with pytest.raises(SystemExit, match="does not support --perf"):
