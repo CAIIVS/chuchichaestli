@@ -37,7 +37,8 @@ __global__ void idwt_axis_kernel(
     const scalar_t* high_lane =
         low_lane + per_group * coeff_length * inner;
 
-    scalar_t value = 0;
+    using acc = acc_t<scalar_t>;
+    acc value = acc(0);
     for (int64_t f = 0; f < filter_len; ++f) {
       int64_t shifted = t + trim - f;
       if (circular) {
@@ -50,12 +51,14 @@ __global__ void idwt_axis_kernel(
       if (k >= coeff_length) {
         continue;
       }
-      value += lo[f] * low_lane[k * inner + q] +
-               hi[f] * high_lane[k * inner + q];
+      value += static_cast<acc>(lo[f]) *
+                   static_cast<acc>(low_lane[k * inner + q]) +
+               static_cast<acc>(hi[f]) *
+                   static_cast<acc>(high_lane[k * inner + q]);
     }
 
     const int64_t out_pre = (batch * groups + group) * per_group + pre;
-    dst[(out_pre * out_length + t) * inner + q] = value;
+    dst[(out_pre * out_length + t) * inner + q] = static_cast<scalar_t>(value);
   }
 }
 

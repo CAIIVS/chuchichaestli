@@ -37,8 +37,9 @@ __global__ void haar_nd_kernel(const scalar_t* __restrict__ src,
       offset += 2 * k * in_stride[d];
     }
 
+    using acc = acc_t<scalar_t>;
     const scalar_t* base = src + lane * in_lane + offset;
-    scalar_t values[8];
+    acc values[8];
     for (int64_t c = 0; c < corners; ++c) {
       int64_t corner = 0;
       for (int64_t d = 0; d < dimensions; ++d) {
@@ -46,15 +47,15 @@ __global__ void haar_nd_kernel(const scalar_t* __restrict__ src,
           corner += in_stride[d];
         }
       }
-      values[c] = base[corner];
+      values[c] = static_cast<acc>(base[corner]);
     }
 
     for (int64_t d = 0; d < dimensions; ++d) {
       const int64_t bit = int64_t{1} << (dimensions - 1 - d);
       for (int64_t c = 0; c < corners; ++c) {
         if ((c & bit) == 0) {
-          const scalar_t low = values[c];
-          const scalar_t high = values[c | bit];
+          const acc low = values[c];
+          const acc high = values[c | bit];
           values[c] = low + high;
           values[c | bit] = low - high;
         }
@@ -65,7 +66,7 @@ __global__ void haar_nd_kernel(const scalar_t* __restrict__ src,
     const int64_t batch = lane / groups;
     for (int64_t b = 0; b < corners; ++b) {
       dst[(batch * channels + group * corners + b) * out_lane + tile] =
-          gain * values[b];
+          static_cast<scalar_t>(static_cast<acc>(gain) * values[b]);
     }
   }
 }

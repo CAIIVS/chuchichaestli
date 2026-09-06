@@ -35,34 +35,36 @@ __global__ void dwt_axis_kernel(
     const int64_t last = 2 * k + offset;
     const int64_t first = last - (filter_len - 1);
 
-    scalar_t low = 0;
-    scalar_t high = 0;
+    using acc = acc_t<scalar_t>;
+    acc low = acc(0);
+    acc high = acc(0);
     if (first >= 0 && last < length) {
       const scalar_t* base = lane + last * inner + q;
       for (int64_t f = 0; f < filter_len; ++f) {
-        const scalar_t value = base[-f * inner];
-        low += lo[f] * value;
-        high += hi[f] * value;
+        const acc value = static_cast<acc>(base[-f * inner]);
+        low += static_cast<acc>(lo[f]) * value;
+        high += static_cast<acc>(hi[f]) * value;
       }
     } else {
-      const scalar_t edge_lo = lane[q];
-      const scalar_t edge_hi = lane[(length - 1) * inner + q];
+      const acc edge_lo = static_cast<acc>(lane[q]);
+      const acc edge_hi = static_cast<acc>(lane[(length - 1) * inner + q]);
       for (int64_t f = 0; f < filter_len; ++f) {
         const PadRef ref = pad_resolve(last - f, length, mode);
-        const scalar_t value = static_cast<scalar_t>(ref.sign) *
-                                   lane[ref.index * inner + q] +
-                               static_cast<scalar_t>(ref.lo) * edge_lo +
-                               static_cast<scalar_t>(ref.hi) * edge_hi;
-        low += lo[f] * value;
-        high += hi[f] * value;
+        const acc value = static_cast<acc>(ref.sign) *
+                              static_cast<acc>(lane[ref.index * inner + q]) +
+                          static_cast<acc>(ref.lo) * edge_lo +
+                          static_cast<acc>(ref.hi) * edge_hi;
+        low += static_cast<acc>(lo[f]) * value;
+        high += static_cast<acc>(hi[f]) * value;
       }
     }
 
     scalar_t* out_low =
         dst + ((batch * (2 * groups) + 2 * group) * per_group + pre) *
                   out_length * inner;
-    out_low[k * inner + q] = low;
-    out_low[per_group * out_length * inner + k * inner + q] = high;
+    out_low[k * inner + q] = static_cast<scalar_t>(low);
+    out_low[per_group * out_length * inner + k * inner + q] =
+        static_cast<scalar_t>(high);
   }
 }
 

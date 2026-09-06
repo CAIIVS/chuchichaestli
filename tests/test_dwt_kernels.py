@@ -89,6 +89,37 @@ class TestAgreement:
                 rtol=tol,
             )
 
+    @needs_gpu
+    @pytest.mark.parametrize(
+        "dtype,tol",
+        [
+            (torch.float64, 1e-12),
+            (torch.float32, 1e-5),
+            (torch.float16, 2e-2),
+            (torch.bfloat16, 1e-1),
+            (torch.complex64, 1e-5),
+            (torch.complex128, 1e-12),
+        ],
+    )
+    def test_every_dtype_agrees_on_the_gpu(self, dtype, tol, monkeypatch):
+        """Test that the device does not narrow the types the kernels serve."""
+        device = torch.device("cuda")
+        if not _ext.kernels_available(device):
+            pytest.skip("the extension carries no GPU kernels")
+        assert _ext.kernels_available(device, dtype)
+        x = torch.randn(2, 3, 16, 16, dtype=torch.float64).to(dtype).to(device)
+        compiled = dwtn(x, "db2", "symmetric", (-2, -1))
+        monkeypatch.setattr(_ext, "USE_CUSTOM_KERNELS", False)
+        fallback = dwtn(x, "db2", "symmetric", (-2, -1))
+        for key in subband_keys(2):
+            assert compiled[key].dtype == dtype
+            assert torch.allclose(
+                compiled[key].to(torch.complex128),
+                fallback[key].to(torch.complex128),
+                atol=tol,
+                rtol=tol,
+            )
+
     def test_an_exact_dtype_falls_back(self):
         """Test that a type the kernels cannot serve is left to torch."""
         assert not _ext.kernels_available(torch.device("cpu"), torch.int32)
