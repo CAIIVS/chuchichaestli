@@ -66,8 +66,8 @@ entirely.
 The native kernels are benchmarked against the pure-torch path and against
 external packages, on both CPU and GPU, with every backend
 checked against a reference before it is timed; see
-[Benchmarks](https://github.com/CAIIVS/chuchichaestli/blob/main/docs/benchmarks.md#dwt)
-for how to run them and benchmark results.
+[Benchmarks](https://caiivs.github.io/chuchichaestli/benchmarks/#dwt)
+for how to run them, the measured results, and the profiler tracing.
 
 
 ## Development
