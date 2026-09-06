@@ -401,7 +401,7 @@ def load_rows(paths: Sequence[str]) -> list[dict]:
         if not isinstance(rows, list):
             raise SystemExit(f"{path} does not hold a list of result rows")
         for row in rows:
-            if not isinstance(row, dict) or "backend" not in row or "case" not in row:
+            if not isinstance(row, dict) or not {"backend", "case", "status"} <= row.keys():
                 raise SystemExit(f"{path} holds something other than result rows")
             # the device is what separates rows written before `label` and
             # `threads` were recorded, where both fall back to None
