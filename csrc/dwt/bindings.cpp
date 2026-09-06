@@ -208,4 +208,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("haar_wavedec", &c3li::haar_wavedec,
         "Fused multi-level Haar decomposition");
   m.def("has_gpu", &c3li::has_gpu, "Whether GPU kernels were compiled in");
+  m.def("supported_dtypes", &c3li::supported_dtypes,
+        "The tensor types the kernels were instantiated for");
 }

@@ -5,6 +5,8 @@
 
 import torch
 
+from functools import lru_cache
+
 from chuchichaestli.dwt.modes import (
     MODE_TO_CODE,
     ExtensionModeTypes,
@@ -17,7 +19,7 @@ _HAAR = Wavelet.from_name("haar")
 
 
 __all__ = [
-    "KERNEL_DTYPES",
+    "kernel_dtypes",
     "USE_CUSTOM_KERNELS",
     "kernels_available",
     "kernels_built",
@@ -57,16 +59,16 @@ def kernels_built() -> bool:
     return _dwt_kernels is not None
 
 
-KERNEL_DTYPES: frozenset[torch.dtype] = frozenset(
-    {
-        torch.float16,
-        torch.bfloat16,
-        torch.float32,
-        torch.float64,
-        torch.complex64,
-        torch.complex128,
-    }
-)
+@lru_cache(maxsize=1)
+def kernel_dtypes() -> frozenset[torch.dtype]:
+    """The tensor types the compiled kernels were instantiated for.
+
+    Read from the extension rather than restated here, so the fallback cannot
+    disagree with what the kernels actually dispatch over.
+    """
+    if not kernels_built():
+        return frozenset()
+    return frozenset(_dwt_kernels.supported_dtypes())
 
 
 def kernels_available(
@@ -81,7 +83,7 @@ def kernels_available(
     """
     if not (USE_CUSTOM_KERNELS and kernels_built()):
         return False
-    if dtype is not None and dtype not in KERNEL_DTYPES:
+    if dtype is not None and dtype not in kernel_dtypes():
         return False
     if device is not None and not isinstance(device, torch.device):
         device = torch.device(device)

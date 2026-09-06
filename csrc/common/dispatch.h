@@ -8,6 +8,7 @@
 #include <ATen/OpMathType.h>
 
 #include <type_traits>
+#include <vector>
 
 #define C3LI_CHECK_CONTIGUOUS(x)                                              \
   TORCH_CHECK((x).is_contiguous(), #x " must be contiguous")
@@ -18,11 +19,21 @@
 
 // Dispatch over every inexact type the transform supports. Reduced precision
 // and complex ride along; `c3li::acc_t` is what each accumulates in.
+//
+// `c3li::supported_dtypes` below must list exactly what this instantiates. It
+// is what the Python side reads to decide when to fall back, and a test holds
+// the two together.
 #define C3LI_DISPATCH_FLOATING(TYPE, NAME, ...)                               \
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::kHalf, at::kBFloat16, TYPE, \
                                               NAME, __VA_ARGS__)
 
 namespace c3li {
+
+// The types `C3LI_DISPATCH_FLOATING` instantiates, in the order it names them.
+inline std::vector<at::ScalarType> supported_dtypes() {
+  return {at::kFloat,        at::kDouble,       at::kComplexFloat,
+          at::kComplexDouble, at::kHalf,        at::kBFloat16};
+}
 
 // What a tap sum is accumulated in: the type itself where that loses nothing,
 // and the widened one where it would.

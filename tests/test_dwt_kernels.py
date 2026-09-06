@@ -120,6 +120,28 @@ class TestAgreement:
                 rtol=tol,
             )
 
+    @needs_kernels
+    def test_the_reported_types_are_the_ones_that_work(self):
+        """Test that the fallback gate matches what the kernels really dispatch."""
+        served = set()
+        for dtype in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+        ):
+            x = torch.zeros(1, 1, 8, 8).to(dtype)
+            filt = torch.zeros(2).to(dtype)
+            try:
+                _ext._dwt_kernels.dwt_axis(x, filt, filt, 0, 0, 0, 4)
+            except (NotImplementedError, RuntimeError):
+                continue
+            served.add(dtype)
+        assert served == _ext.kernel_dtypes()
+
     def test_an_exact_dtype_falls_back(self):
         """Test that a type the kernels cannot serve is left to torch."""
         assert not _ext.kernels_available(torch.device("cpu"), torch.int32)
