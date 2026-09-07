@@ -284,11 +284,11 @@ torch::Tensor idwt_nd_cpu(const torch::Tensor& coeffs,
       for (int64_t o = begin; o < end; ++o) {
         const int64_t group = o % groups;
         const int64_t b = o / groups;
-        // the subbands of this group sit `groups` apart, the order the
+        // a group's own subbands sit side by side, the order the
         // decomposition stacked them in
         for (int64_t c = 0; c < corners; ++c) {
           const scalar_t* plane =
-              src + ((b * bands) + c * groups + group) * coeff_lane;
+              src + ((b * bands) + group * corners + c) * coeff_lane;
           std::copy(plane, plane + coeff_lane, front.data() + c * coeff_lane);
         }
 

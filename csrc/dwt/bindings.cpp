@@ -186,17 +186,7 @@ torch::Tensor idwt_nd(const torch::Tensor& coeffs, const torch::Tensor& rec_lo,
               "a trim and a length are needed for every spatial axis");
 #ifdef C3LI_WITH_GPU
   if (coeffs.is_cuda()) {
-    // The subbands arrive stacked whole, one after another; a per-axis kernel
-    // wants each group's own corners side by side instead.
-    const int64_t corners = int64_t{1} << dimensions;
-    TORCH_CHECK(coeffs.size(1) % corners == 0,
-                "every group needs one channel per subband");
-    const int64_t groups = coeffs.size(1) / corners;
-    auto sizes = coeffs.sizes().vec();
-    std::vector<int64_t> split = {sizes[0], corners, groups};
-    split.insert(split.end(), sizes.begin() + 2, sizes.end());
-    torch::Tensor bands =
-        coeffs.reshape(split).transpose(1, 2).reshape(sizes).contiguous();
+    torch::Tensor bands = coeffs;
     for (int64_t axis = dimensions - 1; axis >= 0; --axis) {
       bands = idwt_axis_cuda(bands, rec_lo, rec_hi, axis, mode, trims[axis],
                              out_lengths[axis], axis == 0 ? out : c10::nullopt);
