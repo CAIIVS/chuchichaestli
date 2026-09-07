@@ -26,6 +26,8 @@ __all__ = [
     "dwt_axis",
     "haar_nd",
     "idwt_axis",
+    "idwt_nd",
+    "idwt_nd_applies",
     "idwt_kernel_applies",
     "fused_haar_applies",
     "haar_wavedec",
@@ -199,6 +201,59 @@ def dwt_axis(
     )
 
 
+def _axis_adjoint(
+    grad_out: torch.Tensor,
+    rec_lo: torch.Tensor,
+    rec_hi: torch.Tensor,
+    axis: int,
+    mode: ExtensionModeTypes,
+    trim: int,
+    out_length: int,
+    coeff_len: int,
+    groups: int,
+) -> torch.Tensor:
+    """Transpose of a reconstruction along one axis.
+
+    The reconstruction trims what its taps spill past the ends, so the adjoint
+    puts the gradient back where it was taken from and correlates the band pair
+    out of it again.
+
+    Args:
+        grad_out: Gradient with respect to the reconstructed tensor.
+        rec_lo: Reconstruction low-pass filter.
+        rec_hi: Reconstruction high-pass filter.
+        axis: Spatial axis that was reconstructed.
+        mode: Signal extension mode the decomposition used.
+        trim: Number of samples the reconstruction led by.
+        out_length: Length the reconstruction was trimmed to.
+        coeff_len: Length of the axis before it was reconstructed.
+        groups: Number of band pairs the reconstruction merged.
+    """
+    from chuchichaestli.dwt.functional import _bank, DIM_TO_CONV_FN_MAP
+
+    dimensions = grad_out.ndim - 2
+    filter_len = rec_lo.numel()
+    full = 2 * (coeff_len - 1) + filter_len
+    pad = [0] * (2 * dimensions)
+    back = 2 * (dimensions - 1 - axis)
+    if mode == "periodization":
+        even = 2 * coeff_len
+        pad[back + 1] = even - grad_out.shape[2 + axis]
+        spread = torch.nn.functional.pad(grad_out, pad)
+        index = (torch.arange(full, device=grad_out.device) - trim) % even
+        padded = spread.index_select(2 + axis, index)
+    else:
+        pad[back] = trim
+        pad[back + 1] = full - trim - out_length
+        padded = torch.nn.functional.pad(grad_out, pad)
+    weight = _bank(rec_lo, rec_hi, groups, axis, dimensions)
+    stride = [1] * dimensions
+    stride[axis] = 2
+    return DIM_TO_CONV_FN_MAP[dimensions](
+        padded.contiguous(), weight, stride=stride, groups=groups
+    )
+
+
 class _IdwtAxis(torch.autograd.Function):
     """Wavelet reconstruction of one axis, computed by the compiled kernel.
 
@@ -231,29 +286,8 @@ class _IdwtAxis(torch.autograd.Function):
         """Apply the adjoint of the reconstruction."""
         rec_lo, rec_hi = ctx.saved_tensors
         axis, mode, trim, out_length, groups, coeff_len = ctx.config
-        from chuchichaestli.dwt.functional import _bank, DIM_TO_CONV_FN_MAP
-
-        dimensions = grad_out.ndim - 2
-        filter_len = rec_lo.numel()
-        full = 2 * (coeff_len - 1) + filter_len
-        pad = [0] * (2 * dimensions)
-        back = 2 * (dimensions - 1 - axis)
-        if mode == "periodization":
-            even = 2 * coeff_len
-            pad[back + 1] = even - grad_out.shape[2 + axis]
-            spread = torch.nn.functional.pad(grad_out, pad)
-            index = (torch.arange(full, device=grad_out.device) - trim) % even
-            padded = spread.index_select(2 + axis, index)
-        else:
-            pad[back] = trim
-            pad[back + 1] = full - trim - out_length
-            padded = torch.nn.functional.pad(grad_out, pad)
-        weight = _bank(rec_lo, rec_hi, groups, axis, dimensions)
-        stride = [1] * dimensions
-        stride[axis] = 2
-        grad = DIM_TO_CONV_FN_MAP[dimensions](
-            padded.contiguous(), weight, stride=stride, groups=groups
-        )
+        grad = _axis_adjoint(grad_out, rec_lo, rec_hi, axis, mode, trim,
+                             out_length, coeff_len, groups)
         return grad, None, None, None, None, None, None
 
 
@@ -287,6 +321,93 @@ def idwt_axis(
             out_length,
         )
     return _IdwtAxis.apply(coeffs, rec_lo, rec_hi, axis, mode, trim, out_length)
+
+
+class _IdwtNd(torch.autograd.Function):
+    """Reconstruction over every axis at once, computed by the compiled kernel.
+
+    The transform is linear, so the backward pass is its adjoint, written with
+    differentiable operations so that a second derivative works too.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        coeffs: torch.Tensor,
+        rec_lo: torch.Tensor,
+        rec_hi: torch.Tensor,
+        mode: ExtensionModeTypes,
+        trims: tuple[int, ...],
+        out_lengths: tuple[int, ...],
+    ) -> torch.Tensor:
+        """Run the kernel and remember what the adjoint needs."""
+        ctx.save_for_backward(rec_lo, rec_hi)
+        ctx.config = (mode, tuple(trims), tuple(out_lengths),
+                      tuple(coeffs.shape[2:]))
+        return _dwt_kernels.idwt_nd(
+            coeffs.contiguous(), rec_lo, rec_hi, MODE_TO_CODE[mode],
+            list(trims), list(out_lengths),
+        )
+
+    @staticmethod
+    def backward(ctx, grad_out: torch.Tensor):
+        """Undo the axes in the order the reconstruction merged them."""
+        rec_lo, rec_hi = ctx.saved_tensors
+        mode, trims, out_lengths, coeff_shape = ctx.config
+        grad = grad_out
+        # the reconstruction folded the last axis first, so the adjoint splits
+        # the first axis first and doubles the bands as it goes
+        for axis in range(len(out_lengths)):
+            grad = _axis_adjoint(grad, rec_lo, rec_hi, axis, mode, trims[axis],
+                                 out_lengths[axis], coeff_shape[axis],
+                                 1 << axis)
+        return grad, None, None, None, None, None
+
+
+def idwt_nd(
+    coeffs: torch.Tensor,
+    rec_lo: torch.Tensor,
+    rec_hi: torch.Tensor,
+    mode: ExtensionModeTypes,
+    trims: tuple[int, ...],
+    out_lengths: tuple[int, ...],
+) -> torch.Tensor:
+    """Reconstruction over every spatial axis, through the compiled kernel.
+
+    The autograd machinery costs more than the kernel on a small transform,
+    so it is only entered when there is a gradient to record.
+
+    Args:
+        coeffs: Every subband, shaped `(batch, 2**d * groups, spatial...)`.
+        rec_lo: Reconstruction low-pass filter.
+        rec_hi: Reconstruction high-pass filter.
+        mode: Signal extension mode the decomposition used.
+        trims: Number of samples the reconstruction leads by, per axis.
+        out_lengths: Length each reconstructed axis is trimmed to.
+    """
+    _require_constant_filters(rec_lo, rec_hi)
+    if not (torch.is_grad_enabled() and coeffs.requires_grad):
+        return _dwt_kernels.idwt_nd(
+            coeffs.contiguous(), rec_lo, rec_hi, MODE_TO_CODE[mode],
+            list(trims), list(out_lengths),
+        )
+    return _IdwtNd.apply(coeffs, rec_lo, rec_hi, mode, trims, out_lengths)
+
+
+def idwt_nd_applies(device: torch.device, dimensions: int, lanes: int) -> bool:
+    """Whether the fused reconstruction beats reconstructing an axis at a time.
+
+    It trades a pass over memory per axis for one copy of each lane, which is
+    worth it while a lane is large and there are not many of them. Measured on
+    the wavelet workloads this library ships: one and two axes win from a few
+    lanes up to a couple of hundred, three axes and wider batches do not.
+
+    Args:
+        device: Device the reconstruction runs on.
+        dimensions: Number of axes being reconstructed.
+        lanes: Number of independent transforms in the batch.
+    """
+    return device.type == "cpu" and dimensions <= 2 and lanes <= 256
 
 
 def idwt_kernel_applies(device: torch.device) -> bool:

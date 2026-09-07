@@ -416,6 +416,17 @@ def idwtn(
     _, _, rec_lo, rec_hi = wavelet.filters(h.dtype, h.device)
 
     sizes = _reconstruction_sizes(h.shape[2:], wavelet.filter_len, mode, output_size)
+    from chuchichaestli.dwt import _ext
+
+    if _ext.idwt_nd_applies(
+        h.device, len(axes), h.shape[0]
+    ) and _ext.kernels_available(h.device, h.dtype):
+        filter_len = wavelet.filter_len
+        trim = filter_len // 2 - 1 if mode == "periodization" else filter_len - 2
+        fused = _ext.idwt_nd(
+            h, rec_lo, rec_hi, mode, (trim,) * len(axes), tuple(sizes)
+        )
+        return _unfold(fused[:, 0], lead, perm)
     # Decomposition appends one character per axis, so the axis transformed last
     # varies fastest and its band pairs are adjacent.
     for axis in reversed(range(len(axes))):

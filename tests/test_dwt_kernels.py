@@ -180,6 +180,46 @@ class TestAgreement:
             grads.append(x.grad.detach().clone())
         assert torch.allclose(grads[0], grads[1], atol=1e-10)
 
+    @needs_kernels
+    @pytest.mark.parametrize("name", WAVELETS)
+    @pytest.mark.parametrize("mode", MODES)
+    def test_the_fused_reconstruction_matches_an_axis_at_a_time(
+        self, name, mode, monkeypatch
+    ):
+        """Test the fused inverse against the per-axis path it stands in for."""
+        x = torch.randn(2, 3, 16, 16, dtype=torch.float64)
+        bands = dwtn(x, name, mode, (-2, -1))
+        fused = idwtn(bands, name, mode, (-2, -1), output_size=(16, 16))
+        monkeypatch.setattr(_ext, "USE_CUSTOM_KERNELS", False)
+        per_axis = idwtn(bands, name, mode, (-2, -1), output_size=(16, 16))
+        assert torch.allclose(fused, per_axis, atol=1e-11)
+
+    @needs_kernels
+    @pytest.mark.parametrize("name", ["haar", "db2", "bior2.2"])
+    @pytest.mark.parametrize("mode", ["zero", "symmetric", "periodization"])
+    def test_the_fused_reconstruction_carries_a_gradient(
+        self, name, mode, monkeypatch
+    ):
+        """Test that the fused inverse agrees with torch on gradients."""
+        base = torch.randn(2, 3, 16, 16, dtype=torch.float64)
+        grads = []
+        for use in (False, True):
+            monkeypatch.setattr(_ext, "USE_CUSTOM_KERNELS", use)
+            x = base.clone().requires_grad_(True)
+            out = idwtn(dwtn(x, name, mode, (-2, -1)), name, mode, (-2, -1),
+                        output_size=(16, 16))
+            (out**2).sum().backward()
+            grads.append(x.grad.detach().clone())
+        assert torch.allclose(grads[0], grads[1], atol=1e-10)
+
+    def test_the_fused_reconstruction_is_declined_where_it_loses(self):
+        """Test the shapes the fused inverse is not used for."""
+        cpu = torch.device("cpu")
+        assert _ext.idwt_nd_applies(cpu, 2, 24)
+        assert not _ext.idwt_nd_applies(cpu, 2, 512)
+        assert not _ext.idwt_nd_applies(cpu, 3, 24)
+        assert not _ext.idwt_nd_applies(torch.device("cuda"), 2, 24)
+
     def test_the_host_keeps_the_transposed_convolution(self):
         """Test that the inverse kernel is not used where it loses to torch."""
         assert not _ext.idwt_kernel_applies(torch.device("cpu"))
