@@ -418,9 +418,9 @@ def idwtn(
     sizes = _reconstruction_sizes(h.shape[2:], wavelet.filter_len, mode, output_size)
     from chuchichaestli.dwt import _ext
 
-    if _ext.idwt_nd_applies(
-        h.device, len(axes), h.shape[0]
-    ) and _ext.kernels_available(h.device, h.dtype):
+    if _ext.idwt_nd_applies(h.device, len(axes)) and _ext.kernels_available(
+        h.device, h.dtype
+    ):
         filter_len = wavelet.filter_len
         trim = filter_len // 2 - 1 if mode == "periodization" else filter_len - 2
         fused = _ext.idwt_nd(

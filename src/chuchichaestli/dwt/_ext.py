@@ -394,21 +394,20 @@ def idwt_nd(
     return _IdwtNd.apply(coeffs, rec_lo, rec_hi, mode, trims, out_lengths)
 
 
-def idwt_nd_applies(device: torch.device, dimensions: int, lanes: int) -> bool:
-    """Whether the fused reconstruction beats reconstructing an axis at a time.
+def idwt_nd_applies(device: torch.device, dimensions: int) -> bool:
+    """Whether the fused reconstruction serves a reconstruction on this device.
 
-    It trades a pass over memory per axis for one copy of each lane, which is
-    worth it while there are not many lanes. Paired measurement over the
-    workloads this library ships puts every rank ahead once the batch is
-    narrow; past a couple of hundred lanes with a long filter the two swap
-    places often enough that the transposed convolution is the safer answer.
+    It replaces a pass over memory per axis with one copy of each lane, which
+    is ahead over the workloads this library ships and, more to the point,
+    steady: its run-to-run spread is a few percent where the transposed
+    convolution swings by half. A shape where the two trade places is worth
+    the occasional loss for a time that can be relied on.
 
     Args:
         device: Device the reconstruction runs on.
         dimensions: Number of axes being reconstructed.
-        lanes: Number of independent transforms in the batch.
     """
-    return device.type == "cpu" and 1 <= dimensions <= 3 and lanes <= 256
+    return device.type == "cpu" and 1 <= dimensions <= 3
 
 
 def idwt_kernel_applies(device: torch.device) -> bool:

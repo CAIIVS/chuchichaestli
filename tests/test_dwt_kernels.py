@@ -212,13 +212,15 @@ class TestAgreement:
             grads.append(x.grad.detach().clone())
         assert torch.allclose(grads[0], grads[1], atol=1e-10)
 
-    def test_the_fused_reconstruction_is_declined_where_it_loses(self):
-        """Test the shapes the fused inverse is not used for."""
-        cpu = torch.device("cpu")
-        assert _ext.idwt_nd_applies(cpu, 2, 24)
-        assert _ext.idwt_nd_applies(cpu, 3, 24)
-        assert not _ext.idwt_nd_applies(cpu, 2, 512)
-        assert not _ext.idwt_nd_applies(torch.device("cuda"), 2, 24)
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_the_host_reconstructs_through_the_fused_kernel(self, dimensions):
+        """Test that every rank the kernel serves is taken on the host."""
+        assert _ext.idwt_nd_applies(torch.device("cpu"), dimensions)
+
+    def test_the_fused_reconstruction_is_declined_off_the_host(self):
+        """Test the calls the fused inverse is not used for."""
+        assert not _ext.idwt_nd_applies(torch.device("cuda"), 2)
+        assert not _ext.idwt_nd_applies(torch.device("cpu"), 4)
 
     def test_the_host_keeps_the_transposed_convolution(self):
         """Test that the inverse kernel is not used where it loses to torch."""
