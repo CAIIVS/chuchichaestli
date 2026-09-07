@@ -75,10 +75,18 @@ void idwt_plane(const scalar_t* low, const scalar_t* high, scalar_t* out,
     int64_t t = interior_begin;
     if constexpr (vectorizable<scalar_t>) {
       // consecutive outputs of one parity read consecutive coefficients, so
-      // each parity loads whole vectors and the two interleave
-      for (; t + 2 * width <= interior_end; t += 2 * width) {
+      // each parity loads whole vectors and the two interleave. A short axis
+      // is mostly tail, so the last block is masked rather than left to the
+      // scalar loop.
+      while (t < interior_end) {
+        const int64_t rest = std::min<int64_t>(2 * width, interior_end - t);
         Vec part[2];
         for (int64_t r = 0; r < 2; ++r) {
+          const int64_t count = (rest - r + 1) / 2;
+          if (count <= 0) {
+            part[r] = Vec(scalar_t(0));
+            continue;
+          }
           const int64_t s = t + r + trim;
           const int64_t p = s & 1;
           const int64_t first = (s - p) / 2;
@@ -86,16 +94,19 @@ void idwt_plane(const scalar_t* low, const scalar_t* high, scalar_t* out,
           Vec sum_hi(scalar_t(0));
           for (int64_t j = 0; j < taps[p]; ++j) {
             const int64_t k = first - j;
-            sum_lo = at::vec::fmadd(Vec(lo[2 * j + p]), Vec::loadu(low + k),
-                                    sum_lo);
-            sum_hi = at::vec::fmadd(Vec(hi[2 * j + p]), Vec::loadu(high + k),
-                                    sum_hi);
+            sum_lo = at::vec::fmadd(Vec(lo[2 * j + p]),
+                                    Vec::loadu(low + k, count), sum_lo);
+            sum_hi = at::vec::fmadd(Vec(hi[2 * j + p]),
+                                    Vec::loadu(high + k, count), sum_hi);
           }
           part[r] = sum_lo + sum_hi;
         }
         const auto woven = at::vec::interleave2(part[0], part[1]);
-        woven.first.store(out + t);
-        woven.second.store(out + t + width);
+        woven.first.store(out + t, std::min<int64_t>(width, rest));
+        if (rest > width) {
+          woven.second.store(out + t + width, rest - width);
+        }
+        t += rest;
       }
     }
     for (; t < interior_end; ++t) {
