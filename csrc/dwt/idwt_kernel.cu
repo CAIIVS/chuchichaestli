@@ -67,7 +67,8 @@ __global__ void idwt_axis_kernel(
 torch::Tensor idwt_axis_cuda(const torch::Tensor& coeffs,
                              const torch::Tensor& rec_lo,
                              const torch::Tensor& rec_hi, int64_t axis,
-                             int64_t mode, int64_t trim, int64_t out_length) {
+                             int64_t mode, int64_t trim, int64_t out_length,
+                             c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(coeffs);
   C3LI_CHECK_FLOATING(coeffs);
   const at::cuda::CUDAGuard guard(coeffs.device());
@@ -80,7 +81,7 @@ torch::Tensor idwt_axis_cuda(const torch::Tensor& coeffs,
   auto sizes = coeffs.sizes().vec();
   sizes[1] = groups;
   sizes[2 + axis] = out_length;
-  torch::Tensor out = torch::empty(sizes, coeffs.options());
+  torch::Tensor out = resolve_out(out_opt, sizes, coeffs);
 
   const int64_t per_group = layout.outer / (coeffs.size(0) * bands);
   const int64_t total =

@@ -45,6 +45,29 @@ using acc_t = at::opmath_type<scalar_t>;
 template <typename scalar_t>
 inline constexpr bool vectorizable = std::is_same_v<scalar_t, acc_t<scalar_t>>;
 
+// Storage for a transform's result: the caller's, where one was handed in and
+// fits, and a fresh tensor otherwise.
+//
+// A caller running one axis after another hands the same storage back every
+// time; allocating per call would return freshly mapped pages, and faulting
+// them in can cost more than the transform.
+inline torch::Tensor resolve_out(const c10::optional<torch::Tensor>& out_opt,
+                                 const std::vector<int64_t>& sizes,
+                                 const torch::Tensor& like) {
+  if (!out_opt.has_value()) {
+    return torch::empty(sizes, like.options());
+  }
+  const torch::Tensor out = out_opt.value();
+  TORCH_CHECK(out.sizes().vec() == sizes,
+              "the output tensor does not have the shape the transform writes");
+  TORCH_CHECK(out.scalar_type() == like.scalar_type(),
+              "the output tensor does not have the type of the input");
+  TORCH_CHECK(out.device() == like.device(),
+              "the output tensor is not on the device the transform runs on");
+  C3LI_CHECK_CONTIGUOUS(out);
+  return out;
+}
+
 constexpr int kThreadsPerBlock = 256;
 
 // Number of blocks needed to cover `total` items.

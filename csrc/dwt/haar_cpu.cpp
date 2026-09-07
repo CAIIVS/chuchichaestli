@@ -19,7 +19,8 @@ namespace c3li {
 //
 // Band `b` of group `g` lands in channel `g * 2**d + b`, first axis most
 // significant, as the per-axis transform produces.
-torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
+torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale,
+                          c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(x);
   C3LI_CHECK_FLOATING(x);
 
@@ -35,7 +36,7 @@ torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale) {
     sizes[2 + d] = x.size(2 + d) / 2;
   }
   sizes[1] *= corners;
-  torch::Tensor out = torch::empty(sizes, x.options());
+  torch::Tensor out = resolve_out(out_opt, sizes, x);
 
   const int64_t lanes = x.size(0) * x.size(1);
   const int64_t groups = x.size(1);

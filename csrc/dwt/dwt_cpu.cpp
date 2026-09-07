@@ -280,17 +280,7 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
   // A caller that transforms one axis after another hands the same storage
   // back every time; allocating here instead would return freshly mapped
   // pages on every call, and faulting them in costs more than the transform.
-  torch::Tensor out;
-  if (out_opt.has_value()) {
-    out = out_opt.value();
-    TORCH_CHECK(out.sizes().vec() == sizes,
-                "the output tensor does not have the shape the transform writes");
-    TORCH_CHECK(out.scalar_type() == x.scalar_type(),
-                "the output tensor does not have the type of the input");
-    C3LI_CHECK_CONTIGUOUS(out);
-  } else {
-    out = torch::empty(sizes, x.options());
-  }
+  torch::Tensor out = resolve_out(out_opt, sizes, x);
 
   const int64_t groups = x.size(1);
   const int64_t per_group = layout.outer / (x.size(0) * groups);
@@ -353,17 +343,7 @@ torch::Tensor dwt_lowpass_axis_cpu(const torch::Tensor& x,
 
   auto sizes = x.sizes().vec();
   sizes[2 + axis] = out_length;
-  torch::Tensor out;
-  if (out_opt.has_value()) {
-    out = out_opt.value();
-    TORCH_CHECK(out.sizes().vec() == sizes,
-                "the output tensor does not have the shape the transform writes");
-    TORCH_CHECK(out.scalar_type() == x.scalar_type(),
-                "the output tensor does not have the type of the input");
-    C3LI_CHECK_CONTIGUOUS(out);
-  } else {
-    out = torch::empty(sizes, x.options());
-  }
+  torch::Tensor out = resolve_out(out_opt, sizes, x);
 
   C3LI_DISPATCH_FLOATING(x.scalar_type(), "dwt_lowpass_axis_cpu", [&] {
     const auto* src = x.data_ptr<scalar_t>();
@@ -399,7 +379,8 @@ torch::Tensor dwt_lowpass_axis_cpu(const torch::Tensor& x,
 torch::Tensor dwt_nd_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                          const torch::Tensor& dec_hi, int64_t mode,
                          const std::vector<int64_t>& pad_los,
-                         const std::vector<int64_t>& out_lengths) {
+                         const std::vector<int64_t>& out_lengths,
+                         c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(x);
   C3LI_CHECK_FLOATING(x);
   TORCH_CHECK(dec_lo.numel() == dec_hi.numel(),
@@ -427,7 +408,7 @@ torch::Tensor dwt_nd_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
   for (int64_t d = 0; d < dimensions; ++d) {
     sizes[2 + d] = out_lengths[d];
   }
-  torch::Tensor out = torch::empty(sizes, x.options());
+  torch::Tensor out = resolve_out(out_opt, sizes, x);
 
   // the widest a stage gets: axes already done are output length, the rest
   // are still input length

@@ -73,7 +73,8 @@ __global__ void haar_nd_kernel(const scalar_t* __restrict__ src,
 
 }  // namespace
 
-torch::Tensor haar_nd_cuda(const torch::Tensor& x, double scale) {
+torch::Tensor haar_nd_cuda(const torch::Tensor& x, double scale,
+                           c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(x);
   C3LI_CHECK_FLOATING(x);
   const at::cuda::CUDAGuard guard(x.device());
@@ -92,7 +93,7 @@ torch::Tensor haar_nd_cuda(const torch::Tensor& x, double scale) {
     tiles *= sizes[2 + d];
   }
   sizes[1] *= corners;
-  torch::Tensor out = torch::empty(sizes, x.options());
+  torch::Tensor out = resolve_out(out_opt, sizes, x);
 
   int64_t in_stride[3] = {1, 1, 1};
   int64_t out_stride[3] = {1, 1, 1};

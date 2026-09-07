@@ -23,7 +23,8 @@ torch::Tensor dwt_lift_axis_cpu(const torch::Tensor& x, int64_t axis,
                             const std::vector<std::vector<double>>& coeffs,
                             const std::vector<int64_t>& lows,
                             double approx_gain, int64_t approx_delay,
-                            double detail_gain, int64_t detail_delay) {
+                            double detail_gain, int64_t detail_delay,
+                            c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(x);
   C3LI_CHECK_FLOATING(x);
   TORCH_CHECK(on_detail.size() == coeffs.size() && coeffs.size() == lows.size(),
@@ -38,7 +39,7 @@ torch::Tensor dwt_lift_axis_cpu(const torch::Tensor& x, int64_t axis,
   auto sizes = x.sizes().vec();
   sizes[1] *= 2;
   sizes[2 + axis] = half;
-  torch::Tensor out = torch::empty(sizes, x.options());
+  torch::Tensor out = resolve_out(out_opt, sizes, x);
 
   const int64_t groups = x.size(1);
   const int64_t per_group = layout.outer / (x.size(0) * groups);

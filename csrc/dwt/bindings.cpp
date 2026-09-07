@@ -25,7 +25,8 @@ torch::Tensor dwt_lift_axis_cpu(
     const std::vector<int64_t>& on_detail,
     const std::vector<std::vector<double>>& coeffs,
     const std::vector<int64_t>& lows, double approx_gain, int64_t approx_delay,
-    double detail_gain, int64_t detail_delay);
+    double detail_gain, int64_t detail_delay,
+    c10::optional<torch::Tensor> out_opt);
 
 torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                            const torch::Tensor& dec_hi, int64_t axis,
@@ -41,7 +42,8 @@ torch::Tensor dwt_lowpass_axis_cpu(const torch::Tensor& x,
 torch::Tensor dwt_nd_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                          const torch::Tensor& dec_hi, int64_t mode,
                          const std::vector<int64_t>& pad_los,
-                         const std::vector<int64_t>& out_lengths);
+                         const std::vector<int64_t>& out_lengths,
+                         c10::optional<torch::Tensor> out_opt);
 
 torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
                             const torch::Tensor& rec_lo,
@@ -53,26 +55,32 @@ torch::Tensor idwt_nd_cpu(const torch::Tensor& coeffs,
                           const torch::Tensor& rec_lo,
                           const torch::Tensor& rec_hi, int64_t mode,
                           const std::vector<int64_t>& trims,
-                          const std::vector<int64_t>& out_lengths);
+                          const std::vector<int64_t>& out_lengths,
+                          c10::optional<torch::Tensor> out_opt);
 
-torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale);
+torch::Tensor haar_nd_cpu(const torch::Tensor& x, double scale,
+                          c10::optional<torch::Tensor> out_opt);
 
 #ifdef C3LI_WITH_GPU
 torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
                             const torch::Tensor& dec_hi, int64_t axis,
-                            int64_t mode, int64_t pad_lo, int64_t out_length);
+                            int64_t mode, int64_t pad_lo, int64_t out_length,
+                            c10::optional<torch::Tensor> out_opt);
 
 torch::Tensor idwt_axis_cuda(const torch::Tensor& coeffs,
                              const torch::Tensor& rec_lo,
                              const torch::Tensor& rec_hi, int64_t axis,
-                             int64_t mode, int64_t trim, int64_t out_length);
+                             int64_t mode, int64_t trim, int64_t out_length,
+                             c10::optional<torch::Tensor> out_opt);
 
 torch::Tensor dwt_lowpass_axis_cuda(const torch::Tensor& x,
                                     const torch::Tensor& dec_lo, int64_t axis,
                                     int64_t mode, int64_t pad_lo,
-                                    int64_t out_length);
+                                    int64_t out_length,
+                                    c10::optional<torch::Tensor> out_opt);
 
-torch::Tensor haar_nd_cuda(const torch::Tensor& x, double scale);
+torch::Tensor haar_nd_cuda(const torch::Tensor& x, double scale,
+                           c10::optional<torch::Tensor> out_opt);
 #endif
 
 // Split every band along one spatial axis, on whichever device the input is on.
@@ -83,9 +91,8 @@ torch::Tensor dwt_axis(const torch::Tensor& x, const torch::Tensor& dec_lo,
   RECORD_FUNCTION("c3li::dwt_axis", std::vector<c10::IValue>());
 #ifdef C3LI_WITH_GPU
   if (x.is_cuda()) {
-    TORCH_CHECK(!out.has_value(),
-                "the accelerator transform allocates its own output");
-    return dwt_axis_cuda(x, dec_lo, dec_hi, axis, mode, pad_lo, out_length);
+    return dwt_axis_cuda(x, dec_lo, dec_hi, axis, mode, pad_lo, out_length,
+                         out);
   }
 #endif
   return dwt_axis_cpu(x, dec_lo, dec_hi, axis, mode, pad_lo, out_length, out);
@@ -101,9 +108,8 @@ torch::Tensor dwt_lowpass_axis(const torch::Tensor& x,
   RECORD_FUNCTION("c3li::dwt_lowpass_axis", std::vector<c10::IValue>());
 #ifdef C3LI_WITH_GPU
   if (x.is_cuda()) {
-    TORCH_CHECK(!out.has_value(),
-                "the accelerator transform allocates its own output");
-    return dwt_lowpass_axis_cuda(x, dec_lo, axis, mode, pad_lo, out_length);
+    return dwt_lowpass_axis_cuda(x, dec_lo, axis, mode, pad_lo, out_length,
+                                 out);
   }
 #endif
   return dwt_lowpass_axis_cpu(x, dec_lo, axis, mode, pad_lo, out_length, out);
@@ -117,23 +123,23 @@ torch::Tensor idwt_axis(const torch::Tensor& coeffs, const torch::Tensor& rec_lo
   RECORD_FUNCTION("c3li::idwt_axis", std::vector<c10::IValue>());
 #ifdef C3LI_WITH_GPU
   if (coeffs.is_cuda()) {
-    TORCH_CHECK(!out.has_value(),
-                "the accelerator transform allocates its own output");
-    return idwt_axis_cuda(coeffs, rec_lo, rec_hi, axis, mode, trim, out_length);
+    return idwt_axis_cuda(coeffs, rec_lo, rec_hi, axis, mode, trim, out_length,
+                          out);
   }
 #endif
   return idwt_axis_cpu(coeffs, rec_lo, rec_hi, axis, mode, trim, out_length, out);
 }
 
 // Transform every spatial axis at once with the Haar wavelet.
-torch::Tensor haar_nd(const torch::Tensor& x, double scale) {
+torch::Tensor haar_nd(const torch::Tensor& x, double scale,
+                      c10::optional<torch::Tensor> out = c10::nullopt) {
   RECORD_FUNCTION("c3li::haar_nd", std::vector<c10::IValue>());
 #ifdef C3LI_WITH_GPU
   if (x.is_cuda()) {
-    return haar_nd_cuda(x, scale);
+    return haar_nd_cuda(x, scale, out);
   }
 #endif
-  return haar_nd_cpu(x, scale);
+  return haar_nd_cpu(x, scale, out);
 }
 
 // Split every band along every spatial axis, on whichever device the input is
@@ -142,7 +148,8 @@ torch::Tensor haar_nd(const torch::Tensor& x, double scale) {
 torch::Tensor dwt_nd(const torch::Tensor& x, const torch::Tensor& dec_lo,
                      const torch::Tensor& dec_hi, int64_t mode,
                      const std::vector<int64_t>& pad_los,
-                     const std::vector<int64_t>& out_lengths) {
+                     const std::vector<int64_t>& out_lengths,
+                     c10::optional<torch::Tensor> out = c10::nullopt) {
   RECORD_FUNCTION("c3li::dwt_nd", std::vector<c10::IValue>());
   const int64_t dimensions = x.dim() - 2;
   TORCH_CHECK(static_cast<int64_t>(pad_los.size()) == dimensions &&
@@ -150,15 +157,18 @@ torch::Tensor dwt_nd(const torch::Tensor& x, const torch::Tensor& dec_lo,
               "a padding and a length are needed for every spatial axis");
 #ifdef C3LI_WITH_GPU
   if (x.is_cuda()) {
+    // the axes run in turn, so the storage handed in takes the last result
+    // and the ones before it are the kernel's own
     torch::Tensor bands = x;
     for (int64_t axis = 0; axis < dimensions; ++axis) {
+      const bool last = axis + 1 == dimensions;
       bands = dwt_axis_cuda(bands, dec_lo, dec_hi, axis, mode, pad_los[axis],
-                            out_lengths[axis]);
+                            out_lengths[axis], last ? out : c10::nullopt);
     }
     return bands;
   }
 #endif
-  return dwt_nd_cpu(x, dec_lo, dec_hi, mode, pad_los, out_lengths);
+  return dwt_nd_cpu(x, dec_lo, dec_hi, mode, pad_los, out_lengths, out);
 }
 
 // Merge every band pair along every spatial axis, on whichever device the
@@ -167,7 +177,8 @@ torch::Tensor dwt_nd(const torch::Tensor& x, const torch::Tensor& dec_lo,
 torch::Tensor idwt_nd(const torch::Tensor& coeffs, const torch::Tensor& rec_lo,
                       const torch::Tensor& rec_hi, int64_t mode,
                       const std::vector<int64_t>& trims,
-                      const std::vector<int64_t>& out_lengths) {
+                      const std::vector<int64_t>& out_lengths,
+                      c10::optional<torch::Tensor> out = c10::nullopt) {
   RECORD_FUNCTION("c3li::idwt_nd", std::vector<c10::IValue>());
   const int64_t dimensions = coeffs.dim() - 2;
   TORCH_CHECK(static_cast<int64_t>(trims.size()) == dimensions &&
@@ -188,12 +199,13 @@ torch::Tensor idwt_nd(const torch::Tensor& coeffs, const torch::Tensor& rec_lo,
         coeffs.reshape(split).transpose(1, 2).reshape(sizes).contiguous();
     for (int64_t axis = dimensions - 1; axis >= 0; --axis) {
       bands = idwt_axis_cuda(bands, rec_lo, rec_hi, axis, mode, trims[axis],
-                             out_lengths[axis]);
+                             out_lengths[axis], axis == 0 ? out : c10::nullopt);
     }
     return bands;
   }
 #endif
-  return idwt_nd_cpu(coeffs, rec_lo, rec_hi, mode, trims, out_lengths);
+  return idwt_nd_cpu(coeffs, rec_lo, rec_hi, mode, trims, out_lengths,
+                     out);
 }
 
 // Lift the approximation band of every group out of `bands`, whose channels
@@ -284,7 +296,7 @@ std::vector<torch::Tensor> haar_wavedec(const torch::Tensor& x, int64_t levels,
   stacked.reserve(levels);
   torch::Tensor current = x;
   for (int64_t level = 0; level < levels; ++level) {
-    torch::Tensor bands = haar_nd(current, scale);
+    torch::Tensor bands = haar_nd(current, scale, c10::nullopt);
     stacked.push_back(bands);
     if (level + 1 < levels) {
       current = approximation(bands, groups, corners);
@@ -307,7 +319,11 @@ bool has_gpu() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.doc() = "Discrete wavelet transforms with CPU and GPU kernels";
   m.def("dwt_lift_axis", &c3li::dwt_lift_axis_cpu,
-        "Decomposition along one spatial axis by lifting");
+        "Decomposition along one spatial axis by lifting", py::arg("x"),
+        py::arg("axis"), py::arg("on_detail"), py::arg("coeffs"),
+        py::arg("lows"), py::arg("approx_gain"), py::arg("approx_delay"),
+        py::arg("detail_gain"), py::arg("detail_delay"),
+        py::arg("out") = py::none());
   m.def("dwt_axis", &c3li::dwt_axis, "Decomposition along one spatial axis",
         py::arg("x"), py::arg("dec_lo"), py::arg("dec_hi"), py::arg("axis"),
         py::arg("mode"), py::arg("pad_lo"), py::arg("out_length"),
@@ -316,7 +332,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         py::arg("coeffs"), py::arg("rec_lo"), py::arg("rec_hi"), py::arg("axis"),
         py::arg("mode"), py::arg("trim"), py::arg("out_length"),
         py::arg("out") = py::none());
-  m.def("haar_nd", &c3li::haar_nd, "Fused Haar decomposition over every axis");
+  m.def("haar_nd", &c3li::haar_nd, "Fused Haar decomposition over every axis",
+        py::arg("x"), py::arg("scale"), py::arg("out") = py::none());
   m.def("wavedec_axes", &c3li::wavedec_axes,
         "Fused multi-level decomposition over every axis");
   m.def("haar_wavedec", &c3li::haar_wavedec,
@@ -325,10 +342,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "Low-pass half of a decomposition along one spatial axis",
         py::arg("x"), py::arg("dec_lo"), py::arg("axis"), py::arg("mode"),
         py::arg("pad_lo"), py::arg("out_length"), py::arg("out") = py::none());
-  m.def("dwt_nd", &c3li::dwt_nd,
-        "Fused decomposition over every axis");
-  m.def("idwt_nd", &c3li::idwt_nd,
-        "Fused reconstruction over every axis");
+  m.def("dwt_nd", &c3li::dwt_nd, "Fused decomposition over every axis",
+        py::arg("x"), py::arg("dec_lo"), py::arg("dec_hi"), py::arg("mode"),
+        py::arg("pad_los"), py::arg("out_lengths"),
+        py::arg("out") = py::none());
+  m.def("idwt_nd", &c3li::idwt_nd, "Fused reconstruction over every axis",
+        py::arg("coeffs"), py::arg("rec_lo"), py::arg("rec_hi"),
+        py::arg("mode"), py::arg("trims"), py::arg("out_lengths"),
+        py::arg("out") = py::none());
   m.def("has_gpu", &c3li::has_gpu, "Whether GPU kernels were compiled in");
   m.def("supported_dtypes", &c3li::supported_dtypes,
         "The tensor types the kernels were instantiated for");

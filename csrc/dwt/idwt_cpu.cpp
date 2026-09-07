@@ -167,20 +167,7 @@ torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
   auto sizes = coeffs.sizes().vec();
   sizes[1] = groups;
   sizes[2 + axis] = out_length;
-  // As in the decomposition: a caller merging one axis after another hands the
-  // same storage back every time, and freshly mapped pages cost more to fault
-  // in than the merge costs to run.
-  torch::Tensor out;
-  if (out_opt.has_value()) {
-    out = out_opt.value();
-    TORCH_CHECK(out.sizes().vec() == sizes,
-                "the output tensor does not have the shape the merge writes");
-    TORCH_CHECK(out.scalar_type() == coeffs.scalar_type(),
-                "the output tensor does not have the type of the bands");
-    C3LI_CHECK_CONTIGUOUS(out);
-  } else {
-    out = torch::empty(sizes, coeffs.options());
-  }
+  torch::Tensor out = resolve_out(out_opt, sizes, coeffs);
 
   const int64_t per_group = layout.outer / (coeffs.size(0) * bands);
   const int64_t lanes = coeffs.size(0) * groups * per_group;
@@ -221,7 +208,8 @@ torch::Tensor idwt_nd_cpu(const torch::Tensor& coeffs,
                           const torch::Tensor& rec_lo,
                           const torch::Tensor& rec_hi, int64_t mode,
                           const std::vector<int64_t>& trims,
-                          const std::vector<int64_t>& out_lengths) {
+                          const std::vector<int64_t>& out_lengths,
+                          c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(coeffs);
   C3LI_CHECK_FLOATING(coeffs);
   const int64_t dimensions = static_cast<int64_t>(out_lengths.size());
@@ -251,7 +239,7 @@ torch::Tensor idwt_nd_cpu(const torch::Tensor& coeffs,
   for (int64_t d = 0; d < dimensions; ++d) {
     sizes[2 + d] = out_lengths[d];
   }
-  torch::Tensor out = torch::empty(sizes, coeffs.options());
+  torch::Tensor out = resolve_out(out_opt, sizes, coeffs);
 
   // the widest a stage gets: axes already done are output length, the rest
   // are still coefficient length

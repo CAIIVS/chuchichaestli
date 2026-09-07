@@ -81,7 +81,8 @@ __global__ void dwt_axis_kernel(
 
 torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
                             const torch::Tensor& dec_hi, int64_t axis,
-                            int64_t mode, int64_t pad_lo, int64_t out_length) {
+                            int64_t mode, int64_t pad_lo, int64_t out_length,
+                            c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(x);
   C3LI_CHECK_FLOATING(x);
   const at::cuda::CUDAGuard guard(x.device());
@@ -93,7 +94,7 @@ torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
   auto sizes = x.sizes().vec();
   sizes[1] *= 2;
   sizes[2 + axis] = out_length;
-  torch::Tensor out = torch::empty(sizes, x.options());
+  torch::Tensor out = resolve_out(out_opt, sizes, x);
 
   const int64_t groups = x.size(1);
   const int64_t per_group = layout.outer / (x.size(0) * groups);
@@ -122,7 +123,8 @@ torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
 torch::Tensor dwt_lowpass_axis_cuda(const torch::Tensor& x,
                                     const torch::Tensor& dec_lo, int64_t axis,
                                     int64_t mode, int64_t pad_lo,
-                                    int64_t out_length) {
+                                    int64_t out_length,
+                                    c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(x);
   C3LI_CHECK_FLOATING(x);
   const at::cuda::CUDAGuard guard(x.device());
@@ -133,7 +135,7 @@ torch::Tensor dwt_lowpass_axis_cuda(const torch::Tensor& x,
 
   auto sizes = x.sizes().vec();
   sizes[2 + axis] = out_length;
-  torch::Tensor out = torch::empty(sizes, x.options());
+  torch::Tensor out = resolve_out(out_opt, sizes, x);
 
   const int64_t groups = x.size(1);
   const int64_t per_group = layout.outer / (x.size(0) * groups);

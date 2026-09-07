@@ -645,3 +645,101 @@ class TestLowpassOnly:
         assert torch.allclose(
             device.cpu(), dwtn(x, name, "zero", axes)["a" * dimensions], atol=1e-5
         )
+
+
+def _every_kernel(device, dtype=torch.float32):
+    """Every kernel that writes one tensor, as `(name, call)` pairs.
+
+    A kernel added without somewhere to write goes on this list and fails the
+    tests below, rather than quietly keeping its own allocation.
+
+    Args:
+        device: Device to build the calls for.
+        dtype: Type to build the calls for.
+    """
+    from chuchichaestli.dwt.functional import dwtn, subband_keys
+
+    kernels = _ext._dwt_kernels
+    wave = wavelet("db2")
+    length, dims = 16, 2
+    trim = wave.filter_len - 2
+    out_length = (length + 2 * trim - wave.filter_len) // 2 + 1
+    dev = torch.device(device)
+    dec_lo, dec_hi, rec_lo, rec_hi = wave.filters(dtype, dev)
+    torch.manual_seed(0)
+    x = torch.randn(2, 3, *([length] * dims), dtype=dtype, device=dev)
+    coeffs = kernels.dwt_nd(
+        x, dec_lo, dec_hi, 0, [trim] * dims, [out_length] * dims, None
+    )
+    bands = dwtn(x, "db2", "zero", (2, 3))
+    stacked = torch.cat([bands[key] for key in subband_keys(dims)], dim=1)
+    lane = torch.randn(2, 3, length, dtype=dtype, device=dev)
+    pairs = [
+        ("dwt_axis", lambda o: kernels.dwt_axis(
+            x, dec_lo, dec_hi, 0, 0, trim, out_length, o)),
+        ("dwt_lowpass_axis", lambda o: kernels.dwt_lowpass_axis(
+            x, dec_lo, 0, 0, trim, out_length, o)),
+        ("dwt_nd", lambda o: kernels.dwt_nd(
+            x, dec_lo, dec_hi, 0, [trim] * dims, [out_length] * dims, o)),
+        ("haar_nd", lambda o: kernels.haar_nd(x, 2**-0.5, o)),
+        ("idwt_axis", lambda o: kernels.idwt_axis(
+            coeffs, rec_lo, rec_hi, 0, 0, trim, length, o)),
+        ("idwt_nd", lambda o: kernels.idwt_nd(
+            stacked, rec_lo, rec_hi, 0, [trim] * dims, [length] * dims, o)),
+    ]
+    if device == "cpu":
+        pairs.append(("dwt_lift_axis", lambda o: kernels.dwt_lift_axis(
+            lane, 0, [0], [[0.5]], [0], 1.0, 0, 1.0, 0, o)))
+    return pairs
+
+
+@needs_kernels
+class TestCallerOwnedStorage:
+    """Every kernel takes storage from the caller rather than making its own."""
+
+    @staticmethod
+    def _devices():
+        return ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+
+    def test_every_kernel_writes_into_the_buffer_it_is_given(self):
+        """Test that the result lands in the caller's tensor, unchanged."""
+        for device in self._devices():
+            for name, call in _every_kernel(device):
+                want = call(None)
+                buffer = torch.empty_like(want)
+                got = call(buffer)
+                assert got.data_ptr() == buffer.data_ptr(), name
+                assert torch.allclose(want, got, atol=1e-6), name
+
+    def test_a_buffer_of_the_wrong_shape_is_refused(self):
+        """Test that a mis-shaped buffer raises rather than being resized."""
+        for device in self._devices():
+            for name, call in _every_kernel(device):
+                want = call(None)
+                wrong = torch.empty(
+                    tuple(s + 1 for s in want.shape),
+                    dtype=want.dtype,
+                    device=want.device,
+                )
+                with pytest.raises(RuntimeError):
+                    call(wrong)
+
+    def test_a_buffer_of_the_wrong_type_is_refused(self):
+        """Test that a mis-typed buffer raises rather than being converted."""
+        for device in self._devices():
+            for name, call in _every_kernel(device):
+                want = call(None)
+                other = (
+                    torch.float64 if want.dtype == torch.float32
+                    else torch.float32
+                )
+                with pytest.raises(RuntimeError):
+                    call(torch.empty_like(want, dtype=other))
+
+    @needs_gpu
+    def test_a_buffer_on_the_other_device_is_refused(self):
+        """Test that storage the kernel cannot reach raises."""
+        for name, call in _every_kernel("cuda"):
+            want = call(None)
+            with pytest.raises(RuntimeError, match="device"):
+                call(torch.empty(want.shape, dtype=want.dtype, device="cpu"))

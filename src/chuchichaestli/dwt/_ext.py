@@ -217,7 +217,12 @@ def lift_axis_applies(
     )
 
 
-def lift_axis(x: torch.Tensor, wavelet: str | Wavelet, axis: int) -> torch.Tensor:
+def lift_axis(
+    x: torch.Tensor,
+    wavelet: str | Wavelet,
+    axis: int,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
     """Split every band along one spatial axis by lifting.
 
     Fewer multiplications than the convolution and no scratch buffer, at the
@@ -227,6 +232,7 @@ def lift_axis(x: torch.Tensor, wavelet: str | Wavelet, axis: int) -> torch.Tenso
         x: Bands so far, shaped `(batch, groups, spatial...)`.
         wavelet: Wavelet, by name or as a `Wavelet`.
         axis: Spatial axis to transform.
+        out: Storage to write into, when the caller keeps one across calls.
 
     Raises:
         RuntimeError: If the kernel does not serve this transform.
@@ -242,7 +248,7 @@ def lift_axis(x: torch.Tensor, wavelet: str | Wavelet, axis: int) -> torch.Tenso
     )
     return _dwt_kernels.dwt_lift_axis(
         x.contiguous(), axis, on_detail, coeffs, lows,
-        a_gain, a_delay, d_gain, d_delay,
+        a_gain, a_delay, d_gain, d_delay, out,
     )
 
 
@@ -499,6 +505,7 @@ def idwt_nd(
     mode: ExtensionModeTypes,
     trims: tuple[int, ...],
     out_lengths: tuple[int, ...],
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Reconstruction over every spatial axis, through the compiled kernel.
 
@@ -512,12 +519,14 @@ def idwt_nd(
         mode: Signal extension mode the decomposition used.
         trims: Number of samples the reconstruction leads by, per axis.
         out_lengths: Length each reconstructed axis is trimmed to.
+        out: Storage to write into, when the caller keeps one across calls;
+            only taken when nothing records a gradient.
     """
     _require_constant_filters(rec_lo, rec_hi)
     if not (torch.is_grad_enabled() and coeffs.requires_grad):
         return _dwt_kernels.idwt_nd(
             coeffs.contiguous(), rec_lo, rec_hi, MODE_TO_CODE[mode],
-            list(trims), list(out_lengths),
+            list(trims), list(out_lengths), out,
         )
     return _IdwtNd.apply(coeffs, rec_lo, rec_hi, mode, trims, out_lengths)
 
@@ -587,7 +596,9 @@ class _FusedHaar(torch.autograd.Function):
         return _HAAR_ADJOINT(grad_out, ctx.dimensions), None
 
 
-def haar_nd(x: torch.Tensor, dimensions: int) -> torch.Tensor:
+def haar_nd(
+    x: torch.Tensor, dimensions: int, out: torch.Tensor | None = None
+) -> torch.Tensor:
     """Haar decomposition over every spatial axis, through the compiled kernel.
 
     The autograd machinery costs more than the kernel on a small transform, so
@@ -596,9 +607,11 @@ def haar_nd(x: torch.Tensor, dimensions: int) -> torch.Tensor:
     Args:
         x: Input tensor, shaped `(batch, groups, spatial...)`.
         dimensions: Number of spatial axes.
+        out: Storage to write into, when the caller keeps one across calls;
+            only taken when nothing records a gradient.
     """
     if not (torch.is_grad_enabled() and x.requires_grad):
-        return _dwt_kernels.haar_nd(x.contiguous(), 2**-0.5)
+        return _dwt_kernels.haar_nd(x.contiguous(), 2**-0.5, out)
     return _FusedHaar.apply(x, dimensions)
 
 
