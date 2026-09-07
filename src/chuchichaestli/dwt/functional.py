@@ -16,8 +16,10 @@ from chuchichaestli.dwt.modes import ExtensionModeTypes, pad_signal
 from chuchichaestli.dwt.wavelet import Wavelet, wavelet as as_wavelet
 from chuchichaestli.models.maps import DIM_TO_CONV_FN_MAP, DIM_TO_CONVT_FN_MAP
 from chuchichaestli.utils import as_inexact
+from collections import OrderedDict
 from collections.abc import Sequence
 from functools import lru_cache
+from math import prod
 
 
 __all__ = [
@@ -368,7 +370,12 @@ _STACK_SLOT = -1
 def _scratch(
     slot: int, shape: tuple[int, ...], dtype: torch.dtype, device: torch.device
 ) -> torch.Tensor:
-    """Lend a tensor of this shape back on every call that asks for it.
+    """Lend storage of at least this size back on every call that asks for it.
+
+    One buffer per slot rather than one per shape, grown to the largest a
+    caller has asked that slot for and handed back as a view. A caller working
+    through many shapes keeps reusing it, where a buffer per shape would hold
+    only the last few and drop them just as they came round again.
 
     Held per thread, so two transforms running at once never share one.
 
@@ -382,14 +389,19 @@ def _scratch(
     """
     pool = getattr(_SCRATCH, "pool", None)
     if pool is None:
-        pool = _SCRATCH.pool = {}
-    key = (slot, shape, dtype, device)
+        pool = _SCRATCH.pool = OrderedDict()
+    key = (slot, dtype, device)
+    needed = prod(shape)
     buffer = pool.get(key)
-    if buffer is None:
-        if len(pool) >= _SCRATCH_LIMIT:
-            pool.clear()
-        buffer = pool[key] = torch.empty(shape, dtype=dtype, device=device)
-    return buffer
+    if buffer is None or buffer.numel() < needed:
+        if buffer is None and len(pool) >= _SCRATCH_LIMIT:
+            pool.popitem(last=False)
+        buffer = torch.empty(needed, dtype=dtype, device=device)
+        pool[key] = buffer
+        pool.move_to_end(key)
+    if buffer.numel() == needed:
+        return buffer.view(shape)
+    return buffer[:needed].view(shape)
 
 
 def _decompose_axes(

@@ -11,6 +11,7 @@ from chuchichaestli.dwt.functional import (
     dwt_coeff_len,
     dwt_max_level,
     dwtn,
+    dwtn_approx,
     idwt,
     idwtn,
     subband_keys,
@@ -523,3 +524,67 @@ class TestPyWaveletsParity:
         assert len(ours) == len(ref)
         for band, reference in zip(ours, ref, strict=True):
             assert band.numpy() == pytest.approx(reference, abs=1e-11)
+
+
+class TestScratchPool:
+    """The buffers a transform hands between its own axes."""
+
+    @staticmethod
+    def _pool():
+        from chuchichaestli.dwt import functional
+
+        pool = getattr(functional._SCRATCH, "pool", None)
+        return {} if pool is None else pool
+
+    def test_one_buffer_serves_every_shape_a_slot_is_asked_for(self):
+        """Test that cycling shapes reuses storage instead of evicting it."""
+        from chuchichaestli.dwt.functional import _scratch
+
+        device = torch.device("cpu")
+        first = _scratch(0, (1, 2, 64, 64), torch.float32, device)
+        pointer = first.data_ptr()
+        for size in range(8, 64, 4):
+            got = _scratch(0, (1, 2, size, size), torch.float32, device)
+            assert got.data_ptr() == pointer
+            assert got.shape == (1, 2, size, size)
+
+    def test_a_slot_grows_to_the_largest_it_is_asked_for(self):
+        """Test that a bigger request is served and the buffer keeps it."""
+        from chuchichaestli.dwt.functional import _scratch
+
+        device = torch.device("cpu")
+        _scratch(1, (4, 4), torch.float32, device)
+        big = _scratch(1, (64, 64), torch.float32, device)
+        assert big.numel() == 64 * 64
+        again = _scratch(1, (8, 8), torch.float32, device)
+        assert again.data_ptr() == big.data_ptr()
+
+    def test_many_shapes_leave_the_pool_bounded(self):
+        """Test that the pool holds a buffer per slot, not per shape."""
+        from chuchichaestli.dwt.functional import _SCRATCH_LIMIT, _scratch
+
+        device = torch.device("cpu")
+        for size in range(4, 200, 3):
+            _scratch(2, (1, 1, size), torch.float32, device)
+        held = [key for key in self._pool() if key[0] == 2]
+        assert len(held) == 1
+        assert len(self._pool()) <= _SCRATCH_LIMIT
+
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_a_transform_never_hands_back_pooled_storage(self, dimensions):
+        """Test that results stay correct when a later call reuses the pool."""
+        axes = tuple(range(-dimensions, 0))
+        xs = [torch.randn(2, 3, *([24] * dimensions)) for _ in range(6)]
+        kept = [dwtn_approx(x, "db2", "zero", axes) for x in xs]
+        for x, band in zip(xs, kept, strict=True):
+            assert torch.allclose(band, dwtn_approx(x, "db2", "zero", axes))
+
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_reconstruction_survives_a_shape_that_keeps_changing(self, dimensions):
+        """Test a round trip while the pool is asked for a new shape each call."""
+        axes = tuple(range(-dimensions, 0))
+        for size in (16, 24, 12, 32, 20, 28, 8, 36, 18, 26):
+            x = torch.randn(1, 2, *([size] * dimensions), dtype=torch.float64)
+            bands = dwtn(x, "db2", "zero", axes)
+            back = idwtn(bands, "db2", "zero", axes, x.shape[-dimensions:])
+            assert torch.allclose(x, back, atol=1e-10)
