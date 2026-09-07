@@ -127,7 +127,8 @@ def build() -> None:
         return
     try:
         _build()
-    except Exception as exc:  # noqa: BLE001 - a build failure must not be fatal
+    # setuptools reports a failed build by exiting, which is not an `Exception`
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - never fatal
         print(f"chuchichaestli: extensions skipped ({exc}); pure-Python install")
 
 
