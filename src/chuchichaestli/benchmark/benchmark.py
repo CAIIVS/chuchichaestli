@@ -62,6 +62,9 @@ def worker_command(
             *case_argv,
             "--perf-iterations", str(iterations),
         ]
+        direction = getattr(args, "direction", None)
+        if direction is not None:
+            line += ["--direction", direction]
         if args.threads is not None:
             line += ["--threads", str(args.threads)]
         return line
@@ -111,9 +114,13 @@ class Benchmark:
         """
         case = self.cases(args)[0]
         backend = self.backends[args.backends[0]]
+        direction = getattr(args, "direction", "forward")
         payload = backend.prepare(case.sample().to(args.device), case)
+        if direction == "backward":
+            payload = payload.requires_grad_(True)
+        call = backend.timed_call(payload, case, direction)
         for _ in range(args.perf_iterations):
-            backend.apply(payload, case)
+            call()
 
     def inspect(self, args) -> None:
         """Profile or count, rather than time, every case of the sweep.
@@ -130,9 +137,12 @@ class Benchmark:
                     print(f"\n=== {title} === {status}")
                     continue
                 if args.profile:
+                    direction = getattr(args, "direction", "forward")
                     payload = backend.prepare(case.sample().to(args.device), case)
+                    if direction == "backward":
+                        payload = payload.requires_grad_(True)
                     profile_case(
-                        functools.partial(backend.apply, payload, case),
+                        backend.timed_call(payload, case, direction),
                         title,
                         args.device,
                         args.profile_repeats,

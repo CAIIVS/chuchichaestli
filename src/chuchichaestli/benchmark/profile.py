@@ -107,6 +107,7 @@ def perf_counters(command: Sequence[str], events: str = EVENTS, timeout: float =
         capture_output=True,
         text=True,
         timeout=timeout,
+        check=True,
     )
     counters: dict[str, int] = {}
     seconds = 0.0
