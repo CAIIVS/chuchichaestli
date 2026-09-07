@@ -28,6 +28,14 @@ torch::Tensor dwt_lift_axis_cpu(
     double detail_gain, int64_t detail_delay,
     c10::optional<torch::Tensor> out_opt);
 
+torch::Tensor idwt_lift_axis_cpu(
+    const torch::Tensor& coeffs, int64_t axis,
+    const std::vector<int64_t>& on_detail,
+    const std::vector<std::vector<double>>& steps,
+    const std::vector<int64_t>& lows, double approx_gain, int64_t approx_delay,
+    double detail_gain, int64_t detail_delay,
+    c10::optional<torch::Tensor> out_opt);
+
 torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                            const torch::Tensor& dec_hi, int64_t axis,
                            int64_t mode, int64_t pad_lo, int64_t out_length,
@@ -311,6 +319,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("dwt_lift_axis", &c3li::dwt_lift_axis_cpu,
         "Decomposition along one spatial axis by lifting", py::arg("x"),
         py::arg("axis"), py::arg("on_detail"), py::arg("coeffs"),
+        py::arg("lows"), py::arg("approx_gain"), py::arg("approx_delay"),
+        py::arg("detail_gain"), py::arg("detail_delay"),
+        py::arg("out") = py::none());
+  m.def("idwt_lift_axis", &c3li::idwt_lift_axis_cpu,
+        "Reconstruction along one spatial axis by lifting", py::arg("coeffs"),
+        py::arg("axis"), py::arg("on_detail"), py::arg("coeffs_steps"),
         py::arg("lows"), py::arg("approx_gain"), py::arg("approx_delay"),
         py::arg("detail_gain"), py::arg("detail_delay"),
         py::arg("out") = py::none());

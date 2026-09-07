@@ -39,6 +39,7 @@ __all__ = [
     "lowpass_kernel_applies",
     "lift_axis",
     "lift_axis_applies",
+    "ilift_axis",
 ]
 
 
@@ -280,6 +281,44 @@ def lift_axis(
         a_gain, a_delay, d_gain, d_delay, out,
     )
 
+
+
+def ilift_axis(
+    coeffs: torch.Tensor,
+    wavelet: str | Wavelet,
+    axis: int,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Merge a band pair along one spatial axis by lifting.
+
+    Undoes `lift_axis`: the steps come off in the order they went on, then the
+    scaling, then the samples go back where the lazy split took them from.
+
+    Args:
+        coeffs: Band pairs, shaped `(batch, 2 * groups, spatial...)`, the
+            low-pass of group `g` at channel `2 g`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
+        axis: Spatial axis to merge.
+        out: Storage to write into, when the caller keeps one across calls.
+
+    Raises:
+        RuntimeError: If the kernel does not serve this reconstruction.
+    """
+    name = wavelet if isinstance(wavelet, str) else wavelet.name
+    if not lift_axis_applies(
+        coeffs.device, coeffs.dtype, 2 * coeffs.shape[2 + axis]
+    ):
+        raise RuntimeError(
+            "lifting runs on an even host axis the kernels were built for;"
+            f" got a {coeffs.dtype} band pair on {coeffs.device}"
+        )
+    on_detail, steps, lows, a_gain, a_delay, d_gain, d_delay = (
+        _lifting_arguments(name)
+    )
+    return _dwt_kernels.idwt_lift_axis(
+        coeffs.contiguous(), axis, on_detail, steps, lows,
+        a_gain, a_delay, d_gain, d_delay, out,
+    )
 
 
 def lowpass_kernel_applies(device: torch.device, dtype: torch.dtype) -> bool:

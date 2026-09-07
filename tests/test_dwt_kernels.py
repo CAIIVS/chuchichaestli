@@ -826,3 +826,51 @@ class TestGradientsKeepTheKernel:
         fused.backward(seed)
         axes.backward(seed)
         assert torch.allclose(x.grad, stepwise.grad, atol=1e-10)
+
+
+@needs_kernels
+class TestLiftingInverse:
+    """Lifting undoes itself, which is the whole reason to keep it."""
+
+    @pytest.mark.parametrize(
+        "name", ["haar", "db2", "db4", "db8", "sym4", "coif1", "bior2.2"]
+    )
+    @pytest.mark.parametrize("groups", [1, 3])
+    def test_a_round_trip_returns_the_signal(self, name, groups):
+        """Test that merging the bands gives the samples back."""
+        torch.manual_seed(0)
+        x = torch.randn(2, groups, 32, dtype=torch.float64)
+        bands = _ext.lift_axis(x, name, 0)
+        assert torch.allclose(_ext.ilift_axis(bands, name, 0), x, atol=1e-12)
+
+    @pytest.mark.parametrize("name", ["haar", "db2", "sym4", "bior2.2"])
+    def test_it_agrees_with_the_convolution_inverse(self, name):
+        """Test the lifting merge against the route it stands in for."""
+        torch.manual_seed(0)
+        x = torch.randn(2, 3, 32, dtype=torch.float64)
+        bands = dwtn(x, name, "periodization", (2,))
+        stacked = torch.empty(2, 6, 16, dtype=torch.float64)
+        stacked[:, 0::2] = bands["a"]
+        stacked[:, 1::2] = bands["d"]
+        lifted = _ext.ilift_axis(stacked, name, 0)
+        conv = idwtn(bands, name, "periodization", (2,), (32,))
+        assert torch.allclose(lifted, conv, atol=1e-10)
+
+    def test_it_declines_channels_that_are_not_a_band_pair(self):
+        """Test that an unpaired channel count is refused, not mangled."""
+        x = torch.randn(1, 3, 8)
+        with pytest.raises(RuntimeError, match="pair a low- and a high-pass"):
+            _ext.ilift_axis(x, "db2", 0)
+
+    @pytest.mark.parametrize("groups", [1, 2])
+    def test_it_writes_into_storage_it_is_given(self, groups):
+        """Test that it takes a buffer like every other kernel."""
+        torch.manual_seed(0)
+        bands = _ext.lift_axis(
+            torch.randn(2, groups, 16, dtype=torch.float64), "db2", 0
+        )
+        want = _ext.ilift_axis(bands, "db2", 0)
+        buffer = torch.empty_like(want)
+        got = _ext.ilift_axis(bands, "db2", 0, buffer)
+        assert got.data_ptr() == buffer.data_ptr()
+        assert torch.allclose(want, got, atol=1e-12)
