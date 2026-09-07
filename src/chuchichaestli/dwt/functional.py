@@ -718,26 +718,19 @@ def wavedecn(
         torch.is_grad_enabled() and data.requires_grad
     ) and _ext.kernels_available(folded.device, folded.dtype)
 
-    if compiled and _ext.fused_recursion_applies(mode, shapes) and not all(
-        _ext.fused_haar_applies(wavelet, mode, shape) for shape in shapes
-    ):
-        # the kernel runs the recursion for any wavelet
-        dec_lo, dec_hi, _, _ = wavelet.filters(folded.dtype, folded.device)
-        for stacked in _ext.wavedec_axes(folded, dec_lo, dec_hi, mode, level):
-            bands = {
-                key: _unfold(stacked[:, i], lead, perm)
-                for i, key in enumerate(keys)
-            }
-            approx = bands.pop(approx_key)
-            result.append(bands)
-        result.append(approx)
-        return result[::-1]
-
-    if compiled and all(
-        _ext.fused_haar_applies(wavelet, mode, shape) for shape in shapes
-    ):
-        # the kernel runs the recursion
-        for stacked in _ext.haar_wavedec(folded, len(axes), level):
+    # the kernel runs the recursion: the Haar form where every level suits it,
+    # and the general one otherwise
+    levels = None
+    if compiled:
+        if all(
+            _ext.fused_haar_applies(wavelet, mode, shape) for shape in shapes
+        ):
+            levels = _ext.haar_wavedec(folded, len(axes), level)
+        elif _ext.fused_recursion_applies(mode, shapes):
+            dec_lo, dec_hi, _, _ = wavelet.filters(folded.dtype, folded.device)
+            levels = _ext.wavedec_axes(folded, dec_lo, dec_hi, mode, level)
+    if levels is not None:
+        for stacked in levels:
             bands = {
                 key: _unfold(stacked[:, i], lead, perm)
                 for i, key in enumerate(keys)

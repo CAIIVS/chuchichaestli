@@ -874,3 +874,15 @@ class TestLiftingInverse:
         got = _ext.ilift_axis(bands, "db2", 0, buffer)
         assert got.data_ptr() == buffer.data_ptr()
         assert torch.allclose(want, got, atol=1e-12)
+
+
+@needs_kernels
+@needs_gpu
+def test_the_gpu_kernels_are_compiled_in():
+    """Test that a broken accelerator build is not quietly fallen back from.
+
+    The just-in-time build drops the GPU sources and keeps the host ones when
+    they fail to compile, so an extension that imports is not on its own proof
+    that the accelerator is served.
+    """
+    assert _ext._dwt_kernels.has_gpu()

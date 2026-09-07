@@ -79,10 +79,21 @@ __global__ void dwt_axis_kernel(
 
 }  // namespace
 
-torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
-                            const torch::Tensor& dec_hi, int64_t axis,
-                            int64_t mode, int64_t pad_lo, int64_t out_length,
-                            c10::optional<torch::Tensor> out_opt) {
+namespace {
+
+// Both entry points below differ only in whether the detail half is wanted:
+// the low-pass-only form leaves the channel count alone and instantiates the
+// kernel without the high-pass arm.
+template <bool with_detail>
+torch::Tensor dwt_axis_launch(const torch::Tensor& x,
+                              const torch::Tensor& dec_lo,
+                              const torch::Tensor& dec_hi, int64_t axis,
+                              int64_t mode, int64_t pad_lo, int64_t out_length,
+                              c10::optional<torch::Tensor> out_opt) {
+  // the dispatch macro names itself at compile time, so this cannot be a
+  // parameter
+  constexpr const char* name =
+      with_detail ? "dwt_axis_cuda" : "dwt_lowpass_axis_cuda";
   C3LI_CHECK_CONTIGUOUS(x);
   C3LI_CHECK_FLOATING(x);
   const at::cuda::CUDAGuard guard(x.device());
@@ -92,7 +103,9 @@ torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
   const int64_t offset = filter_len - 1 - pad_lo;
 
   auto sizes = x.sizes().vec();
-  sizes[1] *= 2;
+  if (with_detail) {
+    sizes[1] *= 2;
+  }
   sizes[2 + axis] = out_length;
   torch::Tensor out = resolve_out(out_opt, sizes, x);
 
@@ -103,10 +116,10 @@ torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
     return out;
   }
 
-  C3LI_DISPATCH_FLOATING(x.scalar_type(), "dwt_axis_cuda", [&] {
+  C3LI_DISPATCH_FLOATING(x.scalar_type(), name, [&] {
     const auto lo_filter = dec_lo.to(x.options()).contiguous();
     const auto hi_filter = dec_hi.to(x.options()).contiguous();
-    dwt_axis_kernel<scalar_t, true>
+    dwt_axis_kernel<scalar_t, with_detail>
         <<<blocks_for(total), kThreadsPerBlock, 0,
            at::cuda::getCurrentCUDAStream()>>>(
             x.data_ptr<scalar_t>(), out.data_ptr<scalar_t>(),
@@ -118,6 +131,16 @@ torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
   return out;
 }
 
+}  // namespace
+
+torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
+                            const torch::Tensor& dec_hi, int64_t axis,
+                            int64_t mode, int64_t pad_lo, int64_t out_length,
+                            c10::optional<torch::Tensor> out_opt) {
+  return dwt_axis_launch<true>(x, dec_lo, dec_hi, axis, mode, pad_lo,
+                               out_length, out_opt);
+}
+
 // Keep only the low-pass half, for an approximation pyramid that would drop
 // the detail bands and carry twice the channels into the next axis.
 torch::Tensor dwt_lowpass_axis_cuda(const torch::Tensor& x,
@@ -125,37 +148,8 @@ torch::Tensor dwt_lowpass_axis_cuda(const torch::Tensor& x,
                                     int64_t mode, int64_t pad_lo,
                                     int64_t out_length,
                                     c10::optional<torch::Tensor> out_opt) {
-  C3LI_CHECK_CONTIGUOUS(x);
-  C3LI_CHECK_FLOATING(x);
-  const at::cuda::CUDAGuard guard(x.device());
-
-  const AxisLayout layout = axis_layout(x, axis);
-  const int64_t filter_len = dec_lo.numel();
-  const int64_t offset = filter_len - 1 - pad_lo;
-
-  auto sizes = x.sizes().vec();
-  sizes[2 + axis] = out_length;
-  torch::Tensor out = resolve_out(out_opt, sizes, x);
-
-  const int64_t groups = x.size(1);
-  const int64_t per_group = layout.outer / (x.size(0) * groups);
-  const int64_t total = layout.outer * out_length * layout.inner;
-  if (total == 0) {
-    return out;
-  }
-
-  C3LI_DISPATCH_FLOATING(x.scalar_type(), "dwt_lowpass_axis_cuda", [&] {
-    const auto lo_filter = dec_lo.to(x.options()).contiguous();
-    dwt_axis_kernel<scalar_t, false>
-        <<<blocks_for(total), kThreadsPerBlock, 0,
-           at::cuda::getCurrentCUDAStream()>>>(
-            x.data_ptr<scalar_t>(), out.data_ptr<scalar_t>(),
-            lo_filter.data_ptr<scalar_t>(), lo_filter.data_ptr<scalar_t>(),
-            layout.length, layout.inner, out_length, filter_len, offset, mode,
-            groups, per_group, total);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  });
-  return out;
+  return dwt_axis_launch<false>(x, dec_lo, dec_lo, axis, mode, pad_lo,
+                                out_length, out_opt);
 }
 
 }  // namespace c3li

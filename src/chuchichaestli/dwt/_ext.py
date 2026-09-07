@@ -121,7 +121,7 @@ def _require_constant_filters(*filters: torch.Tensor) -> None:
 def _decompose_adjoint(
     grad_out: torch.Tensor,
     dec_lo: torch.Tensor,
-    dec_hi: torch.Tensor,
+    dec_hi: torch.Tensor | None,
     axis: int,
     mode: ExtensionModeTypes,
     pad_lo: int,
@@ -133,7 +133,9 @@ def _decompose_adjoint(
     Args:
         grad_out: Gradient with respect to the band pair.
         dec_lo: Decomposition low-pass filter.
-        dec_hi: Decomposition high-pass filter.
+        dec_hi: Decomposition high-pass filter, or `None` where the
+            decomposition kept only the low-pass half and nothing comes back
+            through the other one.
         axis: Spatial axis that was transformed.
         mode: Signal extension mode.
         pad_lo: Number of samples the decomposition prepended.
@@ -143,8 +145,16 @@ def _decompose_adjoint(
     from chuchichaestli.dwt.functional import _bank, DIM_TO_CONVT_FN_MAP
 
     dimensions = grad_out.ndim - 2
-    groups = grad_out.shape[1] // 2
-    weight = _bank(dec_lo.flip(0), dec_hi.flip(0), groups, axis, dimensions)
+    if dec_hi is None:
+        groups = grad_out.shape[1]
+        shape = [1] * dimensions
+        shape[axis] = dec_lo.numel()
+        weight = dec_lo.flip(0).reshape(1, 1, *shape).repeat(
+            groups, 1, *([1] * dimensions)
+        )
+    else:
+        groups = grad_out.shape[1] // 2
+        weight = _bank(dec_lo.flip(0), dec_hi.flip(0), groups, axis, dimensions)
     stride = [1] * dimensions
     stride[axis] = 2
     padded = DIM_TO_CONVT_FN_MAP[dimensions](
@@ -366,31 +376,9 @@ class _DwtLowpassAxis(torch.autograd.Function):
         """Apply the adjoint of the low-pass decomposition."""
         (dec_lo,) = ctx.saved_tensors
         axis, mode, pad_lo, pad_hi, length = ctx.config
-        from chuchichaestli.dwt.functional import DIM_TO_CONVT_FN_MAP
-
-        dimensions = grad_out.ndim - 2
-        groups = grad_out.shape[1]
-        shape = [1] * dimensions
-        shape[axis] = dec_lo.numel()
-        weight = dec_lo.flip(0).reshape(1, 1, *shape).repeat(
-            groups, 1, *([1] * dimensions)
+        grad = _decompose_adjoint(
+            grad_out, dec_lo, None, axis, mode, pad_lo, pad_hi, length
         )
-        stride = [1] * dimensions
-        stride[axis] = 2
-        padded = DIM_TO_CONVT_FN_MAP[dimensions](
-            grad_out.contiguous(), weight, stride=stride, groups=groups
-        )
-        # as in the full decomposition, the transposed convolution can fall
-        # short where the last taps reach past the final coefficient
-        wanted = length + pad_lo + pad_hi
-        short = wanted - padded.shape[2 + axis]
-        if short > 0:
-            pad = [0] * (2 * dimensions)
-            pad[2 * (dimensions - 1 - axis) + 1] = short
-            padded = torch.nn.functional.pad(padded, pad)
-        elif short < 0:
-            padded = padded.narrow(2 + axis, 0, wanted)
-        grad = pad_signal_adjoint(padded, 2 + axis, pad_lo, pad_hi, mode, length)
         return grad, None, None, None, None, None, None
 
 
