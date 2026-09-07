@@ -456,7 +456,11 @@ def dwtn_approx(
     mode: ExtensionModeTypes = "zero",
     axes: Sequence[int] | None = None,
 ) -> torch.Tensor:
-    """Approximation band of a single-level transform, skipping the detail bands.
+    """Approximation band of a single-level transform.
+
+    The compiled kernel splits every band at once for less than a convolution
+    costs to pad for, so it is taken where it serves and its detail bands
+    dropped; the convolution only skips them where there is no kernel.
 
     Args:
         data: Input tensor of any rank.
@@ -464,12 +468,17 @@ def dwtn_approx(
         mode: Signal extension mode.
         axes: Axes to transform; the trailing one if omitted.
     """
+    from chuchichaestli.dwt import _ext
+
     data = as_inexact(data)
     axes = _resolve_axes(data.ndim, axes)
-    dec_lo, _, _, _ = as_wavelet(wavelet).filters(data.dtype, data.device)
+    dec_lo, dec_hi, _, _ = as_wavelet(wavelet).filters(data.dtype, data.device)
     h, lead, perm = _fold(data, axes)
-    for axis in range(len(axes)):
-        h = _decompose_lowpass(h, dec_lo, axis, mode)
+    if _ext.kernels_available(h.device, h.dtype):
+        h = _decompose_axes(h, dec_lo, dec_hi, len(axes), mode)
+    else:
+        for axis in range(len(axes)):
+            h = _decompose_lowpass(h, dec_lo, axis, mode)
     return _unfold(h[:, 0], lead, perm)
 
 
