@@ -246,9 +246,7 @@ def _decompose_lowpass(
     dimensions = h.ndim - 2
     groups = h.shape[1]
     filter_len = lo.numel()
-    if _ext.lowpass_kernel_applies(h.device, h.dtype) and not (
-        torch.is_grad_enabled() and h.requires_grad
-    ):
+    if _ext.lowpass_kernel_applies(h.device, h.dtype):
         length = h.shape[2 + axis]
         if mode == "periodization" and length % 2:
             h = pad_signal(h, 2 + axis, 0, 1, "constant")
@@ -258,7 +256,9 @@ def _decompose_lowpass(
         else:
             pad_lo, pad_hi = filter_len - 2, filter_len - 2 + (length % 2)
         out_length = (length + pad_lo + pad_hi - filter_len) // 2 + 1
-        return _ext.dwt_lowpass_axis(h, lo, axis, mode, pad_lo, out_length)
+        return _ext.dwt_lowpass_axis(
+            h, lo, axis, mode, pad_lo, pad_hi, out_length
+        )
     h = _pad_for_decomposition(h, axis, filter_len, mode)
     shape = [1] * dimensions
     shape[axis] = filter_len

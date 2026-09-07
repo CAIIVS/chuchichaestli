@@ -115,6 +115,51 @@ def _require_constant_filters(*filters: torch.Tensor) -> None:
         )
 
 
+def _decompose_adjoint(
+    grad_out: torch.Tensor,
+    dec_lo: torch.Tensor,
+    dec_hi: torch.Tensor,
+    axis: int,
+    mode: ExtensionModeTypes,
+    pad_lo: int,
+    pad_hi: int,
+    length: int,
+) -> torch.Tensor:
+    """Transpose of a decomposition along one axis.
+
+    Args:
+        grad_out: Gradient with respect to the band pair.
+        dec_lo: Decomposition low-pass filter.
+        dec_hi: Decomposition high-pass filter.
+        axis: Spatial axis that was transformed.
+        mode: Signal extension mode.
+        pad_lo: Number of samples the decomposition prepended.
+        pad_hi: Number of samples the decomposition appended.
+        length: Length of the axis before it was transformed.
+    """
+    from chuchichaestli.dwt.functional import _bank, DIM_TO_CONVT_FN_MAP
+
+    dimensions = grad_out.ndim - 2
+    groups = grad_out.shape[1] // 2
+    weight = _bank(dec_lo.flip(0), dec_hi.flip(0), groups, axis, dimensions)
+    stride = [1] * dimensions
+    stride[axis] = 2
+    padded = DIM_TO_CONVT_FN_MAP[dimensions](
+        grad_out.contiguous(), weight, stride=stride, groups=groups
+    )
+    # the transposed convolution can fall short of the padded length when the
+    # last taps reach past the final coefficient
+    wanted = length + pad_lo + pad_hi
+    short = wanted - padded.shape[2 + axis]
+    if short > 0:
+        pad = [0] * (2 * dimensions)
+        pad[2 * (dimensions - 1 - axis) + 1] = short
+        padded = torch.nn.functional.pad(padded, pad)
+    elif short < 0:
+        padded = padded.narrow(2 + axis, 0, wanted)
+    return pad_signal_adjoint(padded, 2 + axis, pad_lo, pad_hi, mode, length)
+
+
 class _DwtAxis(torch.autograd.Function):
     """Wavelet decomposition of one axis, computed by the compiled kernel.
 
@@ -146,27 +191,9 @@ class _DwtAxis(torch.autograd.Function):
         """Apply the adjoint of the decomposition."""
         dec_lo, dec_hi = ctx.saved_tensors
         axis, mode, pad_lo, pad_hi, _, length = ctx.config
-        from chuchichaestli.dwt.functional import _bank, DIM_TO_CONVT_FN_MAP
-
-        dimensions = grad_out.ndim - 2
-        groups = grad_out.shape[1] // 2
-        weight = _bank(dec_lo.flip(0), dec_hi.flip(0), groups, axis, dimensions)
-        stride = [1] * dimensions
-        stride[axis] = 2
-        padded = DIM_TO_CONVT_FN_MAP[dimensions](
-            grad_out.contiguous(), weight, stride=stride, groups=groups
+        grad = _decompose_adjoint(
+            grad_out, dec_lo, dec_hi, axis, mode, pad_lo, pad_hi, length
         )
-        # the transposed convolution can fall short of the padded length when the
-        # last taps reach past the final coefficient
-        wanted = length + pad_lo + pad_hi
-        short = wanted - padded.shape[2 + axis]
-        if short > 0:
-            pad = [0] * (2 * dimensions)
-            pad[2 * (dimensions - 1 - axis) + 1] = short
-            padded = torch.nn.functional.pad(padded, pad)
-        elif short < 0:
-            padded = padded.narrow(2 + axis, 0, wanted)
-        grad = pad_signal_adjoint(padded, 2 + axis, pad_lo, pad_hi, mode, length)
         return grad, None, None, None, None, None, None, None
 
 
@@ -266,16 +293,80 @@ def lowpass_kernel_applies(device: torch.device, dtype: torch.dtype) -> bool:
     return kernels_available(device, dtype)
 
 
+class _DwtLowpassAxis(torch.autograd.Function):
+    """Low-pass half of a decomposition of one axis, by the compiled kernel.
+
+    Linear like the whole transform, so the backward pass is its adjoint. The
+    detail half was never formed, so nothing comes back through it and the
+    adjoint correlates the low-pass filter alone.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        x: torch.Tensor,
+        dec_lo: torch.Tensor,
+        axis: int,
+        mode: ExtensionModeTypes,
+        pad_lo: int,
+        pad_hi: int,
+        out_length: int,
+    ) -> torch.Tensor:
+        """Run the kernel and remember what the adjoint needs."""
+        ctx.save_for_backward(dec_lo)
+        ctx.config = (axis, mode, pad_lo, pad_hi, x.shape[2 + axis])
+        return _dwt_kernels.dwt_lowpass_axis(
+            x.contiguous(), dec_lo, axis, MODE_TO_CODE[mode], pad_lo,
+            out_length, None,
+        )
+
+    @staticmethod
+    def backward(ctx, grad_out: torch.Tensor):
+        """Apply the adjoint of the low-pass decomposition."""
+        (dec_lo,) = ctx.saved_tensors
+        axis, mode, pad_lo, pad_hi, length = ctx.config
+        from chuchichaestli.dwt.functional import DIM_TO_CONVT_FN_MAP
+
+        dimensions = grad_out.ndim - 2
+        groups = grad_out.shape[1]
+        shape = [1] * dimensions
+        shape[axis] = dec_lo.numel()
+        weight = dec_lo.flip(0).reshape(1, 1, *shape).repeat(
+            groups, 1, *([1] * dimensions)
+        )
+        stride = [1] * dimensions
+        stride[axis] = 2
+        padded = DIM_TO_CONVT_FN_MAP[dimensions](
+            grad_out.contiguous(), weight, stride=stride, groups=groups
+        )
+        # as in the full decomposition, the transposed convolution can fall
+        # short where the last taps reach past the final coefficient
+        wanted = length + pad_lo + pad_hi
+        short = wanted - padded.shape[2 + axis]
+        if short > 0:
+            pad = [0] * (2 * dimensions)
+            pad[2 * (dimensions - 1 - axis) + 1] = short
+            padded = torch.nn.functional.pad(padded, pad)
+        elif short < 0:
+            padded = padded.narrow(2 + axis, 0, wanted)
+        grad = pad_signal_adjoint(padded, 2 + axis, pad_lo, pad_hi, mode, length)
+        return grad, None, None, None, None, None, None
+
+
 def dwt_lowpass_axis(
     x: torch.Tensor,
     dec_lo: torch.Tensor,
     axis: int,
     mode: ExtensionModeTypes,
     pad_lo: int,
+    pad_hi: int,
     out_length: int,
     out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Low-pass half of a decomposition along one axis, through the kernel.
+
+    The autograd machinery costs more than the kernel on a small transform,
+    so it is only entered when there is a gradient to record.
 
     Args:
         x: Bands so far, shaped `(batch, groups, spatial...)`.
@@ -283,13 +374,19 @@ def dwt_lowpass_axis(
         axis: Spatial axis to transform.
         mode: Signal extension mode.
         pad_lo: Number of samples the decomposition prepends.
+        pad_hi: Number of samples the decomposition appends.
         out_length: Length of the transformed axis.
-        out: Storage to write into, when the caller keeps one across axes.
+        out: Storage to write into, when the caller keeps one across axes;
+            only taken when nothing records a gradient.
     """
     _require_constant_filters(dec_lo)
-    return _dwt_kernels.dwt_lowpass_axis(
-        x.contiguous(), dec_lo, axis, MODE_TO_CODE[mode], pad_lo, out_length,
-        out,
+    if not (torch.is_grad_enabled() and x.requires_grad):
+        return _dwt_kernels.dwt_lowpass_axis(
+            x.contiguous(), dec_lo, axis, MODE_TO_CODE[mode], pad_lo,
+            out_length, out,
+        )
+    return _DwtLowpassAxis.apply(
+        x, dec_lo, axis, mode, pad_lo, pad_hi, out_length
     )
 
 

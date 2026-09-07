@@ -743,3 +743,58 @@ class TestCallerOwnedStorage:
             want = call(None)
             with pytest.raises(RuntimeError, match="device"):
                 call(torch.empty(want.shape, dtype=want.dtype, device="cpu"))
+
+
+@needs_kernels
+class TestGradientsKeepTheKernel:
+    """The compiled path is not abandoned as soon as a gradient is wanted."""
+
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_the_approximation_still_calls_the_kernel_under_a_gradient(
+        self, dimensions
+    ):
+        """Test that recording a gradient does not fall back to convolution."""
+        from chuchichaestli.dwt.functional import dwtn_approx
+
+        kernels = _ext._dwt_kernels
+        real = kernels.dwt_lowpass_axis
+        calls = []
+
+        def counted(*args, **kwargs):
+            calls.append(1)
+            return real(*args, **kwargs)
+
+        kernels.dwt_lowpass_axis = counted
+        try:
+            x = torch.randn(
+                1, 2, *([16] * dimensions), dtype=torch.float64,
+                requires_grad=True,
+            )
+            dwtn_approx(
+                x, "db2", "zero", tuple(range(-dimensions, 0))
+            ).sum().backward()
+        finally:
+            kernels.dwt_lowpass_axis = real
+        assert len(calls) == dimensions
+        assert x.grad is not None
+
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4"])
+    @pytest.mark.parametrize("mode", ["zero", "symmetric", "periodization"])
+    def test_the_approximation_gradient_matches_the_convolution(self, name, mode):
+        """Test the adjoint against the route that never takes a kernel."""
+        from chuchichaestli.dwt.functional import dwtn_approx
+
+        torch.manual_seed(0)
+        axes = (2, 3)
+        x = torch.randn(2, 3, 16, 16, dtype=torch.float64, requires_grad=True)
+        plain = x.detach().clone().requires_grad_(True)
+        band = dwtn_approx(x, name, mode, axes)
+        seed = torch.randn_like(band)
+        band.backward(seed)
+        with_torch = _ext.USE_CUSTOM_KERNELS
+        _ext.USE_CUSTOM_KERNELS = False
+        try:
+            dwtn_approx(plain, name, mode, axes).backward(seed)
+        finally:
+            _ext.USE_CUSTOM_KERNELS = with_torch
+        assert torch.allclose(x.grad, plain.grad, atol=1e-10)
