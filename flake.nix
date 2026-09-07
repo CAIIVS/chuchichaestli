@@ -71,6 +71,10 @@
             pytest
             pytest-cov
             ruff
+            # torch.utils.cpp_extension needs these to build csrc/
+            setuptools
+            pybind11
+            ninja
           ]);
 
         makeRocmPyEnv = dist:
@@ -85,6 +89,10 @@
             pytest
             pytest-cov
             ruff
+            # torch.utils.cpp_extension needs these to build csrc/
+            setuptools
+            pybind11
+            ninja
           ]);
 
         makeCudaPyEnv = dist:
@@ -99,6 +107,10 @@
             pytest
             pytest-cov
             ruff
+            # torch.utils.cpp_extension needs these to build csrc/
+            setuptools
+            pybind11
+            ninja
           ]);
       in {
         

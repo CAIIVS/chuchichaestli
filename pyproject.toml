@@ -37,6 +37,10 @@ dependencies = [
     "safetensors[torch]>=0.7.0",
 ]
 
+[project.scripts]
+# Compiles the kernels ahead of the first call
+chuchichaestli-build-kernels = "chuchichaestli._jit:main"
+
 [project.optional-dependencies]
 dev = [
     "ruff==0.16.5",
@@ -53,6 +57,11 @@ docs = [
 viz = [
     "matplotlib>=3.7",
 ]
+# For jit compiling the `csrc` kernels (excluding a C++/CUDA/HIP compiler)
+jit = [
+    "ninja>=1.11",
+    "setuptools>=49.4",
+]
 all = [
     "ruff==0.16.5",
     "pre-commit>=3.7.0",
@@ -68,11 +77,8 @@ all = [
 ]
 
 [dependency-groups]
-# CI installs `cpu` so it does not pull ~700 MB of unused CUDA libraries.
-# `gpu` exists to give `cpu` something to conflict with, which is what makes uv
-# fork the resolution; without it the CPU index would leak into the default one.
-# Plain `uv sync` (no group) keeps resolving torch from PyPI, i.e. whatever
-# suits the developer's hardware.
+# CI installs `cpu` so it does not pull ~700 MB of unused CUDA libraries;
+# see [tool.uv.conflicts]
 cpu = [
     "torch>=2.2.2",
     "torchvision>=0.20.1",
@@ -96,6 +102,11 @@ docs = [
 ]
 viz = [
     "matplotlib>=3.7",
+]
+# For jit-compiling the `csrc` kernels (beyond a C++/CUDA/HIP compiler)
+jit = [
+    "ninja>=1.11",
+    "setuptools>=49.4",
 ]
 
 [tool.uv]
@@ -125,13 +136,23 @@ build-backend = "hatchling.build"
 path = "src/chuchichaestli/__about__.py"
 
 [tool.hatch.build.targets.sdist]
-exclude = [
-    "/docs",
-    "/.*",
+include = [
+    "/src",
+    "/csrc",
+    "/hatch_build.py",
+    "/pyproject.toml",
+    "/README.md",
+    "/LICENSE",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chuchichaestli"]
+# A wheel is shipped without custom kernels included (those are jit compiled)
+exclude = ["**/*.so", "**/*.hip", "**/*_hip.*"]
+
+# Compiles the optional native extensions under `csrc`; see `hatch_build.py`.
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
 
 [tool.hatch.envs.test]
 dependencies = ["pytest", "pytest-cov"]

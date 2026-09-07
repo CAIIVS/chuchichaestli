@@ -66,6 +66,10 @@ from chuchichaestli.data.transforms import (
     BasisProjection,
     InvBasisProjection,
     BASIS_REGISTRY,
+    WaveletDecompose,
+    InvWaveletDecompose,
+    WaveletPacket,
+    InvWaveletPacket,
     SequentialTransform,
 )
 
@@ -128,5 +132,9 @@ __all__ = [
     "BasisProjection",
     "InvBasisProjection",
     "BASIS_REGISTRY",
+    "WaveletDecompose",
+    "InvWaveletDecompose",
+    "WaveletPacket",
+    "InvWaveletPacket",
     "SequentialTransform",
 ]

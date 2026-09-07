@@ -27,7 +27,7 @@ ENCODER_RESERVED = {
 DECODER_RESERVED = {
     "dimensions": "pass `dimensions`",
     "in_channels": "derived from the encoder's latent width",
-    "n_channels": "derived from the encoder's bottleneck width",
+    "n_channels": "pass `decoder_n_channels`, or leave it to the encoder's bottleneck width",
     "out_channels": "pass `out_channels`",
 }
 
@@ -204,6 +204,7 @@ class Autoencoder(nn.Module):
         in_channels: int = 1,
         out_channels: int = 1,
         latent_dim: int = 4,
+        decoder_n_channels: int | None = None,
         res_act_fn: ActivationTypes = "silu",
         res_dropout: float = 0.0,
         res_norm_type: NormTypes = "group",
@@ -234,6 +235,10 @@ class Autoencoder(nn.Module):
             in_channels: Number of input channels.
             out_channels: Number of output channels.
             latent_dim: Number of channels in the latent space.
+            decoder_n_channels: Number of channels the decoder starts from; the
+                encoder's bottleneck width if omitted, which is what mirrored
+                components want. Give it when the two halves are sized
+                independently.
             res_act_fn: Activation function for the residual blocks
                 (see `chuchichaestli.models.activations` for details).
             res_dropout: Dropout rate for the residual blocks.
@@ -308,7 +313,11 @@ class Autoencoder(nn.Module):
         decoder = cls.decoder_cls(
             dimensions=dimensions,
             in_channels=encoder.latent_channels,
-            n_channels=encoder.bottleneck_channels,
+            n_channels=(
+                encoder.bottleneck_channels
+                if decoder_n_channels is None
+                else decoder_n_channels
+            ),
             out_channels=out_channels,
             **dec_args,
         )

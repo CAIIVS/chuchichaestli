@@ -1,17 +1,22 @@
 # chuchichaestli
 
-`chuchichaestli` is a collection of model architectures and other useful bits of code in use at the Intelligent Vision Systems group at the University of Applied Sciences Zurich (ZHAW).
+`chuchichaestli` is a collection of model architectures and other
+useful bits of code in use at the Intelligent Vision Systems group at
+the University of Applied Sciences Zurich (ZHAW).
 
 
 ## Installation
 
-Tagged releases are available as PyPI packages. To install the latest package, run:
+Tagged releases are available as PyPI packages. To install the latest
+package, run:
 
 ```bash
 pip install chuchichaestli
 ```
 
-For the bleeding-edge package directly from the git main, clone the repository and run the following command in the root directory of the repository:
+For the bleeding-edge package directly from a git branch, clone the
+repository and run the following command in the root directory of the
+repository:
 
 ```bash
 pip install -e .
@@ -22,6 +27,48 @@ Alternatively, you can install the package directly from GitHub:
 ```bash
 pip install git+https://github.com/CAIIVS/chuchichaestli.git
 ```
+
+Note: we recommend [`uv`](https://docs.astral.sh/uv/) for running
+examples in
+[`examples/`](https://github.com/CAIIVS/chuchichaestli/tree/main/examples)
+or benchmarks in
+[`benches/`](https://github.com/CAIIVS/chuchichaestli/tree/main/benches).
+
+
+### Native kernels
+
+`chuchichaestli` provides optional, optimized, custom CPU and GPU
+kernels.  Without them everything still works, just a little slower.
+
+They are compiled on first use, against the installed torch, which
+takes a C++ compiler (`gcc` on Linux, `clang` on macOS, MSVC on
+Windows) plus:
+
+```bash
+pip install chuchichaestli[jit]
+```
+
+That yields the CPU kernels. The custom GPU kernels additionally need
+`nvcc` or `hipcc`; without one the build quietly settles for CPU.
+
+Run 
+
+```bash
+chuchichaestli-build-kernels
+```
+
+to compile up front instead, or set `C3LI_JIT_KERNELS=0` to skip them
+entirely.
+
+
+#### Benchmarks
+
+The native kernels are benchmarked against the pure-torch path and against
+external packages, on both CPU and GPU, with every backend
+checked against a reference before it is timed; see
+[Benchmarks](https://caiivs.github.io/chuchichaestli/benchmarks/#dwt)
+for how to run them, the measured results, and the profiler tracing.
+
 
 ## Development
 

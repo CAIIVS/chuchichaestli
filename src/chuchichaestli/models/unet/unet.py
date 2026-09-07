@@ -236,6 +236,17 @@ class UNet(nn.Module):
                 f"The down and up sampling types must agree on which levels change the"
                 f" channel count; they differ at level(s) {mismatched}."
             )
+        rescaled = [
+            i
+            for i in range(n_samplers)
+            if getattr(downsample_clss[i], "factor", 2)
+            != getattr(upsample_clss[n_samplers - 1 - i], "factor", 2)
+        ]
+        if rescaled:
+            raise ValueError(
+                f"The down and up sampling types must agree on the resolution they"
+                f" change a level by; they differ at level(s) {rescaled}."
+            )
         # the last level has no sampler, so its blocks apply the multiplier
         down_changes_channels.append(False)
 

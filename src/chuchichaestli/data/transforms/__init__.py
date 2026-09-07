@@ -30,6 +30,12 @@ from chuchichaestli.data.transforms.basis import (
     InvBasisProjection,
     BASIS_REGISTRY,
 )
+from chuchichaestli.data.transforms.wavelet import (
+    WaveletDecompose,
+    InvWaveletDecompose,
+    WaveletPacket,
+    InvWaveletPacket,
+)
 from chuchichaestli.data.transforms.compose import SequentialTransform
 
 __all__ = [
@@ -61,5 +67,9 @@ __all__ = [
     "BasisProjection",
     "InvBasisProjection",
     "BASIS_REGISTRY",
+    "WaveletDecompose",
+    "InvWaveletDecompose",
+    "WaveletPacket",
+    "InvWaveletPacket",
     "SequentialTransform",
 ]

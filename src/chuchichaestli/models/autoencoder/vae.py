@@ -134,7 +134,7 @@ class VAE(Autoencoder):
         if sample_posterior:
             z = posterior.rsample()
         else:
-            z = posterior.mode()
+            z = posterior.mode
         return self.decode(z), posterior
 
     @staticmethod

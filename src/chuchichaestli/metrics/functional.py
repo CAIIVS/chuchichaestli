@@ -12,7 +12,7 @@ from typing import Literal
 from collections.abc import Sequence, Callable
 
 
-__all__ = ["mse", "psnr", "ssim", "psnr_from_batches"]
+__all__ = ["charbonnier", "mse", "psnr", "ssim", "psnr_from_batches"]
 
 
 def mse(data: torch.Tensor, prediction: torch.Tensor) -> torch.Tensor:
@@ -26,6 +26,30 @@ def mse(data: torch.Tensor, prediction: torch.Tensor) -> torch.Tensor:
     prediction = sanitize_ndim(prediction, check_2D=True, check_3D=True)
     is_nan = torch.isnan(data) | torch.isnan(prediction)
     return torch.mean(torch.pow(data[~is_nan] - prediction[~is_nan], 2))
+
+
+def charbonnier(
+    data: torch.Tensor,
+    prediction: torch.Tensor,
+    eps: float = 1e-3,
+    reduction: Callable | None = torch.mean,
+) -> torch.Tensor:
+    """Compute the Charbonnier penalty between observation and prediction.
+
+    A smooth stand-in for the absolute error: `eps` rounds off the kink at zero,
+    so the penalty stays differentiable where the two agree.
+
+    Args:
+        data: Observed data.
+        prediction: Predicted data.
+        eps: Constant rounding off the penalty at zero.
+        reduction: Reduction function, e.g. `torch.mean` or `torch.sum`;
+            `None` leaves the penalty unreduced.
+    """
+    if eps <= 0:
+        raise ValueError(f"The Charbonnier constant must be positive; got {eps}.")
+    penalty = torch.sqrt((data - prediction) ** 2 + eps**2)
+    return penalty if reduction is None else reduction(penalty)
 
 
 def psnr(

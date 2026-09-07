@@ -13,6 +13,7 @@ from chuchichaestli.utils.functools import (
     broadcast_kwargs,
 )
 from chuchichaestli.utils.formatting import metric_suffix
+from chuchichaestli.utils.tensors import as_inexact, view_along_axis
 from chuchichaestli.utils.modules import (
     info_forward_pass,
     layer_info,
@@ -20,6 +21,7 @@ from chuchichaestli.utils.modules import (
     get_chuchichaestli_block_type,
     get_layer_type,
 )
+from chuchichaestli.utils.arithmetic import Laurent, Lifting, Step, divide, factor, reverse
 from chuchichaestli.utils.ir import build_ir
 from chuchichaestli.utils.info import summary
 from chuchichaestli.utils.visualization import (
@@ -29,6 +31,12 @@ from chuchichaestli.utils.visualization import (
 )
 
 __all__ = [
+    "Laurent",
+    "Lifting",
+    "Step",
+    "divide",
+    "factor",
+    "reverse",
     "partialclass",
     "alias_kwargs",
     "prod",
@@ -37,6 +45,8 @@ __all__ = [
     "broadcast",
     "broadcast_kwargs",
     "metric_suffix",
+    "as_inexact",
+    "view_along_axis",
     "info_forward_pass",
     "layer_info",
     "clear_info_cache",
