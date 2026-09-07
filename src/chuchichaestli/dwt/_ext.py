@@ -303,6 +303,7 @@ def idwt_axis(
     mode: ExtensionModeTypes,
     trim: int,
     out_length: int,
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Reconstruction along one spatial axis, through the compiled kernel.
 
@@ -317,12 +318,14 @@ def idwt_axis(
         mode: Signal extension mode the decomposition used.
         trim: Number of samples the reconstruction leads by.
         out_length: Length the reconstructed axis is trimmed to.
+        out: Storage to write into, when the caller keeps one across axes;
+            only taken when nothing records a gradient.
     """
     _require_constant_filters(rec_lo, rec_hi)
     if not (torch.is_grad_enabled() and coeffs.requires_grad):
         return _dwt_kernels.idwt_axis(
             coeffs.contiguous(), rec_lo, rec_hi, axis, MODE_TO_CODE[mode], trim,
-            out_length,
+            out_length, out,
         )
     return _IdwtAxis.apply(coeffs, rec_lo, rec_hi, axis, mode, trim, out_length)
 

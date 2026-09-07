@@ -212,6 +212,42 @@ class TestAgreement:
             grads.append(x.grad.detach().clone())
         assert torch.allclose(grads[0], grads[1], atol=1e-10)
 
+    @needs_kernels
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4"])
+    @pytest.mark.parametrize("mode", ["zero", "symmetric", "periodization"])
+    def test_the_transforms_write_into_storage_they_are_given(self, name, mode):
+        """Test that both directions take a buffer instead of making one."""
+        wave = wavelet(name)
+        low, high, rec_lo, rec_hi = wave.filters(torch.float64, torch.device("cpu"))
+        code = MODE_TO_CODE[mode]
+        x = torch.randn(2, 3, 32, 32, dtype=torch.float64)
+        pad_lo = wave.filter_len // 2 - 1 if mode == "periodization" else wave.filter_len - 2
+        out_len = 16 if mode == "periodization" else (32 + 2 * pad_lo - wave.filter_len) // 2 + 1
+        made = _ext._dwt_kernels.dwt_axis(x, low, high, 0, code, pad_lo, out_len)
+        given = torch.empty_like(made)
+        again = _ext._dwt_kernels.dwt_axis(x, low, high, 0, code, pad_lo, out_len, given)
+        assert again.data_ptr() == given.data_ptr()
+        assert torch.equal(made, again)
+
+        trim = wave.filter_len // 2 - 1 if mode == "periodization" else wave.filter_len - 2
+        back = _ext._dwt_kernels.idwt_axis(made, rec_lo, rec_hi, 0, code, trim, 32)
+        room = torch.empty_like(back)
+        back_again = _ext._dwt_kernels.idwt_axis(
+            made, rec_lo, rec_hi, 0, code, trim, 32, room
+        )
+        assert back_again.data_ptr() == room.data_ptr()
+        assert torch.equal(back, back_again)
+
+    @needs_kernels
+    def test_storage_of_the_wrong_shape_is_refused(self):
+        """Test that a buffer the transform cannot fill is reported, not filled."""
+        wave = wavelet("db2")
+        low, high, _, _ = wave.filters(torch.float64, torch.device("cpu"))
+        x = torch.randn(2, 1, 32, 32, dtype=torch.float64)
+        wrong = torch.empty(2, 2, 8, 32, dtype=torch.float64)
+        with pytest.raises(RuntimeError, match="shape"):
+            _ext._dwt_kernels.dwt_axis(x, low, high, 0, 0, 2, 17, wrong)
+
     @pytest.mark.parametrize("dimensions", [1, 2, 3])
     def test_the_host_reconstructs_through_the_fused_kernel(self, dimensions):
         """Test that every rank the kernel serves is taken on the host."""

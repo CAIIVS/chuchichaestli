@@ -257,6 +257,7 @@ def _reconstruct(
     axis: int,
     mode: ExtensionModeTypes,
     length: int,
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Merge low- and high-pass band pairs of `h` back along one spatial axis.
 
@@ -267,6 +268,8 @@ def _reconstruct(
         axis: Spatial axis to reconstruct.
         mode: Signal extension mode the decomposition used.
         length: Length the reconstructed axis is trimmed to.
+        out: Storage the kernel writes into, when the caller keeps one across
+            axes; ignored by the pure-torch path.
     """
     dimensions = h.ndim - 2
     groups = h.shape[1] // 2
@@ -277,7 +280,7 @@ def _reconstruct(
         h.device, h.dtype
     ):
         trim = filter_len // 2 - 1 if mode == "periodization" else filter_len - 2
-        return _ext.idwt_axis(h, lo, hi, axis, mode, trim, length)
+        return _ext.idwt_axis(h, lo, hi, axis, mode, trim, length, out)
     weight = _bank(lo, hi, groups, axis, dimensions)
     stride = [1] * dimensions
     stride[axis] = 2

@@ -149,7 +149,8 @@ void idwt_plane(const scalar_t* low, const scalar_t* high, scalar_t* out,
 torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
                             const torch::Tensor& rec_lo,
                             const torch::Tensor& rec_hi, int64_t axis,
-                            int64_t mode, int64_t trim, int64_t out_length) {
+                            int64_t mode, int64_t trim, int64_t out_length,
+                            c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(coeffs);
   C3LI_CHECK_FLOATING(coeffs);
   TORCH_CHECK(coeffs.size(1) % 2 == 0,
@@ -166,7 +167,20 @@ torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
   auto sizes = coeffs.sizes().vec();
   sizes[1] = groups;
   sizes[2 + axis] = out_length;
-  torch::Tensor out = torch::empty(sizes, coeffs.options());
+  // As in the decomposition: a caller merging one axis after another hands the
+  // same storage back every time, and freshly mapped pages cost more to fault
+  // in than the merge costs to run.
+  torch::Tensor out;
+  if (out_opt.has_value()) {
+    out = out_opt.value();
+    TORCH_CHECK(out.sizes().vec() == sizes,
+                "the output tensor does not have the shape the merge writes");
+    TORCH_CHECK(out.scalar_type() == coeffs.scalar_type(),
+                "the output tensor does not have the type of the bands");
+    C3LI_CHECK_CONTIGUOUS(out);
+  } else {
+    out = torch::empty(sizes, coeffs.options());
+  }
 
   const int64_t per_group = layout.outer / (coeffs.size(0) * bands);
   const int64_t lanes = coeffs.size(0) * groups * per_group;
