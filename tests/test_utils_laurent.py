@@ -54,3 +54,24 @@ class TestLaurent:
         q, r = divide(a, b)
         assert apart((q * b) + r, a) < 1e-9
         assert not r or r.span < b.span
+
+
+class TestReverse:
+    """Reversal swaps the two ends without leaving the canonical form."""
+
+    def test_reversing_zero_gives_canonical_zero(self):
+        """Test that the zero polynomial survives a round of reversal."""
+        zero = Laurent.of([0.0])
+        assert reverse(zero) == zero
+        assert reverse(zero).low == 0
+
+    @pytest.mark.parametrize("low", [-3, -1, 0, 2])
+    def test_reversal_is_its_own_inverse(self, low):
+        """Test that reversing twice returns what went in."""
+        p = Laurent.of([1.0, -2.0, 0.5], low)
+        assert reverse(reverse(p)) == p
+
+    def test_reversal_swaps_the_ends(self):
+        """Test that the coefficients come back in the other order."""
+        p = Laurent.of([1.0, 2.0, 3.0], -1)
+        assert reverse(p).c == (3.0, 2.0, 1.0)

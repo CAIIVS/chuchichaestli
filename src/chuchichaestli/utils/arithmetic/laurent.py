@@ -103,6 +103,8 @@ def reverse(p: Laurent) -> Laurent:
     Args:
         p: Polynomial to reverse.
     """
+    if not p.c:
+        return Laurent((), 0)
     return Laurent(tuple(reversed(p.c)), -p.high)
 
 
