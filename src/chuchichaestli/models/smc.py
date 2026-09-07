@@ -86,8 +86,8 @@ class SMConvND(nn.Module):
         )
         self.weight = nn.Parameter(conv.weight.detach().clone())
         self.bias = nn.Parameter(conv.bias.detach().clone()) if bias else None
-        self.scales = nn.Parameter(torch.ones(in_channels))
-        self.gain = nn.Parameter(torch.ones(1))
+        self.scales = nn.Parameter(conv.weight.new_ones(in_channels))
+        self.gain = nn.Parameter(conv.weight.new_ones(1))
 
     def modulated_weight(self) -> torch.Tensor:
         """Return the weight after modulation, demodulation and the gain."""

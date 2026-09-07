@@ -117,6 +117,28 @@ class TestSMConvND:
         assert not torch.isnan(out).any()
 
 
+class TestSMConvNDPlacement:
+    """The modulation parameters live wherever the weight was asked to live."""
+
+    @pytest.mark.parametrize("dtype", [torch.float64, torch.float16])
+    def test_an_explicit_dtype_reaches_every_parameter(self, dtype):
+        """Test that the scales and gain are built in the requested type."""
+        conv = SMConvND(2, 4, kernel_size=3, dtype=dtype)
+        assert conv.weight.dtype == dtype
+        assert conv.scales.dtype == dtype
+        assert conv.gain.dtype == dtype
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+    def test_an_explicit_device_reaches_every_parameter(self):
+        """Test that a module asked for the accelerator is not left split."""
+        conv = SMConvND(2, 4, kernel_size=3, device="cuda")
+        assert conv.weight.is_cuda
+        assert conv.scales.is_cuda
+        assert conv.gain.is_cuda
+        out = conv(torch.randn(1, 4, 8, 8, device="cuda"))
+        assert out.is_cuda
+
+
 class TestSMConvBlock:
     """Tests for the block wrapping the self-modulated convolution."""
 
