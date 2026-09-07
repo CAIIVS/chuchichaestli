@@ -23,7 +23,7 @@ constexpr int64_t kTile = 64;
 // One lane of the decomposition: `length` samples with `inner` between them,
 // split into a low- and a high-pass half of `out_length`. `ext` is scratch the
 // contiguous case writes its boundary extension into.
-template <typename scalar_t>
+template <typename scalar_t, bool with_detail = true>
 void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
                const scalar_t* lo, const scalar_t* hi, int64_t filter_len,
                int64_t length, int64_t out_length, int64_t inner, int64_t mode,
@@ -76,10 +76,14 @@ void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
             const auto pair = at::vec::deinterleave2(
                 Vec::loadu(tap - f), Vec::loadu(tap - f + width));
             acc_low = acc_low + Vec(lo[f]) * pair.first;
-            acc_high = acc_high + Vec(hi[f]) * pair.first;
+            if constexpr (with_detail) {
+              acc_high = acc_high + Vec(hi[f]) * pair.first;
+            }
           }
           acc_low.store(out_low + k, rest);
-          acc_high.store(out_high + k, rest);
+          if constexpr (with_detail) {
+            acc_high.store(out_high + k, rest);
+          }
         }
       } else {
         using acc = acc_t<scalar_t>;
@@ -90,10 +94,14 @@ void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
           for (int64_t f = 0; f < filter_len; ++f) {
             const acc value = static_cast<acc>(tap[-f]);
             acc_low += static_cast<acc>(lo[f]) * value;
-            acc_high += static_cast<acc>(hi[f]) * value;
+            if constexpr (with_detail) {
+              acc_high += static_cast<acc>(hi[f]) * value;
+            }
           }
           out_low[k] = static_cast<scalar_t>(acc_low);
-          out_high[k] = static_cast<scalar_t>(acc_high);
+          if constexpr (with_detail) {
+            out_high[k] = static_cast<scalar_t>(acc_high);
+          }
         }
       }
       continue;
@@ -121,10 +129,14 @@ void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
                                  : Vec(scalar_t(0));
           const auto pair = at::vec::deinterleave2(first, second);
           acc_low = acc_low + Vec(lo[f]) * pair.first;
-          acc_high = acc_high + Vec(hi[f]) * pair.first;
+          if constexpr (with_detail) {
+            acc_high = acc_high + Vec(hi[f]) * pair.first;
+          }
         }
         acc_low.store(low_row, rest);
-        acc_high.store(high_row, rest);
+        if constexpr (with_detail) {
+          acc_high.store(high_row, rest);
+        }
         k += rest - 1;
       } else if (inner == 1) {
         // the tail, and every output whose taps reach past an end
@@ -136,7 +148,9 @@ void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
           for (int64_t f = 0; f < filter_len; ++f) {
             const acc value = static_cast<acc>(base[-f]);
             acc_low += static_cast<acc>(lo[f]) * value;
-            acc_high += static_cast<acc>(hi[f]) * value;
+            if constexpr (with_detail) {
+              acc_high += static_cast<acc>(hi[f]) * value;
+            }
           }
         } else {
           for (int64_t f = 0; f < filter_len; ++f) {
@@ -146,11 +160,15 @@ void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
                 static_cast<acc>(ref.lo) * static_cast<acc>(lane[0]) +
                 static_cast<acc>(ref.hi) * static_cast<acc>(lane[length - 1]);
             acc_low += static_cast<acc>(lo[f]) * value;
-            acc_high += static_cast<acc>(hi[f]) * value;
+            if constexpr (with_detail) {
+              acc_high += static_cast<acc>(hi[f]) * value;
+            }
           }
         }
         *low_row = static_cast<scalar_t>(acc_low);
-        *high_row = static_cast<scalar_t>(acc_high);
+        if constexpr (with_detail) {
+          *high_row = static_cast<scalar_t>(acc_high);
+        }
       } else if (interior) {
         // every tap reads a sample that exists, so no rule is consulted
         using acc = acc_t<scalar_t>;
@@ -163,10 +181,14 @@ void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
             for (int64_t f = 0; f < filter_len; ++f) {
               const Vec value = Vec::loadu(base - f * inner + q);
               acc_low = acc_low + Vec(lo[f]) * value;
-              acc_high = acc_high + Vec(hi[f]) * value;
+              if constexpr (with_detail) {
+                acc_high = acc_high + Vec(hi[f]) * value;
+              }
             }
             acc_low.store(low_row + q);
-            acc_high.store(high_row + q);
+            if constexpr (with_detail) {
+              acc_high.store(high_row + q);
+            }
           }
         }
         for (; q < inner; ++q) {
@@ -175,10 +197,14 @@ void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
           for (int64_t f = 0; f < filter_len; ++f) {
             const acc value = static_cast<acc>(base[-f * inner + q]);
             acc_low += static_cast<acc>(lo[f]) * value;
-            acc_high += static_cast<acc>(hi[f]) * value;
+            if constexpr (with_detail) {
+              acc_high += static_cast<acc>(hi[f]) * value;
+            }
           }
           low_row[q] = static_cast<scalar_t>(acc_low);
-          high_row[q] = static_cast<scalar_t>(acc_high);
+          if constexpr (with_detail) {
+            high_row[q] = static_cast<scalar_t>(acc_high);
+          }
         }
       } else {
         // the rules depend on the sample index alone, so each tap
@@ -208,12 +234,16 @@ void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
                                 weight_lo * static_cast<acc>(edge_lo[q0 + j]) +
                                 weight_hi * static_cast<acc>(edge_hi[q0 + j]);
               acc_low[j] += wl * value;
-              acc_high[j] += wh * value;
+              if constexpr (with_detail) {
+                acc_high[j] += wh * value;
+              }
             }
           }
           for (int64_t j = 0; j < span; ++j) {
             low_row[q0 + j] = static_cast<scalar_t>(acc_low[j]);
-            high_row[q0 + j] = static_cast<scalar_t>(acc_high[j]);
+            if constexpr (with_detail) {
+              high_row[q0 + j] = static_cast<scalar_t>(acc_high[j]);
+            }
           }
         }
       }
@@ -295,6 +325,64 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
         scalar_t* out_high = out_low + per_group * out_length * inner;
         dwt_plane(lane, out_low, out_high, lo, hi, filter_len, length,
                   out_length, inner, mode, pad_lo, ext.data());
+      }
+    });
+  });
+  return out;
+}
+
+// Keep only the low-pass half of every band along one spatial axis.
+// `(batch, groups, ...)` in, `(batch, groups, ...)` out.
+//
+// An approximation pyramid discards every detail band it is handed, and the
+// channels it carries double on every axis that computes them. Skipping the
+// high-pass leaves the arithmetic and the channel count where they started.
+torch::Tensor dwt_lowpass_axis_cpu(const torch::Tensor& x,
+                                   const torch::Tensor& dec_lo, int64_t axis,
+                                   int64_t mode, int64_t pad_lo,
+                                   int64_t out_length,
+                                   c10::optional<torch::Tensor> out_opt) {
+  C3LI_CHECK_CONTIGUOUS(x);
+  C3LI_CHECK_FLOATING(x);
+
+  const AxisLayout layout = axis_layout(x, axis);
+  const int64_t filter_len = dec_lo.numel();
+  const int64_t offset = filter_len - 1 - pad_lo;
+  const int64_t length = layout.length;
+  const int64_t inner = layout.inner;
+
+  auto sizes = x.sizes().vec();
+  sizes[2 + axis] = out_length;
+  torch::Tensor out;
+  if (out_opt.has_value()) {
+    out = out_opt.value();
+    TORCH_CHECK(out.sizes().vec() == sizes,
+                "the output tensor does not have the shape the transform writes");
+    TORCH_CHECK(out.scalar_type() == x.scalar_type(),
+                "the output tensor does not have the type of the input");
+    C3LI_CHECK_CONTIGUOUS(out);
+  } else {
+    out = torch::empty(sizes, x.options());
+  }
+
+  C3LI_DISPATCH_FLOATING(x.scalar_type(), "dwt_lowpass_axis_cpu", [&] {
+    const auto* src = x.data_ptr<scalar_t>();
+    auto* dst = out.data_ptr<scalar_t>();
+    const auto lo_filter = dec_lo.to(x.scalar_type()).contiguous();
+    const auto* lo = lo_filter.data_ptr<scalar_t>();
+    using Vec = at::vec::Vectorized<scalar_t>;
+    const int64_t width = Vec::size();
+    const int64_t extent = pad_lo + 2 * out_length + offset;
+
+    parallel_for(layout.outer, [&](int64_t begin, int64_t end) {
+      std::vector<scalar_t> ext(
+          inner == 1 ? std::max<int64_t>(extent, 0) + 2 * width : 0);
+      for (int64_t o = begin; o < end; ++o) {
+        const scalar_t* lane = src + o * length * inner;
+        scalar_t* out_low = dst + o * out_length * inner;
+        dwt_plane<scalar_t, false>(lane, out_low, out_low, lo, lo, filter_len,
+                                   length, out_length, inner, mode, pad_lo,
+                                   ext.data());
       }
     });
   });

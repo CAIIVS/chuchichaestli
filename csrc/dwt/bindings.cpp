@@ -32,6 +32,12 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                            int64_t mode, int64_t pad_lo, int64_t out_length,
                            c10::optional<torch::Tensor> out_opt);
 
+torch::Tensor dwt_lowpass_axis_cpu(const torch::Tensor& x,
+                                   const torch::Tensor& dec_lo, int64_t axis,
+                                   int64_t mode, int64_t pad_lo,
+                                   int64_t out_length,
+                                   c10::optional<torch::Tensor> out_opt);
+
 torch::Tensor dwt_nd_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                          const torch::Tensor& dec_hi, int64_t mode,
                          const std::vector<int64_t>& pad_los,
@@ -61,6 +67,11 @@ torch::Tensor idwt_axis_cuda(const torch::Tensor& coeffs,
                              const torch::Tensor& rec_hi, int64_t axis,
                              int64_t mode, int64_t trim, int64_t out_length);
 
+torch::Tensor dwt_lowpass_axis_cuda(const torch::Tensor& x,
+                                    const torch::Tensor& dec_lo, int64_t axis,
+                                    int64_t mode, int64_t pad_lo,
+                                    int64_t out_length);
+
 torch::Tensor haar_nd_cuda(const torch::Tensor& x, double scale);
 #endif
 
@@ -78,6 +89,24 @@ torch::Tensor dwt_axis(const torch::Tensor& x, const torch::Tensor& dec_lo,
   }
 #endif
   return dwt_axis_cpu(x, dec_lo, dec_hi, axis, mode, pad_lo, out_length, out);
+}
+
+// Keep the low-pass half along one spatial axis, on whichever device the
+// input is on.
+torch::Tensor dwt_lowpass_axis(const torch::Tensor& x,
+                               const torch::Tensor& dec_lo, int64_t axis,
+                               int64_t mode, int64_t pad_lo,
+                               int64_t out_length,
+                               c10::optional<torch::Tensor> out = c10::nullopt) {
+  RECORD_FUNCTION("c3li::dwt_lowpass_axis", std::vector<c10::IValue>());
+#ifdef C3LI_WITH_GPU
+  if (x.is_cuda()) {
+    TORCH_CHECK(!out.has_value(),
+                "the accelerator transform allocates its own output");
+    return dwt_lowpass_axis_cuda(x, dec_lo, axis, mode, pad_lo, out_length);
+  }
+#endif
+  return dwt_lowpass_axis_cpu(x, dec_lo, axis, mode, pad_lo, out_length, out);
 }
 
 // Merge band pairs along one spatial axis, on whichever device the input is on.
@@ -292,6 +321,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "Fused multi-level decomposition over every axis");
   m.def("haar_wavedec", &c3li::haar_wavedec,
         "Fused multi-level Haar decomposition");
+  m.def("dwt_lowpass_axis", &c3li::dwt_lowpass_axis,
+        "Low-pass half of a decomposition along one spatial axis",
+        py::arg("x"), py::arg("dec_lo"), py::arg("axis"), py::arg("mode"),
+        py::arg("pad_lo"), py::arg("out_length"), py::arg("out") = py::none());
   m.def("dwt_nd", &c3li::dwt_nd,
         "Fused decomposition over every axis");
   m.def("idwt_nd", &c3li::idwt_nd,

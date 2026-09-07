@@ -568,3 +568,80 @@ class TestFusedOnGpu:
         )
         assert torch.allclose(host, device.cpu(), atol=1e-5)
         assert torch.allclose(host, x, atol=1e-4)
+
+
+@needs_kernels
+class TestLowpassOnly:
+    """The decomposition that skips the detail bands it would discard."""
+
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4", "sym4", "coif1"])
+    @pytest.mark.parametrize("mode", ["zero", "symmetric", "periodization"])
+    @pytest.mark.parametrize("length", [16, 17])
+    def test_it_matches_the_low_pass_half_of_the_full_transform(
+        self, name, mode, length
+    ):
+        """Test that dropping the detail changes nothing else."""
+        if mode == "periodization" and length % 2:
+            pytest.skip("the critically sampled mode needs an even axis")
+        wave = wavelet(name)
+        filter_len = wave.filter_len
+        dec_lo, dec_hi, _, _ = wave.filters(torch.float64, torch.device("cpu"))
+        torch.manual_seed(0)
+        x = torch.randn(2, 3, length, dtype=torch.float64)
+        if mode == "periodization":
+            pad_lo, pad_hi = filter_len // 2 - 1, filter_len // 2
+        else:
+            pad_lo, pad_hi = filter_len - 2, filter_len - 2 + (length % 2)
+        out_length = (length + pad_lo + pad_hi - filter_len) // 2 + 1
+        code = MODE_TO_CODE[mode]
+        full = _ext._dwt_kernels.dwt_axis(
+            x, dec_lo, dec_hi, 0, code, pad_lo, out_length, None
+        )
+        low = _ext._dwt_kernels.dwt_lowpass_axis(
+            x, dec_lo, 0, code, pad_lo, out_length, None
+        )
+        assert low.shape == full[:, 0::2].shape
+        assert torch.allclose(low, full[:, 0::2], atol=1e-12)
+
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4"])
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    @pytest.mark.parametrize("mode", ["zero", "symmetric", "periodization"])
+    def test_the_approximation_agrees_with_the_full_transform(
+        self, name, dimensions, mode
+    ):
+        """Test that the pyramid's band is the one the full transform gives."""
+        from chuchichaestli.dwt.functional import dwtn_approx
+
+        torch.manual_seed(0)
+        axes = tuple(range(-dimensions, 0))
+        x = torch.randn(2, 3, *([16] * dimensions), dtype=torch.float64)
+        got = dwtn_approx(x, name, mode, axes)
+        want = dwtn(x, name, mode, axes)["a" * dimensions]
+        assert torch.allclose(got, want, atol=1e-12)
+
+    def test_the_approximation_still_carries_a_gradient(self):
+        """Test that the differentiable route is taken when one is needed."""
+        from chuchichaestli.dwt.functional import dwtn_approx
+
+        x = torch.randn(1, 2, 16, 16, dtype=torch.float64, requires_grad=True)
+        dwtn_approx(x, "db2", "zero", (2, 3)).sum().backward()
+        assert x.grad is not None
+        assert torch.isfinite(x.grad).all()
+
+    @needs_gpu
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4"])
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_the_two_devices_give_one_answer(self, name, dimensions):
+        """Test that the accelerator carries the same transform as the host."""
+        from chuchichaestli.dwt.functional import dwtn_approx
+
+        torch.manual_seed(0)
+        axes = tuple(range(-dimensions, 0))
+        x = torch.randn(2, 3, *([16] * dimensions))
+        host = dwtn_approx(x, name, "zero", axes)
+        device = dwtn_approx(x.cuda(), name, "zero", axes)
+        assert host.shape == device.shape
+        assert torch.allclose(host, device.cpu(), atol=1e-5)
+        assert torch.allclose(
+            device.cpu(), dwtn(x, name, "zero", axes)["a" * dimensions], atol=1e-5
+        )

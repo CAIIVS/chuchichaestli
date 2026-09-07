@@ -241,11 +241,27 @@ def _decompose_lowpass(
         axis: Spatial axis to transform.
         mode: Signal extension mode.
     """
+    from chuchichaestli.dwt import _ext
+
     dimensions = h.ndim - 2
     groups = h.shape[1]
-    h = _pad_for_decomposition(h, axis, lo.numel(), mode)
+    filter_len = lo.numel()
+    if _ext.lowpass_kernel_applies(h.device, h.dtype) and not (
+        torch.is_grad_enabled() and h.requires_grad
+    ):
+        length = h.shape[2 + axis]
+        if mode == "periodization" and length % 2:
+            h = pad_signal(h, 2 + axis, 0, 1, "constant")
+            length += 1
+        if mode == "periodization":
+            pad_lo, pad_hi = filter_len // 2 - 1, filter_len // 2
+        else:
+            pad_lo, pad_hi = filter_len - 2, filter_len - 2 + (length % 2)
+        out_length = (length + pad_lo + pad_hi - filter_len) // 2 + 1
+        return _ext.dwt_lowpass_axis(h, lo, axis, mode, pad_lo, out_length)
+    h = _pad_for_decomposition(h, axis, filter_len, mode)
     shape = [1] * dimensions
-    shape[axis] = lo.numel()
+    shape[axis] = filter_len
     weight = lo.flip(0).reshape(1, 1, *shape).repeat(groups, 1, *([1] * dimensions))
     stride = [1] * dimensions
     stride[axis] = 2
@@ -480,17 +496,12 @@ def dwtn_approx(
         mode: Signal extension mode.
         axes: Axes to transform; the trailing one if omitted.
     """
-    from chuchichaestli.dwt import _ext
-
     data = as_inexact(data)
     axes = _resolve_axes(data.ndim, axes)
-    dec_lo, dec_hi, _, _ = as_wavelet(wavelet).filters(data.dtype, data.device)
+    dec_lo, _, _, _ = as_wavelet(wavelet).filters(data.dtype, data.device)
     h, lead, perm = _fold(data, axes)
-    if _ext.kernels_available(h.device, h.dtype):
-        h = _decompose_axes(h, dec_lo, dec_hi, len(axes), mode)
-    else:
-        for axis in range(len(axes)):
-            h = _decompose_lowpass(h, dec_lo, axis, mode)
+    for axis in range(len(axes)):
+        h = _decompose_lowpass(h, dec_lo, axis, mode)
     return _unfold(h[:, 0], lead, perm)
 
 

@@ -13,7 +13,7 @@ namespace {
 
 // One thread per output sample, indexed so neighbouring threads differ in the
 // contiguous axis and coalesce; a stride of two where that axis is transformed.
-template <typename scalar_t>
+template <typename scalar_t, bool with_detail>
 __global__ void dwt_axis_kernel(
     const scalar_t* __restrict__ src, scalar_t* __restrict__ dst,
     const scalar_t* __restrict__ lo, const scalar_t* __restrict__ hi,
@@ -43,7 +43,9 @@ __global__ void dwt_axis_kernel(
       for (int64_t f = 0; f < filter_len; ++f) {
         const acc value = static_cast<acc>(base[-f * inner]);
         low += static_cast<acc>(lo[f]) * value;
-        high += static_cast<acc>(hi[f]) * value;
+        if constexpr (with_detail) {
+          high += static_cast<acc>(hi[f]) * value;
+        }
       }
     } else {
       const acc edge_lo = static_cast<acc>(lane[q]);
@@ -55,10 +57,17 @@ __global__ void dwt_axis_kernel(
                           static_cast<acc>(ref.lo) * edge_lo +
                           static_cast<acc>(ref.hi) * edge_hi;
         low += static_cast<acc>(lo[f]) * value;
-        high += static_cast<acc>(hi[f]) * value;
+        if constexpr (with_detail) {
+          high += static_cast<acc>(hi[f]) * value;
+        }
       }
     }
 
+    if constexpr (!with_detail) {
+      dst[o * out_length * inner + k * inner + q] =
+          static_cast<scalar_t>(low);
+      continue;
+    }
     scalar_t* out_low =
         dst + ((batch * (2 * groups) + 2 * group) * per_group + pre) *
                   out_length * inner;
@@ -96,11 +105,50 @@ torch::Tensor dwt_axis_cuda(const torch::Tensor& x, const torch::Tensor& dec_lo,
   C3LI_DISPATCH_FLOATING(x.scalar_type(), "dwt_axis_cuda", [&] {
     const auto lo_filter = dec_lo.to(x.options()).contiguous();
     const auto hi_filter = dec_hi.to(x.options()).contiguous();
-    dwt_axis_kernel<scalar_t>
+    dwt_axis_kernel<scalar_t, true>
         <<<blocks_for(total), kThreadsPerBlock, 0,
            at::cuda::getCurrentCUDAStream()>>>(
             x.data_ptr<scalar_t>(), out.data_ptr<scalar_t>(),
             lo_filter.data_ptr<scalar_t>(), hi_filter.data_ptr<scalar_t>(),
+            layout.length, layout.inner, out_length, filter_len, offset, mode,
+            groups, per_group, total);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
+  return out;
+}
+
+// Keep only the low-pass half, for an approximation pyramid that would drop
+// the detail bands and carry twice the channels into the next axis.
+torch::Tensor dwt_lowpass_axis_cuda(const torch::Tensor& x,
+                                    const torch::Tensor& dec_lo, int64_t axis,
+                                    int64_t mode, int64_t pad_lo,
+                                    int64_t out_length) {
+  C3LI_CHECK_CONTIGUOUS(x);
+  C3LI_CHECK_FLOATING(x);
+  const at::cuda::CUDAGuard guard(x.device());
+
+  const AxisLayout layout = axis_layout(x, axis);
+  const int64_t filter_len = dec_lo.numel();
+  const int64_t offset = filter_len - 1 - pad_lo;
+
+  auto sizes = x.sizes().vec();
+  sizes[2 + axis] = out_length;
+  torch::Tensor out = torch::empty(sizes, x.options());
+
+  const int64_t groups = x.size(1);
+  const int64_t per_group = layout.outer / (x.size(0) * groups);
+  const int64_t total = layout.outer * out_length * layout.inner;
+  if (total == 0) {
+    return out;
+  }
+
+  C3LI_DISPATCH_FLOATING(x.scalar_type(), "dwt_lowpass_axis_cuda", [&] {
+    const auto lo_filter = dec_lo.to(x.options()).contiguous();
+    dwt_axis_kernel<scalar_t, false>
+        <<<blocks_for(total), kThreadsPerBlock, 0,
+           at::cuda::getCurrentCUDAStream()>>>(
+            x.data_ptr<scalar_t>(), out.data_ptr<scalar_t>(),
+            lo_filter.data_ptr<scalar_t>(), lo_filter.data_ptr<scalar_t>(),
             layout.length, layout.inner, out_length, filter_len, offset, mode,
             groups, per_group, total);
     C10_CUDA_KERNEL_LAUNCH_CHECK();

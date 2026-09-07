@@ -33,6 +33,8 @@ __all__ = [
     "haar_wavedec",
     "wavedec_axes",
     "fused_recursion_applies",
+    "dwt_lowpass_axis",
+    "lowpass_kernel_applies",
     "lift_axis",
     "lift_axis_applies",
 ]
@@ -168,6 +170,7 @@ class _DwtAxis(torch.autograd.Function):
         return grad, None, None, None, None, None, None, None
 
 
+
 @lru_cache(maxsize=32)
 def _lifting_arguments(name: str) -> tuple:
     """Factor a wavelet's bank into the arguments the lifting kernel takes.
@@ -242,6 +245,46 @@ def lift_axis(x: torch.Tensor, wavelet: str | Wavelet, axis: int) -> torch.Tenso
         a_gain, a_delay, d_gain, d_delay,
     )
 
+
+
+def lowpass_kernel_applies(device: torch.device, dtype: torch.dtype) -> bool:
+    """Whether the low-pass-only decomposition has a kernel here.
+
+    Both the host and the accelerator carry one, so this is the same question
+    as whether the kernels serve this device and type at all.
+
+    Args:
+        device: Device the transform runs on.
+        dtype: Type the transform runs in.
+    """
+    return kernels_available(device, dtype)
+
+
+def dwt_lowpass_axis(
+    x: torch.Tensor,
+    dec_lo: torch.Tensor,
+    axis: int,
+    mode: ExtensionModeTypes,
+    pad_lo: int,
+    out_length: int,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Low-pass half of a decomposition along one axis, through the kernel.
+
+    Args:
+        x: Bands so far, shaped `(batch, groups, spatial...)`.
+        dec_lo: Decomposition low-pass filter.
+        axis: Spatial axis to transform.
+        mode: Signal extension mode.
+        pad_lo: Number of samples the decomposition prepends.
+        out_length: Length of the transformed axis.
+        out: Storage to write into, when the caller keeps one across axes.
+    """
+    _require_constant_filters(dec_lo)
+    return _dwt_kernels.dwt_lowpass_axis(
+        x.contiguous(), dec_lo, axis, MODE_TO_CODE[mode], pad_lo, out_length,
+        out,
+    )
 
 
 def dwt_axis(
