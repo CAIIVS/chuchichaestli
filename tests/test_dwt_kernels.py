@@ -502,6 +502,43 @@ class TestLifting:
 
 
 @needs_kernels
+class TestLiftingEntryPoint:
+    """The supported way in to the lifting kernel."""
+
+    @pytest.mark.parametrize("name", ["haar", "db2", "sym4", "bior2.2"])
+    @pytest.mark.parametrize("groups", [1, 3])
+    def test_the_wrapper_factors_and_lays_out_as_the_kernel_does(
+        self, name, groups
+    ):
+        """Test that it agrees with the transform it stands in for."""
+        torch.manual_seed(0)
+        x = torch.randn(2, groups, 32, dtype=torch.float64)
+        got = _ext.lift_axis(x, name, 0)
+        bands = dwtn(x, name, "periodization", (2,))
+        want = torch.empty_like(got)
+        want[:, 0::2] = bands["a"]
+        want[:, 1::2] = bands["d"]
+        assert torch.allclose(got, want, atol=1e-10)
+
+    def test_a_wavelet_is_factored_once(self):
+        """Test that the factorization is held rather than redone."""
+        from chuchichaestli.dwt._ext import _lifting_arguments
+
+        _lifting_arguments.cache_clear()
+        x = torch.randn(1, 1, 16, dtype=torch.float64)
+        for _ in range(4):
+            _ext.lift_axis(x, "db4", 0)
+        assert _lifting_arguments.cache_info().misses == 1
+
+    def test_lifting_declines_an_odd_axis(self):
+        """Test that an axis it cannot wrap is refused rather than mangled."""
+        x = torch.randn(1, 1, 15)
+        assert not _ext.lift_axis_applies(x.device, x.dtype, 15)
+        with pytest.raises(RuntimeError, match="even host axis"):
+            _ext.lift_axis(x, "db2", 0)
+
+
+@needs_kernels
 @needs_gpu
 class TestFusedOnGpu:
     """The fused transforms, on whichever device they are handed."""

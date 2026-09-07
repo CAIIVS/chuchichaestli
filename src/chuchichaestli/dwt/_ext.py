@@ -33,6 +33,8 @@ __all__ = [
     "haar_wavedec",
     "wavedec_axes",
     "fused_recursion_applies",
+    "lift_axis",
+    "lift_axis_applies",
 ]
 
 
@@ -164,6 +166,82 @@ class _DwtAxis(torch.autograd.Function):
             padded = padded.narrow(2 + axis, 0, wanted)
         grad = pad_signal_adjoint(padded, 2 + axis, pad_lo, pad_hi, mode, length)
         return grad, None, None, None, None, None, None, None
+
+
+@lru_cache(maxsize=32)
+def _lifting_arguments(name: str) -> tuple:
+    """Factor a wavelet's bank into the arguments the lifting kernel takes.
+
+    The factorization is the Euclidean algorithm on the polyphase matrix and
+    costs more than a short transform, so each wavelet is factored once.
+
+    Args:
+        name: Name of the wavelet to factor.
+    """
+    from chuchichaestli.dwt.wavelet import wavelet as as_wavelet
+    from chuchichaestli.utils.arithmetic.lifting import factor
+
+    wave = as_wavelet(name)
+    lifting = factor(wave.dec_lo, wave.dec_hi)
+    return (
+        [int(step.on_detail) for step in lifting.steps],
+        [list(step.q.c) for step in lifting.steps],
+        [int(step.q.low) for step in lifting.steps],
+        float(lifting.approx[0]),
+        int(lifting.approx[1]),
+        float(lifting.detail[0]),
+        int(lifting.detail[1]),
+    )
+
+
+def lift_axis_applies(
+    device: torch.device, dtype: torch.dtype, length: int
+) -> bool:
+    """Whether the lifting kernel serves a transform of this shape.
+
+    Lifting updates the samples in place and wraps at the ends, so it is the
+    critically sampled mode on an even axis, and only where the kernel runs.
+
+    Args:
+        device: Device the transform runs on.
+        dtype: Type the transform runs in.
+        length: Length of the axis being transformed.
+    """
+    return (
+        device.type == "cpu"
+        and length % 2 == 0
+        and kernels_available(device, dtype)
+    )
+
+
+def lift_axis(x: torch.Tensor, wavelet: str | Wavelet, axis: int) -> torch.Tensor:
+    """Split every band along one spatial axis by lifting.
+
+    Fewer multiplications than the convolution and no scratch buffer, at the
+    cost of holding to the critically sampled mode on an even axis.
+
+    Args:
+        x: Bands so far, shaped `(batch, groups, spatial...)`.
+        wavelet: Wavelet, by name or as a `Wavelet`.
+        axis: Spatial axis to transform.
+
+    Raises:
+        RuntimeError: If the kernel does not serve this transform.
+    """
+    name = wavelet if isinstance(wavelet, str) else wavelet.name
+    if not lift_axis_applies(x.device, x.dtype, x.shape[2 + axis]):
+        raise RuntimeError(
+            "lifting runs on an even host axis the kernels were built for;"
+            f" got a {x.shape[2 + axis]}-long {x.dtype} axis on {x.device}"
+        )
+    on_detail, coeffs, lows, a_gain, a_delay, d_gain, d_delay = (
+        _lifting_arguments(name)
+    )
+    return _dwt_kernels.dwt_lift_axis(
+        x.contiguous(), axis, on_detail, coeffs, lows,
+        a_gain, a_delay, d_gain, d_delay,
+    )
+
 
 
 def dwt_axis(
