@@ -287,4 +287,140 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
   return out;
 }
 
+// Split every band over every spatial axis in one pass.
+// `(batch, groups, ...)` in, `(batch, 2**d * groups, ...)` out.
+//
+// The per-axis form writes a whole tensor between axes, so a two-dimensional
+// decomposition streams its result through memory three times over. Here one
+// lane is carried through every axis in a scratch buffer that stays in cache,
+// and only the finished lane is written out.
+torch::Tensor dwt_nd_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
+                         const torch::Tensor& dec_hi, int64_t mode,
+                         const std::vector<int64_t>& pad_los,
+                         const std::vector<int64_t>& out_lengths) {
+  C3LI_CHECK_CONTIGUOUS(x);
+  C3LI_CHECK_FLOATING(x);
+  TORCH_CHECK(dec_lo.numel() == dec_hi.numel(),
+              "the two decomposition filters must have the same length");
+  const int64_t dimensions = static_cast<int64_t>(out_lengths.size());
+  TORCH_CHECK(dimensions >= 1 && dimensions <= 3,
+              "a fused decomposition runs over one to three axes");
+  TORCH_CHECK(static_cast<int64_t>(pad_los.size()) == dimensions,
+              "every axis needs a padding");
+  TORCH_CHECK(x.dim() == dimensions + 2,
+              "the input must carry a batch and a channel axis");
+
+  const int64_t corners = int64_t{1} << dimensions;
+  const int64_t groups = x.size(1);
+  const int64_t batch = x.size(0);
+  const int64_t filter_len = dec_lo.numel();
+
+  std::vector<int64_t> in_shape(dimensions);
+  for (int64_t d = 0; d < dimensions; ++d) {
+    in_shape[d] = x.size(2 + d);
+  }
+
+  auto sizes = x.sizes().vec();
+  sizes[1] = corners * groups;
+  for (int64_t d = 0; d < dimensions; ++d) {
+    sizes[2 + d] = out_lengths[d];
+  }
+  torch::Tensor out = torch::empty(sizes, x.options());
+
+  // the widest a stage gets: axes already done are output length, the rest
+  // are still input length
+  int64_t scratch = 0;
+  for (int64_t stage = 0; stage <= dimensions; ++stage) {
+    int64_t extent = int64_t{1} << stage;
+    for (int64_t d = 0; d < dimensions; ++d) {
+      extent *= (d < stage) ? out_lengths[d] : in_shape[d];
+    }
+    scratch = std::max(scratch, extent);
+  }
+
+  C3LI_DISPATCH_FLOATING(x.scalar_type(), "dwt_nd_cpu", [&] {
+    const auto* src = x.data_ptr<scalar_t>();
+    auto* dst = out.data_ptr<scalar_t>();
+    const auto lo_filter = dec_lo.to(x.scalar_type()).contiguous();
+    const auto hi_filter = dec_hi.to(x.scalar_type()).contiguous();
+    const auto* lo = lo_filter.data_ptr<scalar_t>();
+    const auto* hi = hi_filter.data_ptr<scalar_t>();
+
+    int64_t in_lane = 1;
+    for (int64_t d = 0; d < dimensions; ++d) {
+      in_lane *= in_shape[d];
+    }
+    int64_t out_lane = 1;
+    for (int64_t d = 0; d < dimensions; ++d) {
+      out_lane *= out_lengths[d];
+    }
+    int64_t widest_ext = 0;
+    for (int64_t d = 0; d < dimensions; ++d) {
+      const int64_t offset = filter_len - 1 - pad_los[d];
+      widest_ext = std::max(widest_ext, pad_los[d] + 2 * out_lengths[d] + offset);
+    }
+
+    parallel_for(batch * groups, [&](int64_t begin, int64_t end) {
+      // kept across calls: a lane's working set is small and reallocating it
+      // per chunk costs more than the split does on a short axis
+      static thread_local std::vector<scalar_t> front_buf;
+      static thread_local std::vector<scalar_t> back_buf;
+      static thread_local std::vector<scalar_t> ext_buf;
+      const int64_t ext_want =
+          widest_ext + 2 * at::vec::Vectorized<scalar_t>::size();
+      if (static_cast<int64_t>(front_buf.size()) < scratch) {
+        front_buf.resize(scratch);
+        back_buf.resize(scratch);
+      }
+      if (static_cast<int64_t>(ext_buf.size()) < ext_want) {
+        ext_buf.resize(ext_want);
+      }
+      std::vector<scalar_t>& front = front_buf;
+      std::vector<scalar_t>& back = back_buf;
+
+      for (int64_t o = begin; o < end; ++o) {
+        const int64_t group = o % groups;
+        const int64_t b = o / groups;
+        const scalar_t* lane = src + (b * groups + group) * in_lane;
+        std::copy(lane, lane + in_lane, front.data());
+
+        // axes split from the first outwards, doubling the planes each time.
+        // A plane still carries the axes not yet done, so the ones outside
+        // this axis are walked here.
+        int64_t plane_len = in_lane;
+        int64_t planes = 1;
+        for (int64_t axis = 0; axis < dimensions; ++axis) {
+          const int64_t length = in_shape[axis];
+          const int64_t wanted = out_lengths[axis];
+          int64_t inner = 1;
+          for (int64_t d = axis + 1; d < dimensions; ++d) {
+            inner *= in_shape[d];
+          }
+          const int64_t outer = plane_len / (length * inner);
+          const int64_t split = outer * wanted * inner;
+          for (int64_t pl = 0; pl < planes; ++pl) {
+            const scalar_t* from = front.data() + pl * plane_len;
+            scalar_t* low = back.data() + (2 * pl) * split;
+            scalar_t* high = back.data() + (2 * pl + 1) * split;
+            dwt_plane(from, low, high, lo, hi, filter_len, length, wanted,
+                      inner, mode, pad_los[axis], ext_buf.data(), outer);
+          }
+          front.swap(back);
+          plane_len = split;
+          planes *= 2;
+        }
+
+        // the split interleaves low and high per plane, which is the order
+        // the subband names are read in
+        for (int64_t c = 0; c < corners; ++c) {
+          std::copy(front.data() + c * out_lane,
+                    front.data() + (c + 1) * out_lane,
+                    dst + ((b * groups + group) * corners + c) * out_lane);
+        }
+      }
+    });
+  });
+  return out;
+}
+
 }  // namespace c3li

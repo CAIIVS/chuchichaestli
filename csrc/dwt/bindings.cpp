@@ -31,6 +31,11 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                            const torch::Tensor& dec_hi, int64_t axis,
                            int64_t mode, int64_t pad_lo, int64_t out_length);
 
+torch::Tensor dwt_nd_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
+                         const torch::Tensor& dec_hi, int64_t mode,
+                         const std::vector<int64_t>& pad_los,
+                         const std::vector<int64_t>& out_lengths);
+
 torch::Tensor idwt_axis_cpu(const torch::Tensor& coeffs,
                             const torch::Tensor& rec_lo,
                             const torch::Tensor& rec_hi, int64_t axis,
@@ -213,6 +218,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "Fused multi-level decomposition over every axis");
   m.def("haar_wavedec", &c3li::haar_wavedec,
         "Fused multi-level Haar decomposition");
+  m.def("dwt_nd", &c3li::dwt_nd_cpu,
+        "Fused decomposition over every axis");
   m.def("idwt_nd", &c3li::idwt_nd_cpu,
         "Fused reconstruction over every axis");
   m.def("has_gpu", &c3li::has_gpu, "Whether GPU kernels were compiled in");
