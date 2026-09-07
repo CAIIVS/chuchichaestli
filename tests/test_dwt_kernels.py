@@ -798,3 +798,31 @@ class TestGradientsKeepTheKernel:
         finally:
             _ext.USE_CUSTOM_KERNELS = with_torch
         assert torch.allclose(x.grad, plain.grad, atol=1e-10)
+
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_the_fused_decomposition_agrees_with_the_axes_in_turn(
+        self, dimensions
+    ):
+        """Test that the fused forward and its adjoint match the per-axis form."""
+        from chuchichaestli.dwt.functional import _decompose_axes
+
+        wave = wavelet("db2")
+        filter_len = wave.filter_len
+        dec_lo, dec_hi, _, _ = wave.filters(torch.float64, torch.device("cpu"))
+        torch.manual_seed(0)
+        x = torch.randn(
+            2, 3, *([16] * dimensions), dtype=torch.float64, requires_grad=True
+        )
+        stepwise = x.detach().clone().requires_grad_(True)
+        pad_lo = filter_len - 2
+        out_length = (16 + 2 * pad_lo - filter_len) // 2 + 1
+        fused = _ext.dwt_nd(
+            x, dec_lo, dec_hi, "zero", (pad_lo,) * dimensions,
+            (pad_lo,) * dimensions, (out_length,) * dimensions,
+        )
+        axes = _decompose_axes(stepwise, dec_lo, dec_hi, dimensions, "zero")
+        assert torch.allclose(fused, axes, atol=1e-11)
+        seed = torch.randn_like(fused)
+        fused.backward(seed)
+        axes.backward(seed)
+        assert torch.allclose(x.grad, stepwise.grad, atol=1e-10)

@@ -33,6 +33,8 @@ __all__ = [
     "haar_wavedec",
     "wavedec_axes",
     "fused_recursion_applies",
+    "dwt_nd",
+    "dwt_nd_applies",
     "dwt_lowpass_axis",
     "lowpass_kernel_applies",
     "lift_axis",
@@ -552,6 +554,93 @@ def idwt_axis(
             out_length, out,
         )
     return _IdwtAxis.apply(coeffs, rec_lo, rec_hi, axis, mode, trim, out_length)
+
+
+class _DwtNd(torch.autograd.Function):
+    """Decomposition over every spatial axis, computed by the compiled kernel.
+
+    Linear like the per-axis form, so the backward pass undoes the axes in the
+    order they were laid down, each by the adjoint of its own step.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        x: torch.Tensor,
+        dec_lo: torch.Tensor,
+        dec_hi: torch.Tensor,
+        mode: ExtensionModeTypes,
+        pad_los: tuple[int, ...],
+        pad_his: tuple[int, ...],
+        out_lengths: tuple[int, ...],
+    ) -> torch.Tensor:
+        """Run the kernel and remember what the adjoint needs."""
+        ctx.save_for_backward(dec_lo, dec_hi)
+        ctx.config = (mode, pad_los, pad_his, tuple(x.shape[2:]))
+        return _dwt_kernels.dwt_nd(
+            x.contiguous(), dec_lo, dec_hi, MODE_TO_CODE[mode], list(pad_los),
+            list(out_lengths), None,
+        )
+
+    @staticmethod
+    def backward(ctx, grad_out: torch.Tensor):
+        """Apply the adjoint of every axis, last transformed first."""
+        dec_lo, dec_hi = ctx.saved_tensors
+        mode, pad_los, pad_his, lengths = ctx.config
+        grad = grad_out
+        for axis in reversed(range(len(pad_los))):
+            grad = _decompose_adjoint(
+                grad, dec_lo, dec_hi, axis, mode, pad_los[axis], pad_his[axis],
+                lengths[axis],
+            )
+        return grad, None, None, None, None, None, None
+
+
+def dwt_nd(
+    x: torch.Tensor,
+    dec_lo: torch.Tensor,
+    dec_hi: torch.Tensor,
+    mode: ExtensionModeTypes,
+    pad_los: tuple[int, ...],
+    pad_his: tuple[int, ...],
+    out_lengths: tuple[int, ...],
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Decomposition over every spatial axis, through the compiled kernel.
+
+    The autograd machinery costs more than the kernel on a small transform,
+    so it is only entered when there is a gradient to record.
+
+    Args:
+        x: Input tensor, shaped `(batch, groups, spatial...)`.
+        dec_lo: Decomposition low-pass filter.
+        dec_hi: Decomposition high-pass filter.
+        mode: Signal extension mode.
+        pad_los: Number of samples the decomposition prepends, per axis.
+        pad_his: Number of samples the decomposition appends, per axis.
+        out_lengths: Length each transformed axis takes.
+        out: Storage to write into; only taken when nothing records a gradient.
+    """
+    _require_constant_filters(dec_lo, dec_hi)
+    if not (torch.is_grad_enabled() and x.requires_grad):
+        return _dwt_kernels.dwt_nd(
+            x.contiguous(), dec_lo, dec_hi, MODE_TO_CODE[mode], list(pad_los),
+            list(out_lengths), out,
+        )
+    return _DwtNd.apply(x, dec_lo, dec_hi, mode, pad_los, pad_his, out_lengths)
+
+
+def dwt_nd_applies(device: torch.device, dimensions: int) -> bool:
+    """Whether the fused decomposition serves a transform on this device.
+
+    The host runs every axis in one pass over memory; the accelerator has a
+    kernel per axis and gains nothing from being asked for them together.
+
+    Args:
+        device: Device the transform runs on.
+        dimensions: Number of axes being transformed.
+    """
+    return device.type == "cpu" and 1 <= dimensions <= 3
 
 
 class _IdwtNd(torch.autograd.Function):
