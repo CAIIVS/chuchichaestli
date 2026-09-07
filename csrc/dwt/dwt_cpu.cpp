@@ -231,7 +231,8 @@ void dwt_plane(const scalar_t* lane, scalar_t* out_low, scalar_t* out_high,
 // contiguous axis and vectorizes.
 torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                            const torch::Tensor& dec_hi, int64_t axis,
-                           int64_t mode, int64_t pad_lo, int64_t out_length) {
+                           int64_t mode, int64_t pad_lo, int64_t out_length,
+                           c10::optional<torch::Tensor> out_opt) {
   C3LI_CHECK_CONTIGUOUS(x);
   C3LI_CHECK_FLOATING(x);
   TORCH_CHECK(dec_lo.numel() == dec_hi.numel(),
@@ -246,7 +247,20 @@ torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
   auto sizes = x.sizes().vec();
   sizes[1] *= 2;
   sizes[2 + axis] = out_length;
-  torch::Tensor out = torch::empty(sizes, x.options());
+  // A caller that transforms one axis after another hands the same storage
+  // back every time; allocating here instead would return freshly mapped
+  // pages on every call, and faulting them in costs more than the transform.
+  torch::Tensor out;
+  if (out_opt.has_value()) {
+    out = out_opt.value();
+    TORCH_CHECK(out.sizes().vec() == sizes,
+                "the output tensor does not have the shape the transform writes");
+    TORCH_CHECK(out.scalar_type() == x.scalar_type(),
+                "the output tensor does not have the type of the input");
+    C3LI_CHECK_CONTIGUOUS(out);
+  } else {
+    out = torch::empty(sizes, x.options());
+  }
 
   const int64_t groups = x.size(1);
   const int64_t per_group = layout.outer / (x.size(0) * groups);

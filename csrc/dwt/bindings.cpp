@@ -29,7 +29,8 @@ torch::Tensor dwt_lift_axis_cpu(
 
 torch::Tensor dwt_axis_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                            const torch::Tensor& dec_hi, int64_t axis,
-                           int64_t mode, int64_t pad_lo, int64_t out_length);
+                           int64_t mode, int64_t pad_lo, int64_t out_length,
+                           c10::optional<torch::Tensor> out_opt);
 
 torch::Tensor dwt_nd_cpu(const torch::Tensor& x, const torch::Tensor& dec_lo,
                          const torch::Tensor& dec_hi, int64_t mode,
@@ -65,14 +66,17 @@ torch::Tensor haar_nd_cuda(const torch::Tensor& x, double scale);
 // Split every band along one spatial axis, on whichever device the input is on.
 torch::Tensor dwt_axis(const torch::Tensor& x, const torch::Tensor& dec_lo,
                        const torch::Tensor& dec_hi, int64_t axis, int64_t mode,
-                       int64_t pad_lo, int64_t out_length) {
+                       int64_t pad_lo, int64_t out_length,
+                       c10::optional<torch::Tensor> out = c10::nullopt) {
   RECORD_FUNCTION("c3li::dwt_axis", std::vector<c10::IValue>());
 #ifdef C3LI_WITH_GPU
   if (x.is_cuda()) {
+    TORCH_CHECK(!out.has_value(),
+                "the accelerator transform allocates its own output");
     return dwt_axis_cuda(x, dec_lo, dec_hi, axis, mode, pad_lo, out_length);
   }
 #endif
-  return dwt_axis_cpu(x, dec_lo, dec_hi, axis, mode, pad_lo, out_length);
+  return dwt_axis_cpu(x, dec_lo, dec_hi, axis, mode, pad_lo, out_length, out);
 }
 
 // Merge band pairs along one spatial axis, on whichever device the input is on.
@@ -211,7 +215,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.doc() = "Discrete wavelet transforms with CPU and GPU kernels";
   m.def("dwt_lift_axis", &c3li::dwt_lift_axis_cpu,
         "Decomposition along one spatial axis by lifting");
-  m.def("dwt_axis", &c3li::dwt_axis, "Decomposition along one spatial axis");
+  m.def("dwt_axis", &c3li::dwt_axis, "Decomposition along one spatial axis",
+        py::arg("x"), py::arg("dec_lo"), py::arg("dec_hi"), py::arg("axis"),
+        py::arg("mode"), py::arg("pad_lo"), py::arg("out_length"),
+        py::arg("out") = py::none());
   m.def("idwt_axis", &c3li::idwt_axis, "Reconstruction along one spatial axis");
   m.def("haar_nd", &c3li::haar_nd, "Fused Haar decomposition over every axis");
   m.def("wavedec_axes", &c3li::wavedec_axes,
