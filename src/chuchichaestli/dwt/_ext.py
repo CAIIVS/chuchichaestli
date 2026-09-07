@@ -398,16 +398,17 @@ def idwt_nd_applies(device: torch.device, dimensions: int, lanes: int) -> bool:
     """Whether the fused reconstruction beats reconstructing an axis at a time.
 
     It trades a pass over memory per axis for one copy of each lane, which is
-    worth it while a lane is large and there are not many of them. Measured on
-    the wavelet workloads this library ships: one and two axes win from a few
-    lanes up to a couple of hundred, three axes and wider batches do not.
+    worth it while there are not many lanes. Paired measurement over the
+    workloads this library ships puts every rank ahead once the batch is
+    narrow; past a couple of hundred lanes with a long filter the two swap
+    places often enough that the transposed convolution is the safer answer.
 
     Args:
         device: Device the reconstruction runs on.
         dimensions: Number of axes being reconstructed.
         lanes: Number of independent transforms in the batch.
     """
-    return device.type == "cpu" and dimensions <= 2 and lanes <= 256
+    return device.type == "cpu" and 1 <= dimensions <= 3 and lanes <= 256
 
 
 def idwt_kernel_applies(device: torch.device) -> bool:

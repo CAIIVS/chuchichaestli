@@ -216,8 +216,8 @@ class TestAgreement:
         """Test the shapes the fused inverse is not used for."""
         cpu = torch.device("cpu")
         assert _ext.idwt_nd_applies(cpu, 2, 24)
+        assert _ext.idwt_nd_applies(cpu, 3, 24)
         assert not _ext.idwt_nd_applies(cpu, 2, 512)
-        assert not _ext.idwt_nd_applies(cpu, 3, 24)
         assert not _ext.idwt_nd_applies(torch.device("cuda"), 2, 24)
 
     def test_the_host_keeps_the_transposed_convolution(self):
