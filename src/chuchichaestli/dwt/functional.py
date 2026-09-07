@@ -362,6 +362,7 @@ def dwtn(
 
 _SCRATCH = threading.local()
 _SCRATCH_LIMIT = 8
+_STACK_SLOT = -1
 
 
 def _scratch(
@@ -372,7 +373,9 @@ def _scratch(
     Held per thread, so two transforms running at once never share one.
 
     Args:
-        slot: Which of a transform's intermediates this is.
+        slot: Which of a transform's intermediates this is; a spatial axis
+            index for the ones a decomposition hands between axes, and
+            `_STACK_SLOT` for the subband stack a reconstruction reads.
         shape: Shape the intermediate takes.
         dtype: Type the intermediate takes.
         device: Device the intermediate lives on.
@@ -470,6 +473,26 @@ def dwtn_approx(
     return _unfold(h[:, 0], lead, perm)
 
 
+def _stack_bands(bands: list[torch.Tensor]) -> torch.Tensor:
+    """Lay every subband into one tensor for the reconstruction to read.
+
+    Args:
+        bands: The folded subbands, in subband-key order.
+    """
+    first = bands[0]
+    if first.device.type != "cpu" or (
+        torch.is_grad_enabled() and any(band.requires_grad for band in bands)
+    ):
+        return torch.cat(bands, dim=1)
+    shape = (
+        first.shape[0],
+        sum(band.shape[1] for band in bands),
+        *first.shape[2:],
+    )
+    out = _scratch(_STACK_SLOT, shape, first.dtype, first.device)
+    return torch.cat(bands, dim=1, out=out)
+
+
 def idwtn(
     coeffs: dict[str, torch.Tensor],
     wavelet: str | Wavelet = "haar",
@@ -506,7 +529,8 @@ def idwtn(
     wavelet = as_wavelet(wavelet)
     stacked = [_fold(as_inexact(coeffs[key]), axes) for key in keys]
     lead, perm = stacked[0][1], stacked[0][2]
-    h = torch.cat([band for band, _, _ in stacked], dim=1)
+    bands = [band for band, _, _ in stacked]
+    h = _stack_bands(bands)
     _, _, rec_lo, rec_hi = wavelet.filters(h.dtype, h.device)
 
     sizes = _reconstruction_sizes(h.shape[2:], wavelet.filter_len, mode, output_size)
