@@ -331,12 +331,24 @@ def _wrap(x: torch.Tensor, axis: int, trim: int, length: int) -> torch.Tensor:
 def _HAAR_ADJOINT(grad: torch.Tensor, dimensions: int) -> torch.Tensor:
     """Adjoint of the fused Haar decomposition, used by its backward pass.
 
+    The transform is orthogonal, so the adjoint is the reconstruction, which
+    the fused kernel already carries.
+
     Args:
         grad: Gradient with respect to the stacked subbands.
         dimensions: Number of spatial axes.
     """
+    from chuchichaestli.dwt import _ext
+
     haar = as_wavelet("haar")
     _, _, rec_lo, rec_hi = haar.filters(grad.dtype, grad.device)
+    lengths = tuple(2 * grad.shape[2 + axis] for axis in range(dimensions))
+    if _ext.idwt_nd_applies(grad.device, dimensions) and _ext.kernels_available(
+        grad.device, grad.dtype
+    ):
+        return _ext.idwt_nd(
+            grad, rec_lo, rec_hi, "zero", (0,) * dimensions, lengths
+        )
     h = grad
     for axis in reversed(range(dimensions)):
         h = _reconstruct(h, rec_lo, rec_hi, axis, "zero", 2 * h.shape[2 + axis])
