@@ -8,6 +8,8 @@ and `'d'` for the detail branch, so a two-dimensional transform yields `aa`,
 `ad`, `da` and `dd` (the classical `LL`, `LH`, `HL`, `HH`).
 """
 
+import threading
+
 import torch
 
 from chuchichaestli.dwt.modes import ExtensionModeTypes, pad_signal
@@ -185,6 +187,7 @@ def _decompose(
     hi: torch.Tensor,
     axis: int,
     mode: ExtensionModeTypes,
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Split every band of `h` along one spatial axis into a low- and high-pass half.
 
@@ -194,6 +197,8 @@ def _decompose(
         hi: Decomposition high-pass filter.
         axis: Spatial axis to transform.
         mode: Signal extension mode.
+        out: Storage the kernel writes into, when the caller keeps one across
+            axes; ignored by the pure-torch path.
     """
     from chuchichaestli.dwt import _ext
 
@@ -212,7 +217,7 @@ def _decompose(
     out_length = (length + pad_lo + pad_hi - filter_len) // 2 + 1
 
     if _ext.kernels_available(h.device, h.dtype):
-        return _ext.dwt_axis(h, lo, hi, axis, mode, pad_lo, pad_hi, out_length)
+        return _ext.dwt_axis(h, lo, hi, axis, mode, pad_lo, pad_hi, out_length, out)
 
     extension = "periodic" if mode == "periodization" else mode
     h = pad_signal(h, 2 + axis, pad_lo, pad_hi, extension)
@@ -347,10 +352,96 @@ def dwtn(
     ):
         h = _ext.haar_nd(h, len(axes))
     else:
-        for axis in range(len(axes)):
-            h = _decompose(h, dec_lo, dec_hi, axis, mode)
+        h = _decompose_axes(h, dec_lo, dec_hi, len(axes), mode)
     keys = subband_keys(len(axes))
     return {key: _unfold(h[:, i], lead, perm) for i, key in enumerate(keys)}
+
+
+_SCRATCH = threading.local()
+_SCRATCH_LIMIT = 8
+
+
+def _scratch(
+    slot: int, shape: tuple[int, ...], dtype: torch.dtype, device: torch.device
+) -> torch.Tensor:
+    """Lend a tensor of this shape back on every call that asks for it.
+
+    Held per thread, so two transforms running at once never share one.
+
+    Args:
+        slot: Which of a transform's intermediates this is.
+        shape: Shape the intermediate takes.
+        dtype: Type the intermediate takes.
+        device: Device the intermediate lives on.
+    """
+    pool = getattr(_SCRATCH, "pool", None)
+    if pool is None:
+        pool = _SCRATCH.pool = {}
+    key = (slot, shape, dtype, device)
+    buffer = pool.get(key)
+    if buffer is None:
+        if len(pool) >= _SCRATCH_LIMIT:
+            pool.clear()
+        buffer = pool[key] = torch.empty(shape, dtype=dtype, device=device)
+    return buffer
+
+
+def _decompose_axes(
+    h: torch.Tensor,
+    lo: torch.Tensor,
+    hi: torch.Tensor,
+    dimensions: int,
+    mode: ExtensionModeTypes,
+) -> torch.Tensor:
+    """Split every band along every spatial axis in turn.
+
+    Each axis writes a tensor the next one reads and then drops. Left to the
+    allocator that returns freshly mapped pages every call, and faulting them
+    in can cost more than the transform; two buffers handed back and forth
+    are mapped once.
+
+    Args:
+        h: Bands so far, shaped `(batch, groups, spatial...)`.
+        lo: Decomposition low-pass filter.
+        hi: Decomposition high-pass filter.
+        dimensions: Number of spatial axes to transform.
+        mode: Signal extension mode.
+    """
+    from chuchichaestli.dwt import _ext
+
+    # only the host allocator maps a fresh page for every intermediate; the
+    # accelerator hands its own storage back and takes no buffer from here
+    if (
+        dimensions < 2
+        or h.device.type != "cpu"
+        or not _ext.kernels_available(h.device, h.dtype)
+    ):
+        for axis in range(dimensions):
+            h = _decompose(h, lo, hi, axis, mode)
+        return h
+
+    filter_len = lo.numel()
+    shape = list(h.shape)
+    for axis in range(dimensions):
+        length = shape[2 + axis]
+        if mode == "periodization":
+            length += length % 2
+            out_length = length // 2
+        else:
+            pad_lo = filter_len - 2
+            pad_hi = pad_lo + (length % 2)
+            out_length = (length + pad_lo + pad_hi - filter_len) // 2 + 1
+        shape[1] *= 2
+        shape[2 + axis] = out_length
+        # the last axis writes what the caller keeps, so only the ones before
+        # it are handed a buffer to reuse
+        out = (
+            None
+            if axis == dimensions - 1
+            else _scratch(axis, tuple(shape), h.dtype, h.device)
+        )
+        h = _decompose(h, lo, hi, axis, mode, out)
+    return h
 
 
 def dwtn_approx(

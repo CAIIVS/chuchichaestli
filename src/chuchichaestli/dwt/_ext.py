@@ -175,12 +175,13 @@ def dwt_axis(
     pad_lo: int,
     pad_hi: int,
     out_length: int,
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Decomposition along one spatial axis, through the compiled kernel.
 
     The autograd machinery costs more than the kernel on a small transform,
     so it is only entered when there is a gradient to record.
-    
+
     Args:
         x: Bands so far, shaped `(batch, groups, spatial...)`.
         dec_lo: Decomposition low-pass filter.
@@ -190,11 +191,14 @@ def dwt_axis(
         pad_lo: Number of samples the decomposition prepends.
         pad_hi: Number of samples the decomposition appends.
         out_length: Length of the transformed axis.
+        out: Storage to write into, when the caller keeps one across axes;
+            only taken when nothing records a gradient.
     """
     _require_constant_filters(dec_lo, dec_hi)
     if not (torch.is_grad_enabled() and x.requires_grad):
         return _dwt_kernels.dwt_axis(
-            x.contiguous(), dec_lo, dec_hi, axis, MODE_TO_CODE[mode], pad_lo, out_length
+            x.contiguous(), dec_lo, dec_hi, axis, MODE_TO_CODE[mode], pad_lo,
+            out_length, out,
         )
     return _DwtAxis.apply(
         x, dec_lo, dec_hi, axis, mode, pad_lo, pad_hi, out_length
