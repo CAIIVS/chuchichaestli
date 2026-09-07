@@ -499,3 +499,35 @@ class TestLifting:
             )
             want = _decompose(x, low, high, axis, "periodization")
             assert torch.allclose(got, want, atol=1e-9)
+
+
+@needs_kernels
+@needs_gpu
+class TestFusedOnGpu:
+    """The fused transforms, on whichever device they are handed."""
+
+    @pytest.mark.parametrize("name", ["haar", "db2", "db4"])
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_the_fused_reconstruction_agrees_across_devices(self, name, dimensions):
+        """Test that the fused inverse gives one answer on either device."""
+        torch.manual_seed(0)
+        wave = wavelet(name)
+        trim = wave.filter_len - 2
+        shape = (2, 1) + (16,) * dimensions
+        axes = tuple(range(2, 2 + dimensions))
+        x = torch.randn(*shape)
+        bands = dwtn(x, name, "zero", axes)
+        stacked = torch.cat(
+            [bands[key] for key in subband_keys(dimensions)], dim=1
+        )
+        _, _, rec_lo, rec_hi = wave.filters(x.dtype, x.device)
+        lengths = list(shape[2:])
+        host = _ext.idwt_nd(
+            stacked, rec_lo, rec_hi, "zero", (trim,) * dimensions, tuple(lengths)
+        )
+        device = _ext.idwt_nd(
+            stacked.cuda(), rec_lo.cuda(), rec_hi.cuda(), "zero",
+            (trim,) * dimensions, tuple(lengths),
+        )
+        assert torch.allclose(host, device.cpu(), atol=1e-5)
+        assert torch.allclose(host, x, atol=1e-4)

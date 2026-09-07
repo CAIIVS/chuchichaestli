@@ -107,6 +107,66 @@ torch::Tensor haar_nd(const torch::Tensor& x, double scale) {
   return haar_nd_cpu(x, scale);
 }
 
+// Split every band along every spatial axis, on whichever device the input is
+// on. The host fuses the axes into one pass; the accelerator has a kernel per
+// axis and takes them in turn.
+torch::Tensor dwt_nd(const torch::Tensor& x, const torch::Tensor& dec_lo,
+                     const torch::Tensor& dec_hi, int64_t mode,
+                     const std::vector<int64_t>& pad_los,
+                     const std::vector<int64_t>& out_lengths) {
+  RECORD_FUNCTION("c3li::dwt_nd", std::vector<c10::IValue>());
+  const int64_t dimensions = x.dim() - 2;
+  TORCH_CHECK(static_cast<int64_t>(pad_los.size()) == dimensions &&
+                  static_cast<int64_t>(out_lengths.size()) == dimensions,
+              "a padding and a length are needed for every spatial axis");
+#ifdef C3LI_WITH_GPU
+  if (x.is_cuda()) {
+    torch::Tensor bands = x;
+    for (int64_t axis = 0; axis < dimensions; ++axis) {
+      bands = dwt_axis_cuda(bands, dec_lo, dec_hi, axis, mode, pad_los[axis],
+                            out_lengths[axis]);
+    }
+    return bands;
+  }
+#endif
+  return dwt_nd_cpu(x, dec_lo, dec_hi, mode, pad_los, out_lengths);
+}
+
+// Merge every band pair along every spatial axis, on whichever device the
+// input is on. The axes unwind in the order a decomposition laid them down,
+// so the last one split is the first one merged.
+torch::Tensor idwt_nd(const torch::Tensor& coeffs, const torch::Tensor& rec_lo,
+                      const torch::Tensor& rec_hi, int64_t mode,
+                      const std::vector<int64_t>& trims,
+                      const std::vector<int64_t>& out_lengths) {
+  RECORD_FUNCTION("c3li::idwt_nd", std::vector<c10::IValue>());
+  const int64_t dimensions = coeffs.dim() - 2;
+  TORCH_CHECK(static_cast<int64_t>(trims.size()) == dimensions &&
+                  static_cast<int64_t>(out_lengths.size()) == dimensions,
+              "a trim and a length are needed for every spatial axis");
+#ifdef C3LI_WITH_GPU
+  if (coeffs.is_cuda()) {
+    // The subbands arrive stacked whole, one after another; a per-axis kernel
+    // wants each group's own corners side by side instead.
+    const int64_t corners = int64_t{1} << dimensions;
+    TORCH_CHECK(coeffs.size(1) % corners == 0,
+                "every group needs one channel per subband");
+    const int64_t groups = coeffs.size(1) / corners;
+    auto sizes = coeffs.sizes().vec();
+    std::vector<int64_t> split = {sizes[0], corners, groups};
+    split.insert(split.end(), sizes.begin() + 2, sizes.end());
+    torch::Tensor bands =
+        coeffs.reshape(split).transpose(1, 2).reshape(sizes).contiguous();
+    for (int64_t axis = dimensions - 1; axis >= 0; --axis) {
+      bands = idwt_axis_cuda(bands, rec_lo, rec_hi, axis, mode, trims[axis],
+                             out_lengths[axis]);
+    }
+    return bands;
+  }
+#endif
+  return idwt_nd_cpu(coeffs, rec_lo, rec_hi, mode, trims, out_lengths);
+}
+
 // Lift the approximation band of every group out of `bands`, whose channels
 // run `g * corners + b`, so that it can feed the next level.
 //
@@ -232,9 +292,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "Fused multi-level decomposition over every axis");
   m.def("haar_wavedec", &c3li::haar_wavedec,
         "Fused multi-level Haar decomposition");
-  m.def("dwt_nd", &c3li::dwt_nd_cpu,
+  m.def("dwt_nd", &c3li::dwt_nd,
         "Fused decomposition over every axis");
-  m.def("idwt_nd", &c3li::idwt_nd_cpu,
+  m.def("idwt_nd", &c3li::idwt_nd,
         "Fused reconstruction over every axis");
   m.def("has_gpu", &c3li::has_gpu, "Whether GPU kernels were compiled in");
   m.def("supported_dtypes", &c3li::supported_dtypes,
