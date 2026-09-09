@@ -61,9 +61,24 @@ class TestNbytes:
         assert repr(b) == b.as_bstr()
 
     def test_arithmetic_preserves_type(self):
-        """Class inherits float arithmetic; results are plain floats."""
+        """Byte counts stay byte counts through the arithmetic on them."""
         b = nbytes("1M")
         assert b + b == float(b) * 2
+        assert isinstance(b + b, nbytes)
+        assert isinstance(2 * b, nbytes)
+        assert isinstance(b * 2, nbytes)
+        assert isinstance(b / 2, nbytes)
+        assert isinstance(b // 2, nbytes)
+        assert isinstance(sum([b, b]), nbytes)
+
+    def test_a_difference_is_a_byte_count(self):
+        """What is left of one size after another is a size itself."""
+        big, small = nbytes("4M"), nbytes("1M")
+        assert big - small == nbytes("3M")
+        assert isinstance(big - small, nbytes)
+        assert isinstance(5 * 2**20 - small, nbytes)
+        assert isinstance(abs(small - big), nbytes)
+        assert abs(small - big) == nbytes("3M")
 
     def test_nbytes_size_constructor(self):
         """Passing an nbytes instance directly round-trips correctly."""

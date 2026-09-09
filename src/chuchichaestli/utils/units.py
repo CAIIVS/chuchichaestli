@@ -76,6 +76,14 @@ class nbytes(float):
         """Addition of nbyte instances."""
         return self.__class__(float.__radd__(self, float(other)))
 
+    def __sub__(self, other: int | float) -> "nbytes":
+        """Subtraction of nbyte instances."""
+        return self.__class__(float.__sub__(self, float(other)))
+
+    def __rsub__(self, other: int | float) -> "nbytes":
+        """Subtraction of nbyte instances."""
+        return self.__class__(float.__rsub__(self, float(other)))
+
     def __mul__(self, other: int | float) -> "nbytes":
         """Multiplication of nbyte instances."""
         return self.__class__(float.__mul__(self, float(other)))
@@ -91,6 +99,10 @@ class nbytes(float):
     def __floordiv__(self, other: int | float) -> "nbytes":
         """Division (floor) of nbyte instances."""
         return self.__class__(float.__floordiv__(self, float(other)))
+
+    def __abs__(self) -> "nbytes":
+        """Absolute value of an nbyte instance."""
+        return self.__class__(float.__abs__(self))
 
     def __str__(self) -> str:
         """String of instance."""
