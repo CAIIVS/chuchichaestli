@@ -25,7 +25,7 @@ from abc import ABC, abstractmethod
 import warnings
 from collections.abc import Callable
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
-from chuchichaestli.data.cache import nbytes
+from chuchichaestli.utils import nbytes
 
 
 __all__ = [

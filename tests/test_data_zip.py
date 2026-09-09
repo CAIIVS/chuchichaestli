@@ -13,7 +13,7 @@ from chuchichaestli.data.zip import ZipDataset
 from chuchichaestli.data.base import CachingDataset, with_indices
 from chuchichaestli.data.batching import SlidingWindowBatchSampler
 from chuchichaestli.data.collate import SlidingWindowCollate
-from chuchichaestli.data.cache import nbytes
+from chuchichaestli.utils import nbytes
 
 
 class DummyDataset(torch.utils.data.Dataset):

@@ -8,9 +8,8 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from chuchichaestli.utils import prod
+from chuchichaestli.utils import nbytes, prod
 from chuchichaestli.data.cache import (
-    nbytes,
     serial_byte_size,
     SharedArray,
     SharedDictList,

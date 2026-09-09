@@ -7,10 +7,9 @@ import pickle
 import pytest
 import numpy as np
 import torch
+from chuchichaestli.utils import nbytes
 from chuchichaestli.data.cache import (
-    npy_to_torch_dtype,
     serial_byte_size,
-    nbytes,
     SlotState,
     SharedArray,
     SharedDict,
@@ -28,102 +27,6 @@ def _make_dict_list(n=50, slot_size="256b", size="4M") -> SharedDictList:
 
 def _sample_dict():
     return {"x": 1, "y": [1.0, 2.0], "flag": True}
-
-
-class TestNpyToTorchDtype:
-    """Unit tests for npy_to_torch_dtype."""
-
-    @pytest.mark.parametrize(
-        "np_dtype,expected",
-        [
-            ("bool", torch.bool),
-            ("uint8", torch.uint8),
-            ("int8", torch.int8),
-            ("int16", torch.int16),
-            ("int32", torch.int32),
-            ("int64", torch.int64),
-            ("float16", torch.float16),
-            ("float32", torch.float32),
-            ("float64", torch.float64),
-            ("complex64", torch.complex64),
-            ("complex128", torch.complex128),
-        ],
-    )
-    def test_known_dtypes(self, np_dtype, expected):
-        """Every supported numpy dtype maps to its torch counterpart."""
-        assert npy_to_torch_dtype(np_dtype) == expected
-
-    @pytest.mark.parametrize(
-        "np_dtype,expected",
-        [
-            (np.dtype("float32"), torch.float32),
-            (np.float32, torch.float32),
-            (np.int64, torch.int64),
-        ],
-    )
-    def test_numpy_dtype_objects(self, np_dtype, expected):
-        """Accepts np.dtype objects and numpy type classes, not just strings."""
-        assert npy_to_torch_dtype(np_dtype) == expected
-
-    def test_unknown_dtype_returns_none(self):
-        """An unrecognised dtype string returns None instead of raising."""
-        assert npy_to_torch_dtype("float128") is None
-
-    def test_invalid_string_returns_none(self):
-        """A nonsense string that cannot be parsed returns None."""
-        assert npy_to_torch_dtype("definitely_not_a_dtype") is None
-
-
-class TestNbytes:
-    """Unit tests for nbytes."""
-
-    @pytest.mark.parametrize("x", ["2.0G", "2.0GB", "2.0 GB", 2147483648.0, 2147483648])
-    def test_nbytes_2G(self, x):
-        """Test the nbytes class."""
-        b = nbytes(x)
-        assert 0 < b < 10**10
-        assert isinstance(b, nbytes)
-        assert isinstance(b, float)
-        assert b == float(b)
-        assert isinstance(b.as_str(), str)
-        assert isinstance(b.as_bstr(), str)
-        assert isinstance(b.to("G"), nbytes)
-        assert isinstance(b.to("G"), float)
-
-    @pytest.mark.parametrize("x", [None, 0.0, 0, "GB"])
-    def test_nbytes_null(self, x):
-        """Test the nbytes class in edge cases."""
-        b = nbytes(x)
-        assert b == 0
-        assert isinstance(b, nbytes)
-        assert isinstance(b, float)
-        assert b == float(b)
-        assert isinstance(b.as_str(), str)
-        assert isinstance(b.as_bstr(), str)
-        assert isinstance(b.to("G"), nbytes)
-        assert isinstance(b.to("G"), float)
-
-    def test_invalid_unit_raises(self):
-        """An unknown unit suffix in the string raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown unit"):
-            nbytes("4X")
-
-    def test_repr(self):
-        """__repr__ returns the same string as __str__ / as_str."""
-        b = nbytes("1M")
-        assert repr(b) == b.as_bstr()
-
-    def test_arithmetic_preserves_type(self):
-        """Class inherits float arithmetic; results are plain floats."""
-        b = nbytes("1M")
-        assert b + b == float(b) * 2
-
-    def test_nbytes_size_constructor(self):
-        """Passing an nbytes instance directly round-trips correctly."""
-        original = nbytes("512K")
-        copy = nbytes(original)
-        assert copy == original
-        assert isinstance(copy, nbytes)
 
 
 class TestSerialByteSize:

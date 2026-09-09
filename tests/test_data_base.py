@@ -10,7 +10,7 @@ import numpy as np
 from pathlib import Path
 import tempfile
 from chuchichaestli.data.base import FileDataset, CachingDataset
-from chuchichaestli.data.cache import nbytes
+from chuchichaestli.utils import nbytes
 
 
 class DummyFileDataset(FileDataset):
