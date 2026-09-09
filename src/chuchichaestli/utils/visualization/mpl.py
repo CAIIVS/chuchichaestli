@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, get_args
-from chuchichaestli.utils.formatting import metric_suffix
+from chuchichaestli.utils.units import metric_suffix
 from chuchichaestli.utils.visualization.base import (
     Renderer,
     ZoomSpec,

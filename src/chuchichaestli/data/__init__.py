@@ -15,6 +15,7 @@ from chuchichaestli.data.hdf5 import HDF5Dataset, ZipHDF5Dataset
 from chuchichaestli.data.numpy import NumpyDataset, ZipNumpyDataset
 from chuchichaestli.data.safetensors import SafetensorsDataset, ZipSafetensorsDataset
 from chuchichaestli.data.image import ImageDataset, ZipImageDataset
+from chuchichaestli.data.save import save_dataset
 from chuchichaestli.data.procedural import (
     ProceduralDataset,  # abstract
     HalfMoonsDataset,
@@ -85,6 +86,7 @@ __all__ = [
     "ZipSafetensorsDataset",
     "ImageDataset",
     "ZipImageDataset",
+    "save_dataset",
     "ProceduralDataset",
     "HalfMoonsDataset",
     "SpiralsDataset",

@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
-from chuchichaestli.data.cache import nbytes
+from chuchichaestli.utils import nbytes
 import warnings
 from typing import Any
 from collections.abc import Sequence

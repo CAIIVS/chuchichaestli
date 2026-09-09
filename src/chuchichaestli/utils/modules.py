@@ -237,12 +237,8 @@ class LayerInfo:
             size, elem_bytes = nested_list_size(output)
             if batch_dim is not None:
                 size = [size[:batch_dim] + [1] + size[batch_dim + 1 :]]
-        elif isinstance(inputs, torch.Tensor):
-            size = list(inputs.size())
-            elem_bytes = inputs.element_size()
-        elif isinstance(inputs, np.ndarray):  # type: ignore[unreachable]
-            inputs_ = torch.from_numpy(inputs)  # type: ignore[unreachable]
-            size, elem_bytes = list(inputs_.size()), inputs_.element_size()
+        elif isinstance(inputs, (torch.Tensor, np.ndarray)):
+            size, elem_bytes = nested_list_size(inputs)
         elif isinstance(inputs, (list, tuple)):
             size, elem_bytes = nested_list_size(inputs)
             if batch_dim is not None and batch_dim < len(size):

@@ -12,8 +12,14 @@ from chuchichaestli.utils.functools import (
     broadcast,
     broadcast_kwargs,
 )
-from chuchichaestli.utils.formatting import metric_suffix
-from chuchichaestli.utils.tensors import as_inexact, view_along_axis
+from chuchichaestli.utils.units import metric_suffix, nbytes
+from chuchichaestli.utils.tensors import (
+    as_array,
+    as_inexact,
+    npy_to_torch_dtype,
+    torch_to_npy_dtype,
+    view_along_axis,
+)
 from chuchichaestli.utils.modules import (
     info_forward_pass,
     layer_info,
@@ -45,7 +51,11 @@ __all__ = [
     "broadcast",
     "broadcast_kwargs",
     "metric_suffix",
+    "nbytes",
+    "as_array",
     "as_inexact",
+    "npy_to_torch_dtype",
+    "torch_to_npy_dtype",
     "view_along_axis",
     "info_forward_pass",
     "layer_info",

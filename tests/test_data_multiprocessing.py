@@ -18,7 +18,7 @@ import pytest
 import torchvision.io as tvio
 from safetensors.torch import save_file
 from torch.utils.data import DataLoader
-from chuchichaestli.data.cache import nbytes
+from chuchichaestli.utils import nbytes
 from chuchichaestli.data.numpy import NumpyDataset, ZipNumpyDataset
 from chuchichaestli.data.hdf5 import HDF5Dataset
 from chuchichaestli.data.safetensors import SafetensorsDataset

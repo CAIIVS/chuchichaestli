@@ -15,7 +15,7 @@ import tqdm
 import torch
 from pathlib import Path
 from chuchichaestli.data.dataset import HDF5Dataset, H5PyAttrs
-from chuchichaestli.data.cache import nbytes
+from chuchichaestli.utils import nbytes
 
 
 @pytest.mark.parametrize(

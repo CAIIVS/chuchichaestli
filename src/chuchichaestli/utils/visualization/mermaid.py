@@ -15,7 +15,7 @@ from typing import get_args, Literal, Any
 from dataclasses import dataclass
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from chuchichaestli.utils.formatting import metric_suffix
+from chuchichaestli.utils.units import metric_suffix
 from chuchichaestli.utils.modules import get_layer_type
 from chuchichaestli.utils.visualization.colors import get_color, color_variant
 from chuchichaestli.utils.visualization.base import (

@@ -91,6 +91,8 @@ class Benchmark:
         reference: Returns the arrays every backend is checked against, given a
             case, its input and the arguments; nothing is checked without one.
         group: Bars sharing a value of this are drawn side by side.
+        series: What one bar of every group is, and what the legend names;
+            the backend if omitted.
         case_argv: Flags naming one case, for the `perf stat` worker; a
             benchmark without one cannot run `--perf`.
         moved_bytes: Bytes one run of a case has to move, for the achieved
@@ -103,6 +105,7 @@ class Benchmark:
     label: str = "benchmark"
     reference: Callable[[Case, torch.Tensor, Any], list | None] | None = None
     group: Callable[[dict], str] | None = None
+    series: Callable[[dict], str] | None = None
     case_argv: Callable[[Case], list[str]] | None = None
     moved_bytes: Callable[[Case], float] | None = None
 
@@ -170,7 +173,7 @@ class Benchmark:
             reference = functools.partial(self.reference, args=args)
             results = sweep(cases, self.backends, args, reference, self.label)
         report(results, args)
-        write(results, args, self.group)
+        write(results, args, self.group, self.series)
 
     def redraw(self, args) -> None:
         """Report and plot saved results, measuring nothing.
@@ -180,7 +183,7 @@ class Benchmark:
         """
         rows = load_rows(args.from_json)
         report_rows(rows)
-        write_rows(rows, args, self.group)
+        write_rows(rows, args, self.group, self.series)
 
     def main(self, args) -> None:
         """Run whichever of the modes the command line asked for.
@@ -217,6 +220,6 @@ class Benchmark:
         elif args.profile or args.perf:
             self.inspect(args)
         elif args.repeats > 1:
-            repeated(self.script, args, self.group)
+            repeated(self.script, args, self.group, self.series)
         else:
             self.measure(args)
