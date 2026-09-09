@@ -21,6 +21,7 @@ import dataclasses
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,7 @@ import torch
 import torch.utils.benchmark as benchmark
 
 from chuchichaestli.benchmark.args import without_options
+from chuchichaestli.utils import as_array
 
 
 @runtime_checkable
@@ -145,7 +147,7 @@ class Backend:
         """
         if self.to_arrays is not None:
             return self.to_arrays(result)
-        return [band.detach().cpu().numpy() for band in result]
+        return [as_array(band) for band in result]
 
     def probe(self, device: str, case: Case) -> str:
         """Return `'ok'`, or why this backend cannot run a case.
@@ -271,7 +273,7 @@ def numpy_input(x: torch.Tensor, case: Case):
         x: Sample drawn for the case.
         case: Case being run.
     """
-    return x.detach().cpu().numpy()
+    return as_array(x)
 
 
 def peak_memory(call: Callable[[], Any], device: str) -> float:
@@ -490,7 +492,12 @@ def report(results: Sequence[Result], args) -> None:
             print(f"  {r.case.label():34s} {r.backend:9s} {r.status}")
 
 
-def write(results: Sequence[Result], args, group: Callable[[dict], str] | None = None) -> None:
+def write(
+    results: Sequence[Result],
+    args,
+    group: Callable[[dict], str] | None = None,
+    series: Callable[[dict], str] | None = None,
+) -> None:
     """Write the results to the requested files.
 
     Args:
@@ -498,11 +505,17 @@ def write(results: Sequence[Result], args, group: Callable[[dict], str] | None =
         args: Parsed command line arguments.
         group: Bars sharing a value of this are drawn side by side; the whole
             case label if omitted.
+        series: What one bar of every group is; the backend if omitted.
     """
-    write_rows([r.row() for r in results], args, group)
+    write_rows([r.row() for r in results], args, group, series)
 
 
-def write_rows(rows: Sequence[dict], args, group: Callable[[dict], str] | None = None) -> None:
+def write_rows(
+    rows: Sequence[dict],
+    args,
+    group: Callable[[dict], str] | None = None,
+    series: Callable[[dict], str] | None = None,
+) -> None:
     """Write already flattened result rows to the requested files.
 
     Args:
@@ -510,6 +523,7 @@ def write_rows(rows: Sequence[dict], args, group: Callable[[dict], str] | None =
         args: Parsed command line arguments.
         group: Bars sharing a value of this are drawn side by side; the whole
             case label if omitted.
+        series: What one bar of every group is; the backend if omitted.
     """
     if args.json:
         with open(args.json, "w") as fh:
@@ -522,13 +536,30 @@ def write_rows(rows: Sequence[dict], args, group: Callable[[dict], str] | None =
             writer.writerows(rows)
         print(f"wrote {args.csv}")
     if args.plot:
-        plot(rows, args.plot, group)
+        plot(rows, args.plot, group, series)
+
+
+def natural(text: str) -> list[tuple[int, Any]]:
+    """Return a sort key that reads runs of digits as the numbers they are.
+
+    Labels a benchmark writes carry sizes in them, so sorting them as text puts
+    `b16` before `b4` and `c100%` before `c25%`.
+
+    Args:
+        text: Label to order.
+    """
+    return [
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in re.split(r"(\d+)", text)
+        if part
+    ]
 
 
 def plot(
     rows: Sequence[dict],
     path: str,
     group: Callable[[dict], str] | None = None,
+    series: Callable[[dict], str] | None = None,
     palette: Sequence[str] = (
         "#60293F", "#964063", "#EA9739", "#9BF1F7", "#222B4F"
     ),
@@ -540,7 +571,9 @@ def plot(
         path: File to write the figure to.
         group: Bars sharing a value of this are drawn side by side; the whole
             case label if omitted.
-        palette: Bar colours, cycled when there are more backends than colours;
+        series: What one bar of every group is, and what the legend names; the
+            backend if omitted.
+        palette: Bar colours, cycled when there are more series than colours;
             the stops of the header gradient in `docs/stylesheets/extra.css` by
             default, so a figure dropped into the docs belongs there.
     """
@@ -550,18 +583,21 @@ def plot(
     import matplotlib.pyplot as plt
 
     group = group or (lambda row: row["case"])
+    series = series or (lambda row: row["backend"])
     timed = [row for row in rows if row["status"] == "ok"]
     if not timed:
         print("nothing to plot")
         return
-    groups = sorted({group(row) for row in timed})
-    backends = sorted({row["backend"] for row in timed})
-    width = 0.8 / len(backends)
-    figure, axes = plt.subplots(figsize=(2 + 1.4 * len(groups), 4))
-    for i, backend in enumerate(backends):
+    groups = sorted({group(row) for row in timed}, key=natural)
+    bars = sorted({series(row) for row in timed}, key=natural)
+    width = 0.8 / len(bars)
+    span = max(1.4, 0.3 * len(bars))
+    figure, axes = plt.subplots(figsize=(2 + span * len(groups), 4))
+    for i, bar in enumerate(bars):
         heights = [
             next(
-                (row["median_ms"] for row in timed if row["backend"] == backend and group(row) == name),
+                (row["median_ms"] for row in timed
+                 if series(row) == bar and group(row) == name),
                 0.0,
             )
             for name in groups
@@ -570,14 +606,19 @@ def plot(
             [x + i * width for x in range(len(groups))],
             heights,
             width,
-            label=backend,
+            label=bar,
             color=palette[i % len(palette)],
         )
     axes.set_xticks([x + 0.4 - width / 2 for x in range(len(groups))])
     axes.set_xticklabels(groups, rotation=30, ha="right")
     axes.set_ylabel("median time / ms")
     axes.set_yscale("log")
-    axes.legend()
+    axes.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.0),
+        ncol=min(len(bars), 5),
+        frameon=False,
+    )
     figure.tight_layout()
     figure.savefig(path, dpi=300)
     print(f"wrote {path}")
@@ -606,7 +647,10 @@ def pin_allocator() -> None:
 
 
 def repeated(
-    script: str, args, group: Callable[[dict], str] | None = None
+    script: str,
+    args,
+    group: Callable[[dict], str] | None = None,
+    series: Callable[[dict], str] | None = None,
 ) -> None:
     """Measure the sweep several times over, each in its own process.
 
@@ -618,6 +662,7 @@ def repeated(
         args: Parsed command line arguments.
         group: Bars sharing a value of this are drawn side by side; the whole
             case label if omitted.
+        series: What one bar of every group is; the backend if omitted.
 
     Raises:
         SystemExit: If any of the runs fails, since a missing run would
@@ -677,4 +722,4 @@ def repeated(
         for row in unstable:
             print(f"  {row['case']:34s} {row['backend']:12s} {row['spread']:5.2f}x")
 
-    write_rows(rows_out, args, group)
+    write_rows(rows_out, args, group, series)
