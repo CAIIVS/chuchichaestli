@@ -176,8 +176,8 @@ Two benchmarks read the very same samples off disk, written once per format
 under `--data-dir` and reused. `benches/dataset_types.py` times what a first
 epoch costs, dropping the files from the page cache before every run so the
 reads go to storage; `benches/dataset_caching.py` times the epochs after that
-(sto-caching), with a share of the samples held in shared memory. Keep that
-directory on real storage: nothing on `tmpfs` can be dropped from the page
+(stochastic caching), with a share of the samples held in shared memory. Keep
+that directory on real storage: nothing on `tmpfs` can be dropped from the page
 cache, and a sweep there measures reads served from memory.
 
 
@@ -214,8 +214,8 @@ uniformly, so the hit rate is the share cached.
 
 ### Results { #data-results }
 
-A 256 MiB dataset &mdash; 1024 samples of `1x256x256` `float32` &mdash; read on
-the CPU, the first epoch as the median of three runs in fresh processes.
+A 256 MiB dataset &mdash; 1024 samples of `1x256x256` `float32` &mdash; read
+on the CPU, the first epoch as the median of three runs in fresh processes.
 
 <div class="grid" markdown>
 
