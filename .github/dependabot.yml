@@ -33,3 +33,15 @@ updates:
           - "*"
     commit-message:
       prefix: "build"
+
+  # pre-commit hook revs in .pre-commit-config.yaml
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      pre-commit-hooks:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "build"
