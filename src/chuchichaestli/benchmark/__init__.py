@@ -5,6 +5,7 @@
 
 from chuchichaestli.benchmark.args import base_parser, shape, without_options
 from chuchichaestli.benchmark.benchmark import Benchmark, worker_command
+from chuchichaestli.benchmark.data import DataLoaderCase, drop_page_cache, read_epoch
 from chuchichaestli.benchmark.profile import perf_case, perf_counters, profile_case
 from chuchichaestli.benchmark.utils import (
     ALLOCATOR_ENV,
@@ -14,6 +15,7 @@ from chuchichaestli.benchmark.utils import (
     TensorCase,
     as_measurements,
     load_rows,
+    natural,
     numpy_input,
     peak_memory,
     pin_allocator,
@@ -34,11 +36,14 @@ __all__ = [
     "Backend",
     "Benchmark",
     "Case",
+    "DataLoaderCase",
     "Result",
     "TensorCase",
     "as_measurements",
     "base_parser",
+    "drop_page_cache",
     "load_rows",
+    "natural",
     "numpy_input",
     "peak_memory",
     "perf_case",
@@ -46,6 +51,7 @@ __all__ = [
     "pin_allocator",
     "plot",
     "profile_case",
+    "read_epoch",
     "repeated",
     "report",
     "report_rows",

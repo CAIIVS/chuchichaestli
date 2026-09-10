@@ -8,7 +8,7 @@ import fnmatch
 import torch
 from safetensors import safe_open
 from collections.abc import Sequence
-from chuchichaestli.data.cache import nbytes
+from chuchichaestli.utils import nbytes
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
 from chuchichaestli.data.zip import ZipDataset
 

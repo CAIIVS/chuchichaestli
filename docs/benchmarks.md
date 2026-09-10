@@ -168,3 +168,70 @@ level, since the fused Haar kernel does both axes at once. Search for
 
 The traces carry profiling overhead (on ROCm roughly twice the measured time),
 so read them for structure and the tables/plots above for timings.
+
+
+## Dataset reading { #data }
+
+Two benchmarks read the very same samples off disk, written once per format
+under `--data-dir` and reused. `benches/dataset_types.py` times what a first
+epoch costs, dropping the files from the page cache before every run so the
+reads go to storage; `benches/dataset_caching.py` times the epochs after that
+(stochastic caching), with a share of the samples held in shared memory. Keep
+that directory on real storage: nothing on `tmpfs` can be dropped from the page
+cache, and a sweep there measures reads served from memory.
+
+
+### Measuring { #data-measuring }
+
+=== "Formats, first epoch"
+
+    ```bash
+    python benches/dataset_types.py \
+      --samples 1024 \
+      --sizes 1x256x256 \
+      --batch-size 32 \
+      --workers 0 4 \
+      --repeats 3 \
+      --json dataset_types_1024x1x256x256_b32.json
+    ```
+
+=== "Sample cache, later epochs"
+
+    ```bash
+    python benches/dataset_caching.py \
+      --samples 1024 \
+      --sizes 1x256x256 \
+      --batch-size 8 \
+      --fractions 0 0.25 0.5 0.75 1 \
+      --json dataset_caching_1024x1x256x256_b8_w0_shu.json
+    ```
+
+Both sweep the sizes, sample counts, batch sizes, worker counts and orders
+they are given. The caching sweep reads shuffled in the main process by
+default, since that is where a partial cache shows: a shuffled loader draws
+uniformly, so the hit rate is the share cached.
+
+
+### Results { #data-results }
+
+A 256 MiB dataset &mdash; 1024 samples of `1x256x256` `float32` &mdash; read
+on the CPU, the first epoch as the median of three runs in fresh processes.
+
+<div class="grid" markdown>
+
+<figure markdown="span">
+  ![The first epoch, per format](assets/dataset_types_1024x1x256x256_b32.png)
+  <figcaption>First epoch &mdash; cold reads, batch 32</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![What a cache fraction buys](assets/dataset_caching_1024x1x256x256_b8_w0_shu.png)
+  <figcaption>Later epochs &mdash; shuffled, batch 8</figcaption>
+</figure>
+
+</div>
+
+Which format wins depends on the order the loader draws in: HDF5 reads front to
+back fastest, at 93 ms against 160 ms for `.npy`, and safetensors shuffled, at
+177 ms against 312 ms. Cached in full they converge on 28 ms, since a cached
+epoch is read out of the same shared memory whatever wrote the file.

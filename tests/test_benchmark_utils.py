@@ -19,6 +19,7 @@ from chuchichaestli.benchmark.utils import (
     TensorCase,
     as_measurements,
     load_rows,
+    natural,
     numpy_input,
     peak_memory,
     pin_allocator,
@@ -529,6 +530,34 @@ class TestReportRows:
         assert "not measured" in out and "not installed" in out
 
 
+class TestNatural:
+    """Ordering labels by the numbers in them."""
+
+    def test_numbers_order_as_numbers(self):
+        """Ten follows nine, which sorting text does not manage."""
+        assert sorted(["b16", "b4", "b128"], key=natural) == ["b4", "b16", "b128"]
+
+    def test_percentages_order_as_numbers(self):
+        """A fraction sweep reads 0, 25, 100, not 0, 100, 25."""
+        assert sorted(["c100%", "c0%", "c25%"], key=natural) == ["c0%", "c25%", "c100%"]
+
+    def test_text_still_orders_as_text(self):
+        """A label with no numbers in it is ordered the way it always was."""
+        assert sorted(["npy", "hdf5", "safetensors"], key=natural) == [
+            "hdf5", "npy", "safetensors"
+        ]
+
+    def test_numbers_and_text_do_not_collide(self):
+        """A number against a word compares without raising."""
+        assert sorted(["4", "a", "10"], key=natural) == ["4", "10", "a"]
+
+    def test_several_numbers_in_one_label(self):
+        """Every run of digits counts, so a case sorts by each axis in turn."""
+        assert sorted(["8x256", "8x64", "2x512"], key=natural) == [
+            "2x512", "8x64", "8x256"
+        ]
+
+
 class TestPlot:
     """The figure."""
 
@@ -550,6 +579,54 @@ class TestPlot:
         rows = [{"backend": "a", "case": "8x8", "side": 8, "status": "ok", "median_ms": 1.0}]
         plot(rows, str(path), lambda row: f"side {row['side']}")
         assert path.stat().st_size > 0
+
+    def test_it_takes_the_series_from_the_given_key(self, tmp_path):
+        """A benchmark chooses what one bar of a group is, not only the group."""
+        pytest.importorskip("matplotlib")
+        import matplotlib.pyplot as plt
+
+        rows = [
+            {"backend": "a", "case": "8x8", "share": share, "status": "ok",
+             "median_ms": 1.0}
+            for share in (0.0, 1.0)
+        ]
+        plot(
+            rows,
+            str(tmp_path / "out.png"),
+            lambda row: row["backend"],
+            lambda row: f"c{row['share']:.0%}",
+        )
+        legend = [text.get_text() for text in plt.gcf().axes[0].get_legend().get_texts()]
+        plt.close("all")
+        assert legend == ["c0%", "c100%"]
+
+    def test_the_series_defaults_to_the_backend(self, tmp_path):
+        """A benchmark that says nothing gets one bar per backend, as before."""
+        pytest.importorskip("matplotlib")
+        import matplotlib.pyplot as plt
+
+        rows = [
+            {"backend": name, "case": "8x8", "status": "ok", "median_ms": 1.0}
+            for name in ("a", "b")
+        ]
+        plot(rows, str(tmp_path / "out.png"))
+        legend = [text.get_text() for text in plt.gcf().axes[0].get_legend().get_texts()]
+        plt.close("all")
+        assert legend == ["a", "b"]
+
+    def test_the_axes_read_their_numbers_as_numbers(self, tmp_path):
+        """A size is ordered by what it is, so `b4` is drawn before `b16`."""
+        pytest.importorskip("matplotlib")
+        import matplotlib.pyplot as plt
+
+        rows = [
+            {"backend": "a", "case": case, "status": "ok", "median_ms": 1.0}
+            for case in ("b16 w0", "b4 w0", "b128 w0")
+        ]
+        plot(rows, str(tmp_path / "out.png"))
+        ticks = [text.get_text() for text in plt.gcf().axes[0].get_xticklabels()]
+        plt.close("all")
+        assert ticks == ["b4 w0", "b16 w0", "b128 w0"]
 
     def test_the_bars_use_the_documentation_palette(self, tmp_path):
         """A figure dropped into the docs should look like it belongs there."""

@@ -10,7 +10,7 @@ import h5py
 import torch
 import numpy as np
 from collections.abc import Sequence
-from chuchichaestli.data.cache import nbytes
+from chuchichaestli.utils import nbytes
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
 from chuchichaestli.data.zip import ZipDataset
 

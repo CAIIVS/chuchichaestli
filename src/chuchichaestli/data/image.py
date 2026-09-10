@@ -9,7 +9,7 @@ import torch
 from torchvision.io import decode_image, ImageReadMode
 from collections.abc import Sequence
 from typing import Literal
-from chuchichaestli.data.cache import nbytes
+from chuchichaestli.utils import nbytes
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
 from chuchichaestli.data.zip import ZipDataset
 
