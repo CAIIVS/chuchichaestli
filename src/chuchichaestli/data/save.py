@@ -18,8 +18,7 @@ written under a scratch name and moved into place, so an interrupted write
 leaves nothing half written for the next read.
 """
 
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -31,27 +30,10 @@ from safetensors.torch import save_file
 from chuchichaestli.data.hdf5 import HDF5Dataset
 from chuchichaestli.data.safetensors import SafetensorsDataset
 from chuchichaestli.utils import as_array
+from chuchichaestli.utils.io import staged
 
 
 __all__ = ["SAVERS", "save_dataset"]
-
-
-@contextmanager
-def _staged(*targets: Path) -> Iterator[list[Path]]:
-    """Yield a scratch path per target; all are moved into place, or none are.
-
-    Args:
-        targets: Files the write is to land on.
-    """
-    scratches = [t.with_stem(f"{t.stem}.part") for t in targets]
-    try:
-        yield scratches
-    except BaseException:
-        for scratch in scratches:
-            scratch.unlink(missing_ok=True)
-        raise
-    for scratch, target in zip(scratches, targets):
-        scratch.replace(target)
 
 
 def _as_tensor(data: Any) -> torch.Tensor:
@@ -117,15 +99,13 @@ def _save_hdf5(path: Path, data: Any, key: str, attrs: Any, attrs_key: str) -> N
         attrs: Metadata to write, or `None`.
         attrs_key: Group or dataset the metadata is written under.
     """
-    with _staged(path) as (scratch,):
+    with staged(path) as (scratch,):
         with h5py.File(scratch, "w") as handle:
             handle.create_dataset(key, data=as_array(data))
             if isinstance(attrs, Mapping):
                 handle.create_group(attrs_key).attrs.update(attrs)
             elif attrs is not None:
-                handle.create_dataset(
-                    attrs_key, data=_attrs_array(attrs, path.suffix)
-                )
+                handle.create_dataset(attrs_key, data=_attrs_array(attrs, path.suffix))
 
 
 def _save_safetensors(
@@ -146,7 +126,7 @@ def _save_safetensors(
     tensors = {key: _as_tensor(data)}
     if attrs is not None:
         tensors[attrs_key] = _as_tensor(_attrs_array(attrs, path.suffix))
-    with _staged(path) as (scratch,):
+    with staged(path) as (scratch,):
         save_file(tensors, str(scratch))
 
 
@@ -163,7 +143,7 @@ def _save_npy(path: Path, data: Any, key: str, attrs: Any, attrs_key: str) -> No
         attrs_key: Names the sidecar the metadata is written to.
     """
     targets = [path] if attrs is None else [path, _sidecar(path, attrs_key)]
-    with _staged(*targets) as scratches:
+    with staged(*targets) as scratches:
         np.save(scratches[0], as_array(data))
         if attrs is not None:
             np.save(scratches[1], _attrs_array(attrs, path.suffix, pickles=True))
@@ -182,7 +162,7 @@ def _save_npz(path: Path, data: Any, key: str, attrs: Any, attrs_key: str) -> No
     arrays = {key: as_array(data)}
     if attrs is not None:
         arrays[attrs_key] = _attrs_array(attrs, path.suffix)
-    with _staged(path) as (scratch,):
+    with staged(path) as (scratch,):
         np.savez(scratch, **arrays)
 
 
@@ -229,9 +209,7 @@ def save_dataset(
     path = Path(path)
     saver = SAVERS.get(path.suffix)
     if saver is None:
-        raise ValueError(
-            f"Cannot write '{path.suffix}'; choose from {sorted(SAVERS)}."
-        )
+        raise ValueError(f"Cannot write '{path.suffix}'; choose from {sorted(SAVERS)}.")
     path.parent.mkdir(parents=True, exist_ok=True)
     saver(path, data, key, attrs, attrs_key)
     return path
