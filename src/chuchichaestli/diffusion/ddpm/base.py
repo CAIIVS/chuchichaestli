@@ -132,8 +132,18 @@ class DiffusionProcess(ABC):
         pass
 
     def sample_timesteps(self, n: int) -> torch.Tensor:
-        """Sample timesteps for the diffusion process."""
-        return torch.randint(0, self.num_time_steps, (n,), device=self.device)
+        """Sample timesteps for the diffusion process.
+
+        Args:
+            n: Number of timesteps to draw.
+        """
+        return torch.randint(
+            0,
+            self.num_time_steps,
+            (n,),
+            generator=self.generator,
+            device=self.device,
+        )
 
     def sample_noise(self, shape: torch.Size) -> torch.Tensor:
         """Sample noise for the diffusion process.
