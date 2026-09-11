@@ -121,6 +121,15 @@ class TestDerivedProceduralDataset:
             _ = ds[len(ds)]
 
     @pytest.mark.parametrize("factory", DATASET_FACTORIES)
+    def test_generation_leaves_the_global_rng_alone(self, factory):
+        """Building a dataset must not reseed its caller's generator."""
+        torch.manual_seed(123)
+        expected = torch.randn(4)
+        torch.manual_seed(123)
+        factory()
+        assert torch.equal(torch.randn(4), expected)
+
+    @pytest.mark.parametrize("factory", DATASET_FACTORIES)
     def test_reproducibility_same_seed(self, factory):
         """Test random seed."""
         ds_a = factory()

@@ -28,6 +28,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from chuchichaestli.utils import map_nested
+from chuchichaestli.utils.rng import rng_generator
 
 
 __all__ = ["DataLoaderCase", "drop_page_cache", "read_epoch"]
@@ -82,7 +83,7 @@ def read_epoch(
         shuffle=case.order == "shuffled",
         num_workers=case.workers,
         pin_memory=device.type == "cuda",
-        generator=torch.Generator().manual_seed(case.seed),
+        generator=rng_generator(case.seed, "benchmark"),
     )
     if device.type == "cpu":
         for _ in loader:

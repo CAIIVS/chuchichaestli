@@ -20,12 +20,12 @@ Generators provided:
 
 from pathlib import Path
 import torch
-from torch.distributions import Normal
 from abc import ABC, abstractmethod
 import warnings
 from collections.abc import Callable
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
 from chuchichaestli.utils import nbytes
+from chuchichaestli.utils.rng import rng_generator
 
 
 __all__ = [
@@ -268,7 +268,7 @@ class HalfMoonsDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate half-moon samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         n_out, n_in = self._partition(self.n_samples, 2)
         # Outer moon: upper half-circle.
         t_out = torch.linspace(0, torch.pi, n_out)
@@ -281,10 +281,12 @@ class HalfMoonsDataset(ProceduralDataset):
         y = torch.cat([torch.zeros(n_out), torch.ones(n_in)])
         # Add random jitter on 2D plane
         if self.noise > 0:
-            X = X + torch.randn_like(X) * self.noise
+            X = X + torch.randn(X.shape, generator=gen, dtype=X.dtype) * self.noise
         # Embed into higher-diemnsional ambient space
         if self.dim > 2:
-            extra = torch.randn(self.n_samples, self.dim - 2) * self.noise
+            extra = (
+                torch.randn(self.n_samples, self.dim - 2, generator=gen) * self.noise
+            )
             X = torch.cat([X, extra], dim=1)
         return X, y
 
@@ -325,23 +327,26 @@ class SpiralsDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate two-spiral samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         n0, n1 = self._partition(self.n_samples, 2)
         # Angular parameter (sqrt-sampling gives uniform density along the arc)
-        t0 = torch.sqrt(torch.rand(n0)) * 780.0 * (2.0 * torch.pi / 360.0)
-        t1 = torch.sqrt(torch.rand(n1)) * 780.0 * (2.0 * torch.pi / 360.0)
+        arc = 780.0 * (2.0 * torch.pi / 360.0)
+        t0 = torch.sqrt(torch.rand(n0, generator=gen)) * arc
+        t1 = torch.sqrt(torch.rand(n1, generator=gen)) * arc
         # First arm.
-        jitter0 = torch.randn(n0, 2) * self.noise
+        jitter0 = torch.randn(n0, 2, generator=gen) * self.noise
         arm0 = torch.stack([-torch.cos(t0) * t0, torch.sin(t0) * t0], dim=1) + jitter0
         # Second arm, 180 degrees rotation with independent noise.
-        jitter1 = torch.randn(n1, 2) * self.noise
+        jitter1 = torch.randn(n1, 2, generator=gen) * self.noise
         arm1 = -torch.stack([-torch.cos(t1) * t1, torch.sin(t1) * t1], dim=1) + jitter1
         # Build data tensors
         X = torch.cat([arm0, arm1])
         y = torch.cat([torch.zeros(n0), torch.ones(n1)])
         # Embed into higher-dimensional ambient space if needed
         if self.dim > 2:
-            extra = torch.randn(self.n_samples, self.dim - 2) * self.noise
+            extra = (
+                torch.randn(self.n_samples, self.dim - 2, generator=gen) * self.noise
+            )
             X = torch.cat([X, extra], dim=1)
         return X, y
 
@@ -388,15 +393,15 @@ class CheckerboardDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate checkerboard samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         e = self.extent
-        X = torch.empty(self.n_samples, self.dim).uniform_(-e, e)
+        X = torch.empty(self.n_samples, self.dim).uniform_(-e, e, generator=gen)
         cell_size = 2.0 * e / self.n_tiles
         # Sum tile-index parities across all dimensions
         indices = torch.floor((X + e) / cell_size).long()
         y = (indices.sum(dim=1) % 2).float()
         if self.noise > 0:
-            X = X + torch.randn_like(X) * self.noise
+            X = X + torch.randn(X.shape, generator=gen, dtype=X.dtype) * self.noise
         return X, y
 
 
@@ -448,7 +453,7 @@ class RingsDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate concentric-ring samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         n = self.n_samples // self.n_rings
         counts = self._partition(self.n_samples, self.n_rings)
         X_parts: list[torch.Tensor] = []
@@ -456,13 +461,17 @@ class RingsDataset(ProceduralDataset):
         # Build each ring with spacing inbetween
         for k, n in enumerate(counts):
             radius = self.inner_radius + k * self.ring_spacing
-            theta = torch.empty(n).uniform_(0.0, 2.0 * torch.pi)
-            r = radius + torch.empty(n).uniform_(-self.width, self.width)
+            theta = torch.empty(n).uniform_(0.0, 2.0 * torch.pi, generator=gen)
+            r = radius + torch.empty(n).uniform_(-self.width, self.width, generator=gen)
             pts = torch.stack([r * torch.cos(theta), r * torch.sin(theta)], dim=1)
             if self.noise > 0:
-                pts = pts + torch.randn_like(pts) * self.noise
+                pts = (
+                    pts
+                    + torch.randn(pts.shape, generator=gen, dtype=pts.dtype)
+                    * self.noise
+                )
             if self.dim > 2:
-                extra = torch.randn(n, self.dim - 2) * self.noise
+                extra = torch.randn(n, self.dim - 2, generator=gen) * self.noise
                 pts = torch.cat([pts, extra], dim=1)
             X_parts.append(pts)
             y_parts.append(torch.full((n,), k, dtype=self.dtype))
@@ -511,26 +520,40 @@ class ConcentricSpheresDataset(ProceduralDataset):
         )
 
     @staticmethod
-    def _randnsphere(dim: int, n: int, radius: float = 1.0) -> torch.Tensor:
+    def _randnsphere(
+        dim: int,
+        n: int,
+        radius: float = 1.0,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
         """Sample n points uniformly on the surface of a `dim`-sphere.
 
         Args:
             dim: Dimensionality of the ambient space.
             n: Number of points to sample.
             radius: Radius of the sphere.
+            generator: Source of randomness; the global one when `None`.
         """
-        v = torch.randn(n, dim)
+        v = torch.randn(n, dim, generator=generator)
         return v * (radius / v.norm(dim=1, keepdim=True))
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate concentric-sphere samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         n_inner, n_outer = self._partition(self.n_samples, 2)
-        X_inner = self._randnsphere(self.dim, n_inner, self.inner_radius)
-        X_outer = self._randnsphere(self.dim, n_outer, self.outer_radius)
+        X_inner = self._randnsphere(self.dim, n_inner, self.inner_radius, gen)
+        X_outer = self._randnsphere(self.dim, n_outer, self.outer_radius, gen)
         if self.noise > 0:
-            X_inner = X_inner + torch.randn_like(X_inner) * self.noise
-            X_outer = X_outer + torch.randn_like(X_outer) * self.noise
+            X_inner = (
+                X_inner
+                + torch.randn(X_inner.shape, generator=gen, dtype=X_inner.dtype)
+                * self.noise
+            )
+            X_outer = (
+                X_outer
+                + torch.randn(X_outer.shape, generator=gen, dtype=X_outer.dtype)
+                * self.noise
+            )
         X = torch.cat([X_inner, X_outer])
         y = torch.cat([torch.zeros(n_inner), torch.ones(n_outer)])
         return X, y
@@ -582,7 +605,7 @@ class GaussiansDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate ring-of-Gaussians samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         X_parts: list[torch.Tensor] = []
         y_parts: list[torch.Tensor] = []
         counts = self._partition(self.n_samples, self.n_gaussians)
@@ -593,10 +616,14 @@ class GaussiansDataset(ProceduralDataset):
             centre[0] = self.radius * torch.cos(angle)
             centre[1] = self.radius * torch.sin(angle)
             # Gaussian data
-            pts = Normal(centre, torch.full((self.dim,), self.std)).sample((n,))
+            pts = centre + self.std * torch.randn(n, self.dim, generator=gen)
             # Additional jitter
             if self.noise > 0:
-                pts = pts + torch.randn_like(pts) * self.noise
+                pts = (
+                    pts
+                    + torch.randn(pts.shape, generator=gen, dtype=pts.dtype)
+                    * self.noise
+                )
             X_parts.append(pts)
             y_parts.append(torch.full((n,), k, dtype=self.dtype))
         return torch.cat(X_parts), torch.cat(y_parts)
@@ -642,17 +669,21 @@ class SwissRollDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate Swiss-roll samples."""
-        torch.manual_seed(self.seed)
-        t = self.t_min + (self.t_max - self.t_min) * torch.rand(self.n_samples)
-        h = self.height * (torch.rand(self.n_samples) - 0.5)
+        gen = rng_generator(self.seed, type(self).__name__)
+        t = self.t_min + (self.t_max - self.t_min) * torch.rand(
+            self.n_samples, generator=gen
+        )
+        h = self.height * (torch.rand(self.n_samples, generator=gen) - 0.5)
         # Build spiral
         X = torch.stack([t * torch.cos(t), h, t * torch.sin(t)], dim=1)
         # Additional jitter
         if self.noise > 0:
-            X = X + torch.randn_like(X) * self.noise
+            X = X + torch.randn(X.shape, generator=gen, dtype=X.dtype) * self.noise
         # Embed into higher-dimensional ambient space if needed
         if self.dim > 3:
-            extra = torch.randn(self.n_samples, self.dim - 3) * self.noise
+            extra = (
+                torch.randn(self.n_samples, self.dim - 3, generator=gen) * self.noise
+            )
             X = torch.cat([X, extra], dim=1)
         # Normalised winding angle as a continuous label.
         y = (t - self.t_min) / (self.t_max - self.t_min)
