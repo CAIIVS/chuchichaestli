@@ -4,7 +4,6 @@
 """Recording how an object was constructed, so it can be rebuilt exactly."""
 
 from __future__ import annotations
-
 import functools
 import importlib
 import inspect
@@ -14,70 +13,17 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
 import torch
 
 
-__all__ = ["ModelSpec", "InitArgMixin", "qualname", "resolve", "render"]
+__all__ = ["ModelSpec", "InitArgMixin"]
 
 _INIT_ARGS = "_init_args"
 
 
-def qualname(obj: type) -> str:
-    """Return an importable `"module:QualName"` for a class.
-
-    Args:
-        obj: Class to name.
-    """
-    return f"{obj.__module__}:{obj.__qualname__}"
-
-
-def resolve(path: str) -> type:
-    """Import the class an importable name points at.
-
-    Args:
-        path: Name of the form `"module:QualName"`.
-
-    Raises:
-        ValueError: If `path` is not of that form.
-    """
-    if ":" not in path:
-        raise ValueError(f"Not an importable name: {path!r}. Use 'module:QualName'.")
-    module, _, name = path.partition(":")
-    target: Any = importlib.import_module(module)
-    for part in name.split("."):
-        target = getattr(target, part)
-    return target
-
-
-def render(value: Any) -> Any:
-    """Reduce a constructor argument to something JSON can hold.
-
-    Args:
-        value: Argument to reduce.
-    """
-    if isinstance(value, torch.dtype):
-        return str(value).removeprefix("torch.")
-    if isinstance(value, torch.device):
-        return str(value)
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, Mapping):
-        return {str(k): render(v) for k, v in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        return [render(v) for v in value]
-    if isinstance(value, (bool, int, float, str)) or value is None:
-        return value
-    if isinstance(value, type):
-        return qualname(value)
-    return repr(value)
-
-
 @dataclass(frozen=True, slots=True)
 class ModelSpec:
-    """What it takes to rebuild an object.
+    """What it takes to rebuild a model.
 
     Attributes:
         cls: Importable name of the class, as `"module:QualName"`.
@@ -87,17 +33,98 @@ class ModelSpec:
     cls: str
     kwargs: Mapping[str, Any] = field(default_factory=dict)
 
+    @staticmethod
+    def qualname(obj: type) -> str:
+        """Return an importable `"module:QualName"` for a class.
+
+        Args:
+            obj: Class to name.
+        """
+        return f"{obj.__module__}:{obj.__qualname__}"
+
+    @staticmethod
+    def import_class(path: str) -> type:
+        """Import the class an importable name points at.
+
+        Args:
+            path: Name of the form `"module:QualName"`.
+
+        Raises:
+            ValueError: If `path` is not of that form.
+        """
+        if ":" not in path:
+            raise ValueError(
+                f"Not an importable name: {path!r}. Use 'module:QualName'."
+            )
+        module, _, name = path.partition(":")
+        target: Any = importlib.import_module(module)
+        for part in name.split("."):
+            target = getattr(target, part)
+        return target
+
+    @classmethod
+    def encode_arg(cls, value: Any) -> Any:
+        """Reduce a constructor argument to something JSON can hold.
+
+        Args:
+            value: Argument to reduce.
+
+        Raises:
+            TypeError: If `value` is a module that records no arguments, since
+                the rebuilt model would silently differ from the saved one.
+        """
+        if isinstance(value, InitArgMixin):
+            return value.spec.to_dict()
+        if isinstance(value, torch.nn.Module):
+            raise TypeError(
+                f"Cannot record a {type(value).__name__} argument in a spec: it "
+                "does not inherit InitArgMixin, so nothing says how to rebuild it."
+            )
+        if isinstance(value, torch.dtype):
+            return str(value).removeprefix("torch.")
+        if isinstance(value, torch.device):
+            return str(value)
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, Mapping):
+            return {str(k): cls.encode_arg(v) for k, v in value.items()}
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            return [cls.encode_arg(v) for v in value]
+        if isinstance(value, (bool, int, float, str)) or value is None:
+            return value
+        if isinstance(value, type):
+            return cls.qualname(value)
+        return repr(value)
+
+    @classmethod
+    def decode_arg(cls, value: Any) -> Any:
+        """Rebuild whatever `encode_arg` reduced, nested specs included.
+
+        Args:
+            value: Encoded argument to restore.
+        """
+        if isinstance(value, Mapping):
+            if set(value) == {"cls", "kwargs"}:
+                return cls.from_dict(value).build()
+            return {k: cls.decode_arg(v) for k, v in value.items()}
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            return [cls.decode_arg(v) for v in value]
+        return value
+
     def build(self, **overrides: Any) -> Any:
         """Construct the object this spec describes.
 
         Args:
             overrides: Arguments to replace, for rebuilding a variant.
         """
-        return resolve(self.cls)(**{**self.kwargs, **overrides})
+        kwargs = {key: self.decode_arg(value) for key, value in self.kwargs.items()}
+        return self.import_class(self.cls)(**{**kwargs, **overrides})
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable mapping of the spec."""
-        return {"cls": self.cls, "kwargs": render(dict(self.kwargs))}
+        return {"cls": self.cls, "kwargs": self.encode_arg(dict(self.kwargs))}
 
     def to_json(self) -> str:
         """Return the spec as one JSON string, for file metadata."""
@@ -123,14 +150,7 @@ class ModelSpec:
 
 
 class InitArgMixin:
-    """Records every constructor argument, so `.spec` can rebuild the object.
-
-    A model keeps almost nothing of how it was built — `UNet` stores two of its
-    forty-four arguments — and a checkpoint holds fewer clues still, since
-    activations, dropout and norm choices leave no tensors behind. Capturing
-    the arguments as they arrive is the only way a saved model can be rebuilt
-    exactly rather than guessed at.
-    """
+    """Records every constructor argument, so `.spec` can rebuild the object."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Wrap a subclass's `__init__` so its arguments are recorded.
@@ -139,8 +159,6 @@ class InitArgMixin:
             kwargs: Passed to the next `__init_subclass__` in the chain.
         """
         super().__init_subclass__(**kwargs)
-        # a partialclass installs a partialmethod, which delegates to the
-        # already-wrapped __init__ and so records on its own
         init = cls.__dict__.get("__init__")
         if not inspect.isfunction(init) or getattr(init, "_records_init", False):
             return
@@ -184,4 +202,4 @@ class InitArgMixin:
                 f"{type(self).__name__} recorded no constructor arguments; "
                 "it defines no __init__ for InitArgMixin to wrap."
             )
-        return ModelSpec(cls=qualname(type(self)), kwargs=dict(recorded))
+        return ModelSpec(cls=ModelSpec.qualname(type(self)), kwargs=dict(recorded))

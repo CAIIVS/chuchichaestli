@@ -8,13 +8,7 @@ import torch
 from torch import nn
 
 from chuchichaestli.utils.functools import partialclass
-from chuchichaestli.models.spec import (
-    InitArgMixin,
-    ModelSpec,
-    qualname,
-    render,
-    resolve,
-)
+from chuchichaestli.models.spec import InitArgMixin, ModelSpec
 
 
 class Tiny(InitArgMixin, nn.Module):
@@ -96,15 +90,15 @@ def test_a_class_without_its_own_init_says_so():
         Bare().spec
 
 
-def test_qualname_round_trips_through_resolve():
+def test_qualname_round_trips_through_import_class():
     """A spec names a class by an importable path."""
-    assert resolve(qualname(nn.Linear)) is nn.Linear
+    assert ModelSpec.import_class(ModelSpec.qualname(nn.Linear)) is nn.Linear
 
 
-def test_resolve_rejects_a_name_that_is_not_importable():
+def test_import_class_rejects_a_name_that_is_not_importable():
     """The error says what shape the name should have."""
     with pytest.raises(ValueError, match="Use 'module:QualName'"):
-        resolve("torch.nn.Linear")
+        ModelSpec.import_class("torch.nn.Linear")
 
 
 @pytest.mark.parametrize(
@@ -118,6 +112,62 @@ def test_resolve_rejects_a_name_that_is_not_importable():
         (True, True),
     ],
 )
-def test_render_reduces_arguments_to_json(value, expected):
+def test_encode_arg_reduces_arguments_to_json(value, expected):
     """Constructor arguments hold torch types that JSON cannot."""
-    assert render(value) == expected
+    assert ModelSpec.encode_arg(value) == expected
+
+
+class Wrapper(InitArgMixin, nn.Module):
+    """A model assembled from a component it was handed."""
+
+    def __init__(self, inner: nn.Module, scale: float = 1.0):
+        """Constructor.
+
+        Args:
+            inner: Component to wrap.
+            scale: Arbitrary scalar, to check plain arguments still render.
+        """
+        super().__init__()
+        self.inner = inner
+        self.scale = scale
+
+
+def test_a_component_is_recorded_as_a_nested_spec():
+    """A model built from submodules must say how to rebuild them too."""
+    nested = Wrapper(Tiny(width=8, act="gelu")).spec.to_dict()
+    assert nested["kwargs"]["inner"]["cls"].endswith(":Tiny")
+    assert nested["kwargs"]["inner"]["kwargs"]["act"] == "gelu"
+
+
+def test_a_nested_spec_rebuilds_its_component():
+    """The whole tree has to survive a trip through JSON."""
+    original = Wrapper(Tiny(width=8, act="gelu"), scale=2.0)
+    rebuilt = ModelSpec.from_json(original.spec.to_json()).build()
+    assert isinstance(rebuilt.inner, Tiny)
+    assert type(rebuilt.inner.act).__name__ == "GELU"
+    assert rebuilt.inner.lin.in_features == 8
+    assert rebuilt.scale == 2.0
+
+
+def test_a_module_that_records_nothing_is_refused():
+    """A repr would serialize fine and then rebuild into the wrong thing."""
+    with pytest.raises(TypeError, match="does not inherit InitArgMixin"):
+        Wrapper(nn.Linear(4, 4)).spec.to_dict()
+
+
+def test_decode_arg_passes_plain_values_through():
+    """Only spec-shaped mappings are rebuilt; everything else is data."""
+    assert ModelSpec.decode_arg({"cls": "x", "kwargs": {}, "extra": 1}) == {
+        "cls": "x",
+        "kwargs": {},
+        "extra": 1,
+    }
+    assert ModelSpec.decode_arg([1, "a", None]) == [1, "a", None]
+
+
+def test_recording_does_not_register_the_arguments_as_submodules():
+    """A recorded component must not show up twice in the state dict."""
+    inner = Tiny(width=4)
+    wrapper = Wrapper(inner)
+    assert [name for name, _ in wrapper.named_children()] == ["inner"]
+    assert all("_init_args" not in key for key in wrapper.state_dict())
