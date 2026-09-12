@@ -1,0 +1,316 @@
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""The engine: it owns the driver loop and everything a run needs set up once."""
+
+from __future__ import annotations
+import os
+import warnings
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any, Literal, NamedTuple
+import torch
+from torch import nn
+from chuchichaestli.runtime.context import Context
+from chuchichaestli.runtime.events import (
+    C3liRuntimeError,
+    Event,
+    EventType,
+    Progress,
+    Signal,
+    filter_priority,
+)
+from chuchichaestli.runtime.hooks import Console
+from chuchichaestli.utils.rng import seed_ambient
+from chuchichaestli.runtime.stages import Phase
+from chuchichaestli.runtime.topology import auto_topology
+from chuchichaestli.runtime.traits import (
+    Hook,
+    Stage,
+    Topology,
+    is_critical,
+    needs_store,
+)
+
+
+__all__ = [
+    "Runtime",
+    "BackendsPresets",
+    "BACKENDS_PRESETS_MAP",
+    "C3liProgramError",
+]
+
+
+BackendsPresets = Literal["fast", "default", "deterministic", "strict"]
+
+
+class BackendsSettings(NamedTuple):
+    """The torch backend settings collection.
+
+    Attributes:
+        deterministic: Whether deterministic algorithms are required, or `None`
+            to leave the current setting alone.
+        warn_only: Whether a non-deterministic operation warns instead of
+            raising.
+        benchmark: Whether cuDNN autotunes its algorithms, or `None` to leave
+            the current setting alone.
+    """
+
+    deterministic: bool | None
+    warn_only: bool
+    benchmark: bool | None
+
+
+BACKENDS_PRESETS_MAP: dict[str, BackendsSettings] = {
+    "fast": BackendsSettings(deterministic=False, warn_only=False, benchmark=True),
+    "default": BackendsSettings(deterministic=None, warn_only=False, benchmark=None),
+    "deterministic": BackendsSettings(
+        deterministic=True, warn_only=True, benchmark=False
+    ),
+    "strict": BackendsSettings(deterministic=True, warn_only=False, benchmark=False),
+}
+
+
+class C3liProgramError(ValueError):
+    """Raised when a program cannot possibly run as written.
+
+    Everything it covers is detectable before any compute happens.
+    """
+
+
+def apply_backends_settings(level: BackendsPresets) -> None:
+    """Apply one backend preset for a run.
+
+    Must happen before anything touches CUDA: `CUBLAS_WORKSPACE_CONFIG` is
+    read when the cuBLAS handle is created and silently ignored afterwards.
+
+    Args:
+        level: `"fast"`, `"default"`, `"deterministic"` or `"strict"`.
+            `"default"` leaves every setting exactly as it is rather than
+            restoring torch's own defaults.
+
+    Raises:
+        ValueError: If `level` is not one of the four.
+    """
+    if level not in BACKENDS_PRESETS_MAP:
+        raise ValueError(
+            f"Unsupported backends preset: {level!r}. "
+            f"Use one of {sorted(BACKENDS_PRESETS_MAP)}."
+        )
+    settings = BACKENDS_PRESETS_MAP[level]
+    if settings.deterministic is not None:
+        if settings.deterministic:
+            os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.use_deterministic_algorithms(
+            settings.deterministic, warn_only=settings.warn_only
+        )
+        torch.backends.cudnn.deterministic = settings.deterministic
+    if settings.benchmark is not None:
+        torch.backends.cudnn.benchmark = settings.benchmark
+
+
+class Runtime:
+    """Runs a program.
+
+    Owns what is set once per run: determinism, seed, device, topology, hooks.
+    """
+
+    def __init__(
+        self,
+        program: Stage,
+        seed: int = 0,
+        store: str | Path | None = None,
+        resume: str | Path | None = None,
+        hooks: Sequence[Hook] | None = None,
+        device: torch.device | str | None = None,
+        topology: Topology | None = None,
+        backends: BackendsPresets = "default",
+    ):
+        """Constructor.
+
+        Args:
+            program: Any stage; a bare stage needs no `Program` wrapper.
+            seed: Root seed every random stream in the run derives from.
+            store: Directory checkpoints are written under, resolved to an
+                absolute path so a later change of working directory cannot
+                move it.
+            resume: `"last"`, `"best"`, a checkpoint directory, or the
+                manifest file inside one.
+            hooks: Observers of the run; defaults to a console reporter.
+            device: Device to place modules and batches on; the topology
+                picks one per process when absent.
+            topology: Process layout; detected from the environment if absent.
+            backends: Torch backend preset; one of `"fast"`, `"default"`,
+                `"deterministic"` or `"strict"`.
+        """
+        self.program = program
+        self.seed = seed
+        self.store = Path(store).resolve() if store is not None else None
+        self.resume = resume
+        self.hooks = list(hooks) if hooks is not None else [Console()]
+        self.backends = backends
+        self._device = torch.device(device) if device is not None else None
+        self._topology = topology
+        self._muted: set[int] = set()
+
+    @property
+    def device(self) -> torch.device:
+        """Device this run places modules and batches on.
+
+        Comes from the topology unless pinned explicitly.
+        """
+        return self._device if self._device is not None else self.topology.device
+
+    @property
+    def topology(self) -> Topology:
+        """Process layout this run executes across."""
+        if self._topology is None:
+            self._topology = auto_topology(self._device)
+        return self._topology
+
+    def check(self) -> None:
+        """Reject a program that cannot run, before any compute happens.
+
+        Checks that every requirement is bound or published ahead of it.
+
+        Raises:
+            C3liProgramError: If the program or the runtime options are unusable.
+        """
+        problems: list[str] = []
+        if self.resume is not None and self.store is None:
+            problems.append(
+                f"resume={self.resume!r} needs a store to resume from, but "
+                f"store is {self.store!r}."
+            )
+        for hook in self.hooks:
+            if needs_store(hook) and self.store is None:
+                problems.append(f"{hook!r} needs a store to write to.")
+        self._check_stage(self.program, set(), problems, self.program.name)
+        if problems:
+            raise C3liProgramError(
+                "This program cannot run:\n  - " + "\n  - ".join(problems)
+            )
+
+    def _check_stage(
+        self, stage: Any, available: set[str], problems: list[str], path: str
+    ) -> set[str]:
+        """Walk a subtree checking requirements against what is bound.
+
+        Returns the names visible to this stage's later siblings: a stage
+        publishes to its parent, so what it provides outlives it.
+
+        Args:
+            stage: The stage to check.
+            available: Binding names resolvable at this point.
+            problems: Accumulates human-readable failures.
+            path: This stage's logical coordinate.
+        """
+        for name in getattr(stage, "requires", ()):
+            if name not in available:
+                problems.append(
+                    f"{path!r} requires {name!r}, which nothing provides "
+                    f"(available: {sorted(available) or 'nothing'})."
+                )
+        if isinstance(stage, Phase):
+            inner = available | set(stage.provide)
+            for index, child in enumerate(stage.stages):
+                inner = self._check_stage(
+                    child, inner, problems, f"{path}/{index}:{child.name}"
+                )
+        return available | set(getattr(stage, "provides", ()))
+
+    def _provision(self) -> None:
+        """Ready what the program provides for this run.
+
+        Each module is placed on the device before the topology wraps it,
+        since a distributed wrapper requires a module already on its own.
+        """
+        provide = getattr(self.program, "provide", None)
+        if not provide:
+            return
+        for key, value in list(provide.items()):
+            if isinstance(value, nn.Module):
+                provide[key] = self.topology.wrap(value.to(self.device))
+
+    def run(self) -> Progress:
+        """Execute the program and return where it finished.
+
+        Raises:
+            C3liRuntimeError: If any stage or hook aborted the run.
+        """
+        apply_backends_settings(self.backends)
+        self._muted.clear()
+        seed_ambient(self.seed)
+        self.check()
+        self._provision()
+
+        ctx = Context(
+            self.program.name,
+            self.seed,
+            topology=self.topology,
+            device=self.device,
+            dispatch=self._dispatch,
+        )
+        ctx.emit(EventType.RUN_BEGAN, seed=self.seed, backends=self.backends)
+        failure: str | None = None
+        try:
+            signal = self._lockstep(lambda: self.program.enter(ctx))
+            while not signal.halts:
+                signal = self._lockstep(lambda: self.program.execute(ctx))
+        except C3liRuntimeError as exc:
+            failure = str(exc)
+            raise
+        finally:
+            self.program.leave(ctx)
+            ctx.progress = self.program.progress()
+            ctx.emit(EventType.RUN_ENDED, aborted=failure)
+        return self.program.progress()
+
+    def _dispatch(self, event: Event) -> Signal:
+        """Deliver an event to every hook and combine their verdicts.
+
+        A hook that raises is dropped for the rest of the run unless it sets
+        `critical`, so a failing console does not end a long training run.
+
+        Args:
+            event: What the runtime just did.
+        """
+        signals = []
+        for hook in self.hooks:
+            if id(hook) in self._muted:
+                continue
+            try:
+                signals.append(hook.on(event))
+            except C3liRuntimeError:
+                raise
+            except Exception as exc:
+                if is_critical(hook):
+                    raise
+                self._muted.add(id(hook))
+                warnings.warn(
+                    f"Hook {hook!r} raised {exc!r}; dropping it for this run.",
+                    stacklevel=2,
+                )
+        return filter_priority(signals)
+
+    def _lockstep(self, call: Callable[[], Signal]) -> Signal:
+        """Run a driver call, broadcasting outcomes to every rank.
+
+        Args:
+            call: Performs the driver call.
+
+        Raises:
+            C3liRuntimeError: If rank 0 reports that some process aborted.
+        """
+        try:
+            outcome: tuple[Signal, str | None] = (call(), None)
+        except C3liRuntimeError as exc:
+            outcome = (Signal.BREAK, str(exc) or "aborted")
+        signal, reason = self.topology.broadcast(outcome)
+        if reason is not None:
+            raise C3liRuntimeError(reason)
+        return signal
+
+    def __repr__(self) -> str:
+        """Return a short description of the runtime."""
+        return f"Runtime({self.program!r}, seed={self.seed})"
