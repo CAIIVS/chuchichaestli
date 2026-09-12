@@ -108,7 +108,9 @@ class LiteVAEEncoder(InitArgMixin, nn.Module):
         """
         super().__init__()
         if dwt_levels < 1:
-            raise ValueError(f"A wavelet encoder needs at least one level; got {dwt_levels}.")
+            raise ValueError(
+                f"A wavelet encoder needs at least one level; got {dwt_levels}."
+            )
         if mode != "periodization":
             raise ValueError(
                 f"A wavelet encoder pools every level to the resolution of the"
@@ -144,12 +146,12 @@ class LiteVAEEncoder(InitArgMixin, nn.Module):
             **{
                 f"attn_{name}": attn_args[name]
                 for name in (
-                        "n_heads",
-                        "head_dim",
-                        "dropout_p",
-                        "norm_type",
-                        "groups",
-                        "kernel_size",
+                    "n_heads",
+                    "head_dim",
+                    "dropout_p",
+                    "norm_type",
+                    "groups",
+                    "kernel_size",
                 )  # UNet attn_args
                 if name in attn_args
             },
