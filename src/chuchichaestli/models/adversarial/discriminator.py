@@ -10,6 +10,7 @@ from torch.nn.modules.pooling import _AvgPoolNd, _MaxPoolNd
 from collections.abc import Sequence
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
+from chuchichaestli.models.spec import InitArgMixin
 from chuchichaestli.models.blocks import (
     ATTN_CONV_BLOCK_MAP,
     CONV_BLOCK_MAP,
@@ -27,7 +28,7 @@ __all__ = [
 ]
 
 
-class BlockDiscriminator(nn.Sequential):
+class BlockDiscriminator(InitArgMixin, nn.Sequential):
     """A base class for pixel and patch-based discriminators as in Pix2Pix.
 
     From the paper: https://arxiv.org/abs/1611.07004

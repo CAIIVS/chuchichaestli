@@ -8,7 +8,31 @@ import torch
 from torch import nn
 
 from chuchichaestli.utils.functools import partialclass
+from chuchichaestli.models.adversarial.discriminator import (
+    AntialiasingDiscriminator,
+    AntialiasingPatchDiscriminator,
+    AttnPatchDiscriminator,
+    BlockDiscriminator,
+    PatchDiscriminator,
+    PixelDiscriminator,
+)
+from chuchichaestli.models.autoencoder import (
+    Autoencoder,
+    DCAE,
+    Decoder,
+    Encoder,
+    LiteVAE,
+    LiteVAEDecoder,
+    LiteVAEEncoder,
+    VAE,
+    VAEDecoder,
+    VAEEncoder,
+    VQVAE,
+)
+from chuchichaestli.models.autoencoder.vqvae import VectorQuantizer
+from chuchichaestli.models.resnet import ResNet, ResNet18
 from chuchichaestli.models.spec import InitArgMixin, ModelSpec
+from chuchichaestli.models.unet import UNet
 
 
 class Tiny(InitArgMixin, nn.Module):
@@ -171,3 +195,69 @@ def test_recording_does_not_register_the_arguments_as_submodules():
     wrapper = Wrapper(inner)
     assert [name for name, _ in wrapper.named_children()] == ["inner"]
     assert all("_init_args" not in key for key in wrapper.state_dict())
+
+
+MODELS = [
+    UNet,
+    ResNet,
+    ResNet18,
+    Encoder,
+    Decoder,
+    Autoencoder,
+    VAE,
+    VAEEncoder,
+    VAEDecoder,
+    VQVAE,
+    VectorQuantizer,
+    DCAE,
+    LiteVAE,
+    LiteVAEEncoder,
+    LiteVAEDecoder,
+    BlockDiscriminator,
+    PixelDiscriminator,
+    PatchDiscriminator,
+    AttnPatchDiscriminator,
+    AntialiasingDiscriminator,
+    AntialiasingPatchDiscriminator,
+]
+
+
+@pytest.mark.parametrize("model_cls", MODELS, ids=lambda c: c.__name__)
+def test_every_model_family_records_its_arguments(model_cls):
+    """A model added without the mixin cannot be rebuilt from a checkpoint."""
+    assert issubclass(model_cls, InitArgMixin)
+
+
+def test_a_real_model_rebuilds_from_its_spec():
+    """`UNet` keeps two of its forty-four arguments, so the spec is the record."""
+    original = UNet(dimensions=2, in_channels=1, n_channels=32)
+    rebuilt = ModelSpec.from_json(original.spec.to_json()).build()
+    before, after = original.state_dict(), rebuilt.state_dict()
+    assert set(before) == set(after)
+    assert all(before[key].shape == after[key].shape for key in before)
+
+
+def test_a_model_assembled_from_components_rebuilds():
+    """The autoencoders take their encoder and decoder as constructed objects."""
+    original = Autoencoder(
+        encoder=Encoder(dimensions=2, in_channels=1, n_channels=32),
+        decoder=Decoder(dimensions=2, n_channels=256, out_channels=1),
+    )
+    rebuilt = ModelSpec.from_json(original.spec.to_json()).build()
+    assert isinstance(rebuilt.encoder, Encoder)
+    assert isinstance(rebuilt.decoder, Decoder)
+    before, after = original.state_dict(), rebuilt.state_dict()
+    assert set(before) == set(after)
+    assert all(before[key].shape == after[key].shape for key in before)
+
+
+def test_a_forwarding_constructor_records_what_its_caller_passed():
+    """Recording the value the caller passed, not the one forwarded down.
+
+    `VAEEncoder` doubles `out_channels`, so recording the doubled value would
+    double it again on every rebuild.
+    """
+    encoder = VAEEncoder(dimensions=2, in_channels=1, n_channels=32, out_channels=4)
+    assert encoder.spec.kwargs["out_channels"] == 4
+    rebuilt = ModelSpec.from_json(encoder.spec.to_json()).build()
+    assert rebuilt.latent_channels == encoder.latent_channels == 4

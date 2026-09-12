@@ -16,6 +16,7 @@ from chuchichaestli.models.blocks import SMConvBlock
 from chuchichaestli.models.downsampling import AvgPool
 from chuchichaestli.models.dwt import MultilevelWaveletTransformND
 from chuchichaestli.models.norm import NormTypes
+from chuchichaestli.models.spec import InitArgMixin
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.utils import partialclass, prod
 from collections.abc import Sequence
@@ -36,7 +37,7 @@ __all__ = [
 ]
 
 
-class LiteVAEEncoder(nn.Module):
+class LiteVAEEncoder(InitArgMixin, nn.Module):
     """Wavelet-domain encoding component of a `LiteVAE`.
 
     The input is decomposed by a multi-level wavelet transform, every level is
