@@ -9,7 +9,7 @@ import torch
 from chuchichaestli.models.spec import InitArgMixin
 from chuchichaestli.utils.io import (
     READERS,
-    SPEC_KEY,
+    METADATA_KEY,
     load_model,
     read_spec,
     WRITERS,
@@ -129,7 +129,7 @@ def test_the_spec_never_reaches_the_state_dict(tmp_path, suffix):
     model = Tiny()
     write_state(path, model.state_dict(), spec=model.spec)
     assert set(read_state(path)) == set(model.state_dict())
-    assert SPEC_KEY not in read_state(path)
+    assert METADATA_KEY not in read_state(path)
 
 
 def test_an_unknown_suffix_cannot_hold_a_spec_either(tmp_path):
@@ -156,3 +156,34 @@ def test_an_override_that_changes_shapes_fails_loudly(tmp_path):
     write_state(path, model.state_dict(), spec=model.spec)
     with pytest.raises(RuntimeError, match="(?i)size mismatch|shape"):
         load_model(path, width=6)
+
+
+@pytest.mark.parametrize("suffix", sorted(WRITERS))
+def test_state_and_spec_come_back_together(suffix, tmp_path):
+    """`write_state` can store a spec, so `read_state` can return one."""
+    path = tmp_path / f"model{suffix}"
+    model = Tiny(width=8, act="gelu")
+    write_state(path, model.state_dict(), spec=model.spec)
+
+    state, spec = read_state(path, spec=True)
+    assert spec == model.spec
+    assert torch.equal(state["lin.weight"], model.lin.weight)
+    assert METADATA_KEY not in state
+
+
+@pytest.mark.parametrize("suffix", sorted(WRITERS))
+def test_the_spec_is_none_when_the_file_carries_one_none(suffix, tmp_path):
+    """Asking for a spec must not fail on weights that were saved without one."""
+    path = tmp_path / f"plain{suffix}"
+    write_state(path, Tiny().state_dict())
+    state, spec = read_state(path, spec=True)
+    assert spec is None
+    assert set(state) == set(Tiny().state_dict())
+
+
+def test_read_state_returns_the_state_alone_by_default(tmp_path):
+    """The common call site must not have to unpack a pair."""
+    path = tmp_path / "model.safetensors"
+    model = Tiny()
+    write_state(path, model.state_dict(), spec=model.spec)
+    assert set(read_state(path)) == set(model.state_dict())

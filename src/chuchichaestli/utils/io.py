@@ -15,20 +15,20 @@ from safetensors.torch import load_file, save_file
 from chuchichaestli.models.spec import ModelSpec
 
 
-SPEC_KEY = "__metadata__"
+METADATA_KEY = "__metadata__"
+MODELSPEC_KEY = "spec"
 
 __all__ = [
-    "SPEC_KEY",
+    "METADATA_KEY",
+    "MODELSPEC_KEY",
     "staged",
     "READERS",
     "WRITERS",
     "reader_for",
     "writer_for",
     "read_state",
-    "write_state",
-    "SPEC_READERS",
-    "SPEC_WRITERS",
     "read_spec",
+    "write_state",
     "load_model",
 ]
 
@@ -51,114 +51,81 @@ def staged(*targets: Path) -> Iterator[list[Path]]:
         scratch.replace(target)
 
 
-def _read_safetensors(path: Path) -> dict[str, torch.Tensor]:
-    """Read a safetensors file.
+def _read_safetensors(path: Path, spec_only: bool = False) -> Any:
+    """Read a safetensors file as `(state, spec)`, or the spec on its own.
+
+    Reading the spec alone touches the metadata header rather than the
+    tensors, so a large checkpoint can be inspected cheaply.
 
     Args:
         path: File to read.
-    """
-    return load_file(str(path))
-
-
-def _read_torch(path: Path) -> dict[str, torch.Tensor]:
-    """Read a torch archive, refusing to unpickle anything but tensors.
-
-    Args:
-        path: File to read.
-    """
-    stored = torch.load(path, map_location="cpu", weights_only=True)
-    return {k: v for k, v in stored.items() if k != SPEC_KEY}
-
-
-def _write_safetensors(path: Path, state: dict[str, torch.Tensor]) -> None:
-    """Write a safetensors file.
-
-    Args:
-        path: File to write.
-        state: Tensors to store.
-    """
-    save_file(state, str(path))
-
-
-def _write_torch(path: Path, state: dict[str, torch.Tensor]) -> None:
-    """Write a torch archive.
-
-    Args:
-        path: File to write.
-        state: Tensors to store.
-    """
-    torch.save(state, path)
-
-
-def _read_torch_spec(path: Path) -> str | None:
-    """Return the spec stored beside the tensors, if there is one.
-
-    Args:
-        path: File to read.
-    """
-    stored = torch.load(path, map_location="cpu", weights_only=True)
-    return stored.get(SPEC_KEY)
-
-
-def _read_safetensors_spec(path: Path) -> str | None:
-    """Return the spec from the file's header, if there is one.
-
-    Args:
-        path: File to read.
+        spec_only: Return the stored spec instead of the pair.
     """
     with safe_open(str(path), framework="pt") as handle:
-        return (handle.metadata() or {}).get("spec")
+        stored = (handle.metadata() or {}).get(MODELSPEC_KEY)
+    if spec_only:
+        return stored
+    return load_file(str(path)), stored
 
 
-def _write_torch_spec(path: Path, state: dict[str, torch.Tensor], spec: str) -> None:
-    """Write tensors with the spec alongside them under a reserved key.
+def _read_torch(path: Path, spec_only: bool = False) -> Any:
+    """Read a torch archive as `(state, spec)`, or the spec on its own.
 
-    A torch archive has no metadata header, but it stores any picklable value,
-    and `weights_only` accepts a plain string.
+    Refuses to unpickle anything but tensors and plain strings.
 
     Args:
-        path: File to write.
-        state: Tensors to store.
-        spec: Serialized spec to store beside them.
+        path: File to read.
+        spec_only: Return the stored spec instead of the pair.
     """
-    torch.save({**state, SPEC_KEY: spec}, path)
+    stored = torch.load(path, map_location="cpu", weights_only=True)
+    metadata = stored.get(METADATA_KEY, {})
+    if spec_only:
+        return metadata.get(MODELSPEC_KEY)
+    state = {k: v for k, v in stored.items() if k != METADATA_KEY}
+    return state, metadata.get(MODELSPEC_KEY)
 
 
-def _write_safetensors_spec(
-    path: Path, state: dict[str, torch.Tensor], spec: str
+def _write_safetensors(
+    path: Path, state: dict[str, torch.Tensor], spec: str | None = None
 ) -> None:
-    """Write tensors with the spec in the file's metadata header.
+    """Write a safetensors file, keeping any spec in its metadata header.
 
     Args:
         path: File to write.
         state: Tensors to store.
-        spec: Serialized spec to store beside them.
+        spec: Serialized spec to store beside them, if any.
     """
-    save_file(state, str(path), metadata={"spec": spec})
+    save_file(state, str(path), metadata={MODELSPEC_KEY: spec} if spec else None)
 
 
-READERS: dict[str, Callable[[Path], dict[str, torch.Tensor]]] = {
+def _write_torch(
+    path: Path, state: dict[str, torch.Tensor], spec: str | None = None
+) -> None:
+    """Write a torch archive, keeping any spec under a reserved key.
+
+    An archive has no metadata header, so one is stored beside the tensors
+    under a reserved key, holding the spec in the same field safetensors uses.
+    `weights_only` accepts a mapping of plain strings, and the reader strips
+    the reserved key out again.
+
+    Args:
+        path: File to write.
+        state: Tensors to store.
+        spec: Serialized spec to store beside them, if any.
+    """
+    torch.save({**state, METADATA_KEY: {MODELSPEC_KEY: spec}} if spec else state, path)
+
+
+READERS: dict[str, Callable[..., Any]] = {
     ".safetensors": _read_safetensors,
     ".pt": _read_torch,
     ".pth": _read_torch,
 }
 
-WRITERS: dict[str, Callable[[Path, dict[str, torch.Tensor]], None]] = {
+WRITERS: dict[str, Callable[..., None]] = {
     ".safetensors": _write_safetensors,
     ".pt": _write_torch,
     ".pth": _write_torch,
-}
-
-SPEC_READERS: dict[str, Callable[[Path], str | None]] = {
-    ".safetensors": _read_safetensors_spec,
-    ".pt": _read_torch_spec,
-    ".pth": _read_torch_spec,
-}
-
-SPEC_WRITERS: dict[str, Callable[[Path, dict[str, torch.Tensor], str], None]] = {
-    ".safetensors": _write_safetensors_spec,
-    ".pt": _write_torch_spec,
-    ".pth": _write_torch_spec,
 }
 
 
@@ -181,7 +148,7 @@ def _require(path: Path, registry: Mapping[str, Any], action: str) -> Callable:
     return handler
 
 
-def reader_for(path: Path) -> Callable[[Path], dict[str, torch.Tensor]]:
+def reader_for(path: Path) -> Callable[..., Any]:
     """Return the reader for a path's suffix.
 
     Exposed alongside `read_state` so a caller can reject a path before doing
@@ -193,7 +160,7 @@ def reader_for(path: Path) -> Callable[[Path], dict[str, torch.Tensor]]:
     return _require(path, READERS, "read")
 
 
-def writer_for(path: Path) -> Callable[[Path, dict[str, torch.Tensor]], None]:
+def writer_for(path: Path) -> Callable[..., None]:
     """Return the writer for a path's suffix.
 
     Args:
@@ -202,38 +169,20 @@ def writer_for(path: Path) -> Callable[[Path, dict[str, torch.Tensor]], None]:
     return _require(path, WRITERS, "write")
 
 
-def read_state(path: Path) -> dict[str, torch.Tensor]:
+def read_state(
+    path: Path, spec: bool = False
+) -> dict[str, torch.Tensor] | tuple[dict[str, torch.Tensor], ModelSpec | None]:
     """Read a state dict, picking the reader from the suffix.
 
     Args:
         path: File to read.
+        spec: Return `(state, spec)` rather than the state alone. The spec is
+            `None` when the file carries none.
     """
-    reader = reader_for(path)
-    return reader(path)
-
-
-def write_state(
-    path: Path, state: dict[str, torch.Tensor], spec: ModelSpec | None = None
-) -> None:
-    """Write a state dict, picking the writer from the suffix.
-
-    A spec travels in the file's own metadata, so the weights carry what it
-    takes to rebuild the model rather than relying on the caller to remember.
-
-    Args:
-        path: File to write.
-        state: Tensors to store.
-        spec: How to rebuild the model. Safetensors keeps it in the file's
-            metadata header; a torch archive keeps it under a reserved key
-            beside the tensors, which the reader strips out again.
-
-    Raises:
-        ValueError: If the suffix names no known format.
-    """
-    if spec is None:
-        writer_for(path)(path, state)
-        return
-    _require(path, SPEC_WRITERS, "write")(path, state, spec.to_json())
+    state, stored = reader_for(path)(path)
+    if not spec:
+        return state
+    return state, ModelSpec.from_json(stored) if stored else None
 
 
 def read_spec(path: Path) -> ModelSpec | None:
@@ -242,8 +191,24 @@ def read_spec(path: Path) -> ModelSpec | None:
     Args:
         path: File to read.
     """
-    stored = _require(path, SPEC_READERS, "read")(path)
+    stored = reader_for(path)(path, spec_only=True)
     return ModelSpec.from_json(stored) if stored else None
+
+
+def write_state(
+    path: Path, state: dict[str, torch.Tensor], spec: ModelSpec | None = None
+) -> None:
+    """Write a state dict, picking the writer from the suffix.
+
+    Args:
+        path: File to write.
+        state: Tensors to store.
+        spec: How to rebuild the model, stored beside the tensors.
+
+    Raises:
+        ValueError: If the suffix names no known format.
+    """
+    writer_for(path)(path, state, spec.to_json() if spec is not None else None)
 
 
 def load_model(path: Path, strict: bool = True, **overrides: Any) -> Any:
@@ -260,12 +225,12 @@ def load_model(path: Path, strict: bool = True, **overrides: Any) -> Any:
         ValueError: If the file carries no spec, since the architecture cannot
             be inferred from weights alone.
     """
-    spec = read_spec(path)
+    state, spec = read_state(path, spec=True)
     if spec is None:
         raise ValueError(
             f"No model spec in {str(path)!r}; weights alone do not say which "
             "architecture built them. Save it with write_state(..., spec=...)."
         )
     model = spec.build(**overrides)
-    model.load_state_dict(read_state(path), strict=strict)
+    model.load_state_dict(state, strict=strict)
     return model
