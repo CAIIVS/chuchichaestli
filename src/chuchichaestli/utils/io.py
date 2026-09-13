@@ -200,6 +200,8 @@ def write_state(
 ) -> None:
     """Write a state dict, picking the writer from the suffix.
 
+    Tensors are detached onto the CPU and made contiguous on the way out.
+
     Args:
         path: File to write.
         state: Tensors to store.
@@ -208,7 +210,13 @@ def write_state(
     Raises:
         ValueError: If the suffix names no known format.
     """
-    writer_for(path)(path, state, spec.to_json() if spec is not None else None)
+    storable = {
+        key: value.detach().cpu().contiguous()
+        if isinstance(value, torch.Tensor)
+        else value
+        for key, value in state.items()
+    }
+    writer_for(path)(path, storable, spec.to_json() if spec is not None else None)
 
 
 def load_model(path: Path, strict: bool = True, **overrides: Any) -> Any:
