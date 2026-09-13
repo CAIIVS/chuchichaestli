@@ -104,6 +104,23 @@ class Local:
         """
         return value
 
+    def state_of(self, stateful: Any) -> dict[str, Any]:
+        """Capture a component's state.
+
+        Args:
+            stateful: Component whose state is wanted.
+        """
+        return stateful.state_dict()
+
+    def load_state(self, stateful: Any, state: dict[str, Any]) -> None:
+        """Restore state captured by `state_of`.
+
+        Args:
+            stateful: Component to restore.
+            state: Mapping as returned by `state_of`.
+        """
+        stateful.load_state_dict(state)
+
     def __repr__(self) -> str:
         """Return a short description of the topology."""
         return f"Local(device={self.device})"

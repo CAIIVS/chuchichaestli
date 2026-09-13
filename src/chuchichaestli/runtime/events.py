@@ -62,10 +62,9 @@ class Progress:
 
     Attributes:
         epoch: Completed passes over the data.
-        step: Optimizer steps taken within the current epoch.
-        global_step: Optimizer steps taken since the stage began.
+        step: Program steps; e.g. for a training loop, one optimizer step.
+        global_step: Units of the stage's own work since it began.
         samples: Samples seen since the stage began.
-        index: Position within a parent's children, used by phases.
         done: Whether the stage has finished.
     """
 
@@ -73,7 +72,6 @@ class Progress:
     step: int = 0
     global_step: int = 0
     samples: int = 0
-    index: int = 0
     done: bool = False
 
     def next_step(self, samples: int = 0) -> Progress:
@@ -93,14 +91,6 @@ class Progress:
         """Return the progress at the start of the following epoch."""
         return replace(self, epoch=self.epoch + 1, step=0)
 
-    def at(self, index: int) -> Progress:
-        """Return the progress positioned at a child index.
-
-        Args:
-            index: Position within the parent's children.
-        """
-        return replace(self, index=index)
-
     def finish(self) -> Progress:
         """Return the progress marked as finished."""
         return replace(self, done=True)
@@ -112,7 +102,6 @@ class Progress:
             "step": self.step,
             "global_step": self.global_step,
             "samples": self.samples,
-            "index": self.index,
             "done": self.done,
         }
 
@@ -136,6 +125,7 @@ class EventType(str, Enum):
     RUN_BEGAN = "run.began"
     RUN_ENDED = "run.ended"
     STAGE_BEGAN = "stage.began"
+    STAGE_ADVANCED = "stage.advanced"
     STAGE_ENDED = "stage.ended"
     EPOCH_BEGAN = "epoch.began"
     EPOCH_ENDED = "epoch.ended"

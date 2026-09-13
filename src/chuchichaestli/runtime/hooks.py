@@ -12,26 +12,47 @@ import time
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, ClassVar, Literal, TextIO
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO
 from chuchichaestli.debug import cli_pbar
 from chuchichaestli.utils.ansi import ANSIShade, ansi_supported, paint
-from chuchichaestli.runtime.events import C3liRuntimeError, Event, EventType, Signal
+from chuchichaestli.runtime.ckpt import CheckpointFormats, CheckpointStore
+from chuchichaestli.runtime.events import (
+    C3liRuntimeError,
+    Event,
+    EventType,
+    Progress,
+    Signal,
+)
+
+if TYPE_CHECKING:
+    from chuchichaestli.runtime.context import Context
+    from chuchichaestli.runtime.runtime import Runtime
 
 
 ModeTypes = Literal["min", "max"]
 ThresholdModeTypes = Literal["rel", "abs"]
+CheckpointUnitTypes = Literal["advance", "epoch", "step"]
 
 MODES: frozenset[str] = frozenset({"min", "max"})
 THRESHOLD_MODES: frozenset[str] = frozenset({"rel", "abs"})
 
+CHECKPOINT_UNIT_MAP: dict[str, EventType] = {
+    "advance": EventType.STAGE_ADVANCED,
+    "epoch": EventType.EPOCH_ENDED,
+    "step": EventType.STEP_ENDED,
+}
+
 __all__ = [
     "Console",
+    "Checkpointer",
     "Jsonl",
     "Timer",
     "EarlyStop",
     "Cancel",
     "ModeTypes",
     "ThresholdModeTypes",
+    "CheckpointUnitTypes",
+    "CHECKPOINT_UNIT_MAP",
 ]
 
 
@@ -443,3 +464,155 @@ class Cancel:
             self._raised = True
             raise C3liRuntimeError(f"cancelled by {self.caught}")
         return Signal.GO
+
+
+class Checkpointer:
+    """Write a checkpoint as the run proceeds.
+
+    Checkpoints are taken at stage boundaries, so they are always complete.
+
+    Attributes:
+        critical: Whether a failed write stops the run.
+        needs_store: Whether the runtime must be given a store.
+    """
+
+    critical: bool = True
+    needs_store: bool = True
+
+    def __init__(
+        self,
+        every: int = 1,
+        unit: CheckpointUnitTypes = "epoch",
+        keep: int | None = None,
+        format: CheckpointFormats = "safetensors",
+        prefix: str = "ckpt_",
+        rng: bool = True,
+        at_end: bool = True,
+    ):
+        """Constructor.
+
+        Args:
+            every: Write a checkpoint every nth unit.
+            unit: What to count:
+                - `"epoch"` counts epochs, i.e. dataset passes
+                - `"step"` counts optimizer steps
+                - `"advance"` counts program steps, i.e. a stage's unit of work
+            keep: How many checkpoints to retain, or `None` to keep all.
+            format: `"safetensors"` or `"torch"`.
+            prefix: What each checkpoint directory is named before its number.
+            rng: Whether to record the ambient RNG state as well.
+            at_end: Whether to write a final checkpoint when the run ends,
+                cancelled and aborted runs included.
+
+        Raises:
+            ValueError: If `every` is not positive, or `unit` is unknown.
+        """
+        if every < 1:
+            raise ValueError(f"Checkpointer needs a positive interval, got {every!r}.")
+        if unit not in CHECKPOINT_UNIT_MAP:
+            raise ValueError(
+                f"Unsupported checkpoint unit: {unit!r}. "
+                f"Use one of {sorted(CHECKPOINT_UNIT_MAP)}."
+            )
+        self.every = every
+        self.unit = unit
+        self.keep = keep
+        self.format = format
+        self.prefix = prefix
+        self.rng = rng
+        self.at_end = at_end
+        self._store: CheckpointStore | None = None
+        self._runtime: Runtime | None = None
+        self._ctx: Context | None = None
+        self._counted = 0
+        self._due = False
+        self._at: Progress | None = None
+        self._at_path: str | None = None
+
+    def __repr__(self) -> str:
+        """Return a short description of the hook."""
+        every, unit, keep = self.every, self.unit, self.keep
+        return f"Checkpointer({every=}, {unit=}, {keep=})"
+
+    @property
+    def trigger(self) -> EventType:
+        """The event this hook counts."""
+        return CHECKPOINT_UNIT_MAP[self.unit]
+
+    def attach(self, runtime: Runtime, ctx: Context) -> None:
+        """Receive the run this hook writes checkpoints for.
+
+        Args:
+            runtime: The engine executing the program.
+            ctx: Root context of the run.
+        """
+        self._runtime = runtime
+        self._ctx = ctx
+        self._counted = 0
+        self._due = False
+        self._at = None
+        self._at_path = None
+        self._store = CheckpointStore(
+            runtime.store, keep=self.keep, format=self.format, prefix=self.prefix
+        )
+
+    def on(self, event: Event) -> Signal:
+        """Note that a checkpoint is due, and write it at the next boundary.
+
+        Epoch and step events come from inside a stage's `execute`; writing
+        there would record a stage that has not been closed yet, so the write
+        waits for the advance that follows.
+
+        Args:
+            event: What the runtime just did.
+        """
+        if event.type is self.trigger:
+            self._counted += 1
+            self._due = self._due or self._counted % self.every == 0
+            self._at = event.progress
+            self._at_path = event.path
+        if event.type is EventType.STAGE_ADVANCED and self._due:
+            self._due = False
+            self.save(event, announce=True)
+        elif event.type is EventType.RUN_ENDED and (self.at_end or self._due):
+            self._due = False
+            self.save(event, announce=False)
+        return Signal.GO
+
+    def save(self, event: Event, announce: bool = True) -> None:
+        """Write one checkpoint of the run as it currently stands.
+
+        The counters recorded are the triggering event's, not the boundary
+        event's: an epoch is reported by the stage that ran it, while the
+        boundary carries the program's own.
+
+        Args:
+            event: The event that called for it, for its position in the run.
+            announce: Whether to emit a `CHECKPOINT` event afterwards. The
+                final one does not, the hooks having been told the run ended.
+
+        Raises:
+            C3liRuntimeError: If the hook was never attached to a run.
+        """
+        if self._store is None or self._runtime is None or self._ctx is None:
+            raise C3liRuntimeError(
+                "This Checkpointer was never attached to a run; it can only be "
+                "used through Runtime(hooks=[...])."
+            )
+        checkpoint = self._store.save(
+            index=event.progress.global_step,
+            program=self._runtime.program,
+            bindings=self._ctx.stateful(),
+            topology=self._ctx.topology,
+            seed=self._runtime.seed,
+            progress=self._at if self._at is not None else event.progress,
+            unit=self.unit,
+            at=self._at_path,
+            rng=self.rng,
+        )
+        if checkpoint is not None and announce:
+            self._ctx.emit(
+                EventType.CHECKPOINT,
+                path=str(checkpoint.path),
+                index=checkpoint.index,
+            )

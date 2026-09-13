@@ -56,7 +56,7 @@ def test_progress_transitions():
 
 def test_progress_round_trip():
     """Progress survives its mapping form unchanged."""
-    progress = Progress(epoch=2, step=3, global_step=11, samples=99, index=1)
+    progress = Progress(epoch=2, step=3, global_step=11, samples=99)
     assert Progress.from_dict(progress.to_dict()) == progress
 
 

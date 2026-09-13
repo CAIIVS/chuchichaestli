@@ -10,7 +10,7 @@ import torch
 from chuchichaestli.runtime.events import Event, EventType, Progress, Signal
 from chuchichaestli.utils.rng import derive_seed, rng_generator
 from chuchichaestli.runtime.topology import Local
-from chuchichaestli.runtime.traits import Topology
+from chuchichaestli.runtime.traits import Stateful, Topology
 
 
 __all__ = ["Context", "C3liContextError"]
@@ -132,6 +132,14 @@ class Context:
                     seen.add(key)
                     yield key
             ctx = ctx.parent
+
+    def stateful(self) -> dict[str, Any]:
+        """Return every binding that carries state, keyed by name."""
+        return {
+            name: self[name]
+            for name in self.names()
+            if isinstance(self[name], Stateful)
+        }
 
     def bind(self, key: str, value: Any) -> None:
         """Bind an artifact for this stage and its children.

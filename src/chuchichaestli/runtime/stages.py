@@ -233,12 +233,8 @@ class Export(StageBlock):
         if not ctx.topology.is_main:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        state = {
-            k: v.detach().cpu().contiguous()
-            for k, v in ctx[self.source].state_dict().items()
-        }
         with staged(self.path) as (scratch,):
-            writer(scratch, state)
+            writer(scratch, ctx[self.source].state_dict())
 
 
 class Barrier(StageBlock):
@@ -333,7 +329,7 @@ class Phase:
             signal = ctx.topology.broadcast(child.execute(self._child_ctx))
             if signal.halts:
                 self._close(child)
-            self._progress = self._progress.next_step().at(self._index)
+            self._progress = self._progress.next_step()
             ctx.progress = self._progress
             if self._index >= len(self.stages):
                 self._progress = self._progress.finish()

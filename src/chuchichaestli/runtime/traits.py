@@ -11,6 +11,7 @@ from chuchichaestli.runtime.events import Event, Progress, Signal
 
 if TYPE_CHECKING:
     from chuchichaestli.runtime.context import Context
+    from chuchichaestli.runtime.runtime import Runtime
 
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "Hook",
     "CriticalHook",
     "StoreWriterHook",
+    "RunAwareHook",
     "is_critical",
     "needs_store",
     "Topology",
@@ -125,6 +127,20 @@ class StoreWriterHook(Hook, Protocol):
     needs_store: bool
 
 
+@runtime_checkable
+class RunAwareHook(Hook, Protocol):
+    """A hook that needs the run itself, not just the events it emits."""
+
+    def attach(self, runtime: Runtime, ctx: Context) -> None:
+        """Receive the run this hook observes.
+
+        Args:
+            runtime: The engine executing the program.
+            ctx: Root context of the run.
+        """
+        ...
+
+
 def is_critical(hook: Hook) -> bool:
     """Whether a hook's own failure should stop the run.
 
@@ -196,5 +212,22 @@ class Topology(Protocol):
 
         Args:
             value: This process's candidate value.
+        """
+        ...
+
+    def state_of(self, stateful: Stateful) -> dict[str, Any]:
+        """Capture a component's state, gathered across processes.
+
+        Args:
+            stateful: Component whose state is wanted.
+        """
+        ...
+
+    def load_state(self, stateful: Stateful, state: dict[str, Any]) -> None:
+        """Restore state captured by `state_of`, scattered across processes.
+
+        Args:
+            stateful: Component to restore.
+            state: Mapping as returned by `state_of`.
         """
         ...

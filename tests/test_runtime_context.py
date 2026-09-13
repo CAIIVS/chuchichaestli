@@ -4,6 +4,7 @@
 """Tests for the per-entry execution context."""
 
 import pytest
+import torch
 
 from chuchichaestli.runtime.context import Context, C3liContextError
 from chuchichaestli.runtime.events import EventType, Progress, Signal
@@ -110,3 +111,25 @@ def test_emit_builds_the_event_from_path_and_progress():
 def test_emit_without_a_dispatcher_is_a_no_op():
     """A context built outside a run is still usable."""
     assert Context("p", seed=1).emit(EventType.RUN_BEGAN) is Signal.GO
+
+
+def test_stateful_lists_only_the_bindings_that_carry_state():
+    """A checkpoint wants the models and optimizers, not the scalars."""
+    model = torch.nn.Linear(2, 2)
+    ctx = Context("program")
+    ctx.bind("model", model)
+    ctx.bind("optim", torch.optim.Adam(model.parameters()))
+    ctx.bind("threshold", 0.5)
+    ctx.bind("name", "unet")
+    assert sorted(ctx.stateful()) == ["model", "optim"]
+    assert ctx.stateful()["model"] is model
+
+
+def test_stateful_sees_what_an_enclosing_context_bound():
+    """Bindings resolve outwards, and so does this."""
+    root = Context("program")
+    root.bind("model", torch.nn.Linear(2, 2))
+    child = root.child(0, "train")
+    child.bind("optim", torch.optim.Adam(root["model"].parameters()))
+    assert sorted(child.stateful()) == ["model", "optim"]
+    assert sorted(root.stateful()) == ["model"]

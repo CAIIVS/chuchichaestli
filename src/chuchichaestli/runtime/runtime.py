@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple
 import torch
 from torch import nn
+from chuchichaestli.runtime.ckpt import CheckpointStore
+from chuchichaestli.runtime.serialize import C3liCheckpointError
 from chuchichaestli.runtime.context import Context
 from chuchichaestli.runtime.events import (
     C3liRuntimeError,
@@ -21,11 +23,12 @@ from chuchichaestli.runtime.events import (
     filter_priority,
 )
 from chuchichaestli.runtime.hooks import Console
-from chuchichaestli.utils.rng import seed_ambient
+from chuchichaestli.utils.rng import restore_rng_state, seed_ambient
 from chuchichaestli.runtime.stages import Phase
 from chuchichaestli.runtime.topology import auto_topology
 from chuchichaestli.runtime.traits import (
     Hook,
+    RunAwareHook,
     Stage,
     Topology,
     is_critical,
@@ -120,28 +123,30 @@ class Runtime:
         program: Stage,
         seed: int = 0,
         store: str | Path | None = None,
-        resume: str | Path | None = None,
+        resume: str | Path | int | None = None,
         hooks: Sequence[Hook] | None = None,
         device: torch.device | str | None = None,
         topology: Topology | None = None,
         backends: BackendsPresets = "default",
+        allow_signature_change: bool = False,
     ):
         """Constructor.
 
         Args:
             program: Any stage; a bare stage needs no `Program` wrapper.
             seed: Root seed every random stream in the run derives from.
-            store: Directory checkpoints are written under, resolved to an
-                absolute path so a later change of working directory cannot
-                move it.
-            resume: `"last"`, `"best"`, a checkpoint directory, or the
-                manifest file inside one.
+            store: Directory checkpoints and results are written under;
+                resolved to an absolute path.
+            resume: An index, `"first"`, `"last"`, `"last~N"`, `"best"`, a
+                checkpoint directory, or the manifest file inside one.
             hooks: Observers of the run; defaults to a console reporter.
             device: Device to place modules and batches on; the topology
                 picks one per process when absent.
             topology: Process layout; detected from the environment if absent.
             backends: Torch backend preset; one of `"fast"`, `"default"`,
                 `"deterministic"` or `"strict"`.
+            allow_signature_change: Resume even though the program's stages
+                no longer match the original ones.
         """
         self.program = program
         self.seed = seed
@@ -149,9 +154,11 @@ class Runtime:
         self.resume = resume
         self.hooks = list(hooks) if hooks is not None else [Console()]
         self.backends = backends
+        self.allow_signature_change = allow_signature_change
         self._device = torch.device(device) if device is not None else None
         self._topology = topology
         self._muted: set[int] = set()
+        self._checkpoints: CheckpointStore | None = None
 
     @property
     def device(self) -> torch.device:
@@ -167,6 +174,15 @@ class Runtime:
         if self._topology is None:
             self._topology = auto_topology(self._device)
         return self._topology
+
+    @property
+    def checkpoints(self) -> CheckpointStore | None:
+        """The run's checkpoints, or `None` when it persists nothing."""
+        if self.store is None:
+            return None
+        if self._checkpoints is None:
+            self._checkpoints = CheckpointStore(self.store)
+        return self._checkpoints
 
     def check(self) -> None:
         """Reject a program that cannot run, before any compute happens.
@@ -185,6 +201,12 @@ class Runtime:
         for hook in self.hooks:
             if needs_store(hook) and self.store is None:
                 problems.append(f"{hook!r} needs a store to write to.")
+        store = self.checkpoints
+        if self.resume is not None and store is not None:
+            try:
+                store.resolve(self.resume)
+            except C3liCheckpointError as exc:
+                problems.append(str(exc))
         self._check_stage(self.program, set(), problems, self.program.name)
         if problems:
             raise C3liProgramError(
@@ -251,12 +273,20 @@ class Runtime:
             device=self.device,
             dispatch=self._dispatch,
         )
+        for hook in self.hooks:
+            if isinstance(hook, RunAwareHook):
+                hook.attach(self, ctx)
         ctx.emit(EventType.RUN_BEGAN, seed=self.seed, backends=self.backends)
         failure: str | None = None
         try:
             signal = self._lockstep(lambda: self.program.enter(ctx))
+            if self.resume is not None:
+                self._restore(ctx)
             while not signal.halts:
                 signal = self._lockstep(lambda: self.program.execute(ctx))
+                if signal.halts:
+                    break
+                signal = self._lockstep(lambda: self._advanced(ctx))
         except C3liRuntimeError as exc:
             failure = str(exc)
             raise
@@ -265,6 +295,43 @@ class Runtime:
             ctx.progress = self.program.progress()
             ctx.emit(EventType.RUN_ENDED, aborted=failure)
         return self.program.progress()
+
+    def _advanced(self, ctx: Context) -> Signal:
+        """Announce that the program took one step.
+
+        Args:
+            ctx: Root context of the run.
+        """
+        ctx.progress = self.program.progress()
+        return ctx.emit(EventType.STAGE_ADVANCED)
+
+    def _restore(self, ctx: Context) -> None:
+        """Put a checkpoint's state back before the first program step.
+
+        Runs after `enter`.
+
+        Args:
+            ctx: Root context of the run.
+
+        Raises:
+            C3liCheckpointError: If the checkpoint cannot be found or trusted.
+        """
+        store = self.checkpoints
+        if store is None:
+            raise C3liCheckpointError(
+                f"resume={self.resume!r} needs a store to resume from."
+            )
+        checkpoint = store.load(self.resume)
+        store.restore(
+            checkpoint,
+            program=self.program,
+            bindings=ctx.stateful(),
+            topology=self.topology,
+            allow_signature_change=self.allow_signature_change,
+        )
+        if checkpoint.rng is not None:
+            restore_rng_state(dict(checkpoint.rng))
+        ctx.progress = self.program.progress()
 
     def _dispatch(self, event: Event) -> Signal:
         """Deliver an event to every hook and combine their verdicts.
