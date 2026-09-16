@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up uv and 🐍 3.13
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@v10.1.0
         with:
           # Newest supported interpreter. The rendered site does not depend on
           # it; this only needs to be a version the package imports under.
