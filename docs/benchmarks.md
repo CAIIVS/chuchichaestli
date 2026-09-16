@@ -190,7 +190,7 @@ cache, and a sweep there measures reads served from memory.
       --samples 1024 \
       --sizes 1x256x256 \
       --batch-size 32 \
-      --workers 0 4 \
+      --num-workers 0 4 \
       --repeats 3 \
       --json dataset_types_1024x1x256x256_b32.json
     ```

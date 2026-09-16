@@ -23,10 +23,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Protocol, runtime_checkable
-
 import torch
 from torch.utils.data import DataLoader, Dataset
-
 from chuchichaestli.utils import map_nested
 from chuchichaestli.utils.rng import rng_generator
 
@@ -58,7 +56,7 @@ class DataLoaderCase(Protocol):
     """A case that says how a loader draws from a dataset."""
 
     batch_size: int
-    workers: int
+    num_workers: int
     order: str
     seed: int
 
@@ -81,7 +79,7 @@ def read_epoch(
         dataset,
         batch_size=case.batch_size,
         shuffle=case.order == "shuffled",
-        num_workers=case.workers,
+        num_workers=case.num_workers,
         pin_memory=device.type == "cuda",
         generator=rng_generator(case.seed, "benchmark"),
     )
