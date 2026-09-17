@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 import torch
 from chuchichaestli.runtime.events import Event, EventType, Progress, Signal
-from chuchichaestli.utils.rng import derive_seed, rng_generator
+from chuchichaestli.utils.rng import WorkerSeeder, derive_seed, rng_generator
 from chuchichaestli.runtime.topology import Local
 from chuchichaestli.runtime.traits import Stateful, Topology
 
@@ -195,6 +195,14 @@ class Context:
             device: Device the generator draws for; defaults to the CPU.
         """
         return rng_generator(self.seed, self._keyed_path(key), device)
+
+    def seeder(self, key: str = "") -> WorkerSeeder:
+        """Build a worker seeder for a key at this position.
+
+        Args:
+            key: What the randomness is for, e.g. `"data/epoch=3"`.
+        """
+        return WorkerSeeder(self.seed, self._keyed_path(key))
 
     def cache(self, key: str, fn: Callable[[], Any]) -> Any:
         """Compute a value once per step, reusing it across objective terms.

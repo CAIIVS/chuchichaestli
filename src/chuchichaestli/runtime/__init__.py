@@ -13,6 +13,7 @@ from chuchichaestli.runtime.ckpt import (
     CheckpointStore,
 )
 from chuchichaestli.runtime.context import Context, C3liContextError
+from chuchichaestli.runtime.data import C3liDataError, DataManager
 from chuchichaestli.runtime.events import (
     C3liRuntimeError,
     Event,
@@ -89,6 +90,8 @@ __all__ = [
     "Barrier",
     "Context",
     "C3liContextError",
+    "DataManager",
+    "C3liDataError",
     "Event",
     "EventType",
     "Progress",
