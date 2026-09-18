@@ -8,17 +8,14 @@ from collections.abc import Callable, Collection, Mapping
 from typing import Any
 
 
-__all__ = ["require", "UNSUPPORTED"]
-
-
-UNSUPPORTED = "Unsupported{context}: {name!r}. Use one of {options}."
+__all__ = ["require"]
 
 
 def require(
     name: Any,
     registry: Collection[Any],
     context: str = "",
-    message: str = UNSUPPORTED,
+    message: Callable[[list[Any]], str] | None = None,
     fallback: Callable[[Any], Any] | None = None,
 ) -> Any:
     """Return what a registry holds under a name, or the name itself.
@@ -28,8 +25,8 @@ def require(
         registry: Entries accepted at this position. A mapping's value is
             returned; any other collection returns the name, so it validates.
         context: What the position is, used by the default message.
-        message: Template for the error, taking `{name}`, `{context}` and
-            `{options}`. `{context}` already carries its leading space.
+        message: Builds the error from the sorted alternatives, replacing the
+            default. Called only on failure.
         fallback: Resolves a name the registry lacks, e.g. by importing it.
 
     Raises:
@@ -39,10 +36,8 @@ def require(
         return registry[name] if isinstance(registry, Mapping) else name
     if fallback is not None:
         return fallback(name)
-    raise ValueError(
-        message.format(
-            name=name,
-            context=f" {context}" if context else "",
-            options=sorted(registry),
-        )
-    )
+    options = sorted(registry)
+    if message is not None:
+        raise ValueError(message(options))
+    qualifier = f" {context}" if context else ""
+    raise ValueError(f"Unsupported{qualifier}: {name!r}. Use one of {options}.")

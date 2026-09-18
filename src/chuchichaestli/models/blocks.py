@@ -121,7 +121,9 @@ def _require_time_injection(time_injection: str) -> None:
     require(
         time_injection,
         get_args(TimeInjectionTypes),
-        message="Unknown time injection: {name}. Available: {options}.",
+        message=lambda options: (
+            f"Unknown time injection: {time_injection}. Available: {options}."
+        ),
     )
 
 

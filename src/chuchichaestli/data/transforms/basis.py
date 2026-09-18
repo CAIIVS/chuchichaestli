@@ -134,7 +134,9 @@ class BasisProjection(Transform):
             require(
                 name,
                 BASIS_REGISTRY,
-                message="unknown basis {name!r}; choose from {options}",
+                message=lambda options: (
+                    f"unknown basis {name!r}; choose from {options}"
+                ),
             )
             if order < 1:
                 raise ValueError(f"order for axis {axis} must be >= 1, got {order}")

@@ -16,8 +16,6 @@ from chuchichaestli.models.spec import ModelSpec
 from chuchichaestli.utils.registry import require
 
 
-_CANNOT = "Cannot {action} '{{name}}'; choose from {{options}}."
-
 METADATA_KEY = "__metadata__"
 MODELSPEC_KEY = "spec"
 
@@ -141,7 +139,11 @@ def reader_for(path: Path) -> Callable[..., Any]:
     Args:
         path: File whose suffix selects the reader.
     """
-    return require(path.suffix, READERS, message=_CANNOT.format(action="read"))
+    return require(
+        path.suffix,
+        READERS,
+        message=lambda options: f"Cannot read '{path.suffix}'; choose from {options}.",
+    )
 
 
 def writer_for(path: Path) -> Callable[..., None]:
@@ -150,7 +152,11 @@ def writer_for(path: Path) -> Callable[..., None]:
     Args:
         path: File whose suffix selects the writer.
     """
-    return require(path.suffix, WRITERS, message=_CANNOT.format(action="write"))
+    return require(
+        path.suffix,
+        WRITERS,
+        message=lambda options: f"Cannot write '{path.suffix}'; choose from {options}.",
+    )
 
 
 def read_state(

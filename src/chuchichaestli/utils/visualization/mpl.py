@@ -211,7 +211,9 @@ class MatplotlibRenderer(Renderer):
             require(
                 color_by,
                 _COLOR_MODES,
-                message="Unknown color_by {name!r}; choose from {options}",
+                message=lambda options: (
+                    f"Unknown color_by {color_by!r}; choose from {options}"
+                ),
             )
         self.show_legend = show_legend
         self.label_fields = tuple(label_fields) if label_fields is not None else None

@@ -209,7 +209,9 @@ def save_dataset(
     """
     path = Path(path)
     saver = require(
-        path.suffix, SAVERS, message="Cannot write '{name}'; choose from {options}."
+        path.suffix,
+        SAVERS,
+        message=lambda options: f"Cannot write '{path.suffix}'; choose from {options}.",
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     saver(path, data, key, attrs, attrs_key)

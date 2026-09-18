@@ -5,7 +5,7 @@
 
 import pytest
 
-from chuchichaestli.utils.registry import UNSUPPORTED, require
+from chuchichaestli.utils.registry import require
 
 
 REGISTRY = {"b": 2, "a": 1, "c": 3}
@@ -52,15 +52,22 @@ def test_a_plain_collection_validates_and_returns_the_name():
 
 def test_a_custom_message_replaces_the_default():
     """A file suffix reads better named by the verb than by 'Unsupported'."""
+    suffix = ".ckpt"
     with pytest.raises(ValueError, match=r"Cannot read '.ckpt'; choose from"):
         require(
-            ".ckpt",
+            suffix,
             {".pt": 1, ".safetensors": 2},
-            message="Cannot read '{name}'; choose from {options}.",
+            message=lambda options: f"Cannot read '{suffix}'; choose from {options}.",
         )
 
 
-def test_the_default_message_is_available_to_build_on():
-    """So a caller can extend it rather than restate it."""
-    with pytest.raises(ValueError, match=r"Unsupported block: 'z'. Use one of"):
-        require("z", REGISTRY, "block", message=UNSUPPORTED)
+def test_a_custom_message_is_only_built_on_failure():
+    """It is an error path, so it must cost nothing when the lookup succeeds."""
+    calls = []
+
+    def message(options):
+        calls.append(options)
+        return "never used"
+
+    assert require("a", REGISTRY, message=message) == 1
+    assert calls == []

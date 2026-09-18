@@ -210,8 +210,8 @@ class Wavelet:
         family = require(
             key,
             WAVELET_REGISTRY,
-            message=(
-                f"Unknown wavelet: {name!r}. Use one of {{options}},"
+            message=lambda options: (
+                f"Unknown wavelet: {name!r}. Use one of {options},"
                 " or pass an explicit filter bank to `Wavelet`."
             ),
         )
@@ -325,7 +325,9 @@ def wavelist(family: str | None = None) -> list[str]:
         require(
             family,
             FAMILIES,
-            message="Unknown wavelet family: {name!r}. Use one of {options}.",
+            message=lambda options: (
+                f"Unknown wavelet family: {family!r}. Use one of {options}."
+            ),
         )
     )
 
