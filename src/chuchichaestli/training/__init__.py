@@ -7,6 +7,12 @@ Imports nothing from `chuchichaestli.runtime`; the dependency runs the other
 way.
 """
 
+from chuchichaestli.training.objective import (
+    AdaptiveWeight,
+    Loss,
+    Objective,
+    Term,
+)
 from chuchichaestli.training.update import (
     CLIP_FUNCTIONS,
     ClipTypes,
@@ -40,4 +46,8 @@ __all__ = [
     "ClipTypes",
     "ReductionTypes",
     "CLIP_FUNCTIONS",
+    "Loss",
+    "Term",
+    "Objective",
+    "AdaptiveWeight",
 ]
