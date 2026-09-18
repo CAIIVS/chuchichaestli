@@ -14,6 +14,7 @@ from chuchichaestli.dwt.filters import (
 from collections.abc import Sequence
 from functools import cache
 from typing import Literal
+from chuchichaestli.utils.registry import require
 
 
 __all__ = ["Wavelet", "WaveletTypes", "WAVELET_REGISTRY", "wavelet", "wavelist"]
@@ -206,12 +207,14 @@ class Wavelet:
             ValueError: If `name` is not a known wavelet.
         """
         key = ALIASES.get(name, name)
-        if key not in WAVELET_REGISTRY:
-            raise ValueError(
-                f"Unknown wavelet: {name!r}. Use one of {sorted(WAVELET_REGISTRY)},"
-                f" or pass an explicit filter bank to `Wavelet`."
-            )
-        family = WAVELET_REGISTRY[key]
+        family = require(
+            key,
+            WAVELET_REGISTRY,
+            message=(
+                f"Unknown wavelet: {name!r}. Use one of {{options}},"
+                " or pass an explicit filter bank to `Wavelet`."
+            ),
+        )
         if key in ORTHOGONAL_DEC_LO:
             return cls(
                 ORTHOGONAL_DEC_LO[key], name=name, family=family, orthogonal=True
@@ -318,11 +321,13 @@ def wavelist(family: str | None = None) -> list[str]:
     """
     if family is None:
         return sorted(WAVELET_REGISTRY)
-    if family not in FAMILIES:
-        raise ValueError(
-            f"Unknown wavelet family: {family!r}. Use one of {sorted(FAMILIES)}."
+    return list(
+        require(
+            family,
+            FAMILIES,
+            message="Unknown wavelet family: {name!r}. Use one of {options}.",
         )
-    return list(FAMILIES[family])
+    )
 
 
 def wavelet(spec: "str | Wavelet") -> Wavelet:

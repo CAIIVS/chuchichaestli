@@ -24,6 +24,7 @@ from chuchichaestli.runtime.serialize import (
 from chuchichaestli.runtime.traits import Topology
 from chuchichaestli.utils.io import read_state, staged, write_state
 from chuchichaestli.utils.rng import capture_rng_state
+from chuchichaestli.utils.registry import require
 
 
 __all__ = [
@@ -153,11 +154,7 @@ class CheckpointStore:
         """
         if keep is not None and keep < 1:
             raise ValueError(f"A store keeps at least one checkpoint, got {keep!r}.")
-        if format not in CHECKPOINT_FORMAT_MAP:
-            raise ValueError(
-                f"Unsupported checkpoint format: {format!r}. "
-                f"Use one of {sorted(CHECKPOINT_FORMAT_MAP)}."
-            )
+        require(format, CHECKPOINT_FORMAT_MAP, "checkpoint format")
         for label, value in (
             ("prefix", prefix),
             ("manifest", manifest),

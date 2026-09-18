@@ -23,6 +23,7 @@ from chuchichaestli.runtime.events import (
     Progress,
     Signal,
 )
+from chuchichaestli.utils.registry import require
 
 if TYPE_CHECKING:
     from chuchichaestli.runtime.context import Context
@@ -309,13 +310,8 @@ class EarlyStop:
         Raises:
             ValueError: If `mode` or `threshold_mode` is not one of its two.
         """
-        if mode not in MODES:
-            raise ValueError(f"Unsupported mode: {mode!r}. Use one of {sorted(MODES)}.")
-        if threshold_mode not in THRESHOLD_MODES:
-            raise ValueError(
-                f"Unsupported threshold mode: {threshold_mode!r}. "
-                f"Use one of {sorted(THRESHOLD_MODES)}."
-            )
+        require(mode, MODES, "mode")
+        require(threshold_mode, THRESHOLD_MODES, "threshold mode")
         self.monitor = monitor
         self.mode = mode
         self.patience = patience
@@ -509,11 +505,7 @@ class Checkpointer:
         """
         if every < 1:
             raise ValueError(f"Checkpointer needs a positive interval, got {every!r}.")
-        if unit not in CHECKPOINT_UNIT_MAP:
-            raise ValueError(
-                f"Unsupported checkpoint unit: {unit!r}. "
-                f"Use one of {sorted(CHECKPOINT_UNIT_MAP)}."
-            )
+        require(unit, CHECKPOINT_UNIT_MAP, "checkpoint unit")
         self.every = every
         self.unit = unit
         self.keep = keep

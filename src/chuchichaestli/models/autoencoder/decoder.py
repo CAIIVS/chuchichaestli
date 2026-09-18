@@ -15,7 +15,7 @@ from chuchichaestli.models.blocks import (
     AutoencoderMidBlockTypes,
     DecoderInBlockTypes,
 )
-from chuchichaestli.models.maps import require_cls
+from chuchichaestli.utils.registry import require
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.spec import InitArgMixin
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS, UpsampleTypes
@@ -109,7 +109,7 @@ class Decoder(InitArgMixin, nn.Module):
             upsample_type, n_mults, "upsample_type", None, f"[{n_mults} level(s)]"
         )
         upsample_clss = [
-            require_cls(name, UPSAMPLE_FUNCTIONS, "upsampling type")
+            require(name, UPSAMPLE_FUNCTIONS, "upsampling type")
             for name in upsample_types
         ]
 

@@ -34,6 +34,7 @@ from chuchichaestli.runtime.traits import (
     is_critical,
     needs_store,
 )
+from chuchichaestli.utils.registry import require
 
 
 __all__ = [
@@ -95,12 +96,7 @@ def apply_backends_settings(level: BackendsPresets) -> None:
     Raises:
         ValueError: If `level` is not one of the four.
     """
-    if level not in BACKENDS_PRESETS_MAP:
-        raise ValueError(
-            f"Unsupported backends preset: {level!r}. "
-            f"Use one of {sorted(BACKENDS_PRESETS_MAP)}."
-        )
-    settings = BACKENDS_PRESETS_MAP[level]
+    settings = require(level, BACKENDS_PRESETS_MAP, "backends preset")
     if settings.deterministic is not None:
         if settings.deterministic:
             os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")

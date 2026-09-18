@@ -28,6 +28,7 @@ from chuchichaestli.utils.ir import (
     NodeRole,
     normalize_level,
 )
+from chuchichaestli.utils.registry import require
 
 __all__ = ["DiagramStyle", "MatplotlibRenderer"]
 
@@ -206,9 +207,11 @@ class MatplotlibRenderer(Renderer):
                     f"Unknown label field(s) {unknown}; choose from "
                     f"{sorted(_LABEL_FIELDS)}"
                 )
-        if color_by is not None and color_by not in _COLOR_MODES:
-            raise ValueError(
-                f"Unknown color_by {color_by!r}; choose from {sorted(_COLOR_MODES)}"
+        if color_by is not None:
+            require(
+                color_by,
+                _COLOR_MODES,
+                message="Unknown color_by {name!r}; choose from {options}",
             )
         self.show_legend = show_legend
         self.label_fields = tuple(label_fields) if label_fields is not None else None

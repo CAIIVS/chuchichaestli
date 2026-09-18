@@ -19,6 +19,7 @@ from chuchichaestli.utils import partialclass, alias_kwargs
 from math import gcd
 from collections.abc import Callable, Sequence
 from typing import Literal, get_args
+from chuchichaestli.utils.registry import require
 
 
 __all__ = [
@@ -117,11 +118,11 @@ def _require_time_injection(time_injection: str) -> None:
     Args:
         time_injection: Mode to check against `TimeInjectionTypes`.
     """
-    if time_injection not in get_args(TimeInjectionTypes):
-        raise ValueError(
-            f"Unknown time injection: {time_injection}."
-            f" Available: {get_args(TimeInjectionTypes)}"
-        )
+    require(
+        time_injection,
+        get_args(TimeInjectionTypes),
+        message="Unknown time injection: {name}. Available: {options}.",
+    )
 
 
 ConvBlockTypes = Literal[

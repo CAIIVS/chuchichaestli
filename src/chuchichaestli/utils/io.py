@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Filesystem helpers for reading and writing states."""
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -13,7 +13,10 @@ from safetensors import safe_open
 from safetensors.torch import load_file, save_file
 
 from chuchichaestli.models.spec import ModelSpec
+from chuchichaestli.utils.registry import require
 
+
+_CANNOT = "Cannot {action} '{{name}}'; choose from {{options}}."
 
 METADATA_KEY = "__metadata__"
 MODELSPEC_KEY = "spec"
@@ -129,25 +132,6 @@ WRITERS: dict[str, Callable[..., None]] = {
 }
 
 
-def _require(path: Path, registry: Mapping[str, Any], action: str) -> Callable:
-    """Look a suffix up in a registry, raising with the alternatives.
-
-    Args:
-        path: File whose suffix selects the handler.
-        registry: Handlers accepted at this position.
-        action: What the caller was attempting, for the error message.
-
-    Raises:
-        ValueError: If the suffix names no known format.
-    """
-    handler = registry.get(path.suffix)
-    if handler is None:
-        raise ValueError(
-            f"Cannot {action} '{path.suffix}'; choose from {sorted(registry)}."
-        )
-    return handler
-
-
 def reader_for(path: Path) -> Callable[..., Any]:
     """Return the reader for a path's suffix.
 
@@ -157,7 +141,7 @@ def reader_for(path: Path) -> Callable[..., Any]:
     Args:
         path: File whose suffix selects the reader.
     """
-    return _require(path, READERS, "read")
+    return require(path.suffix, READERS, message=_CANNOT.format(action="read"))
 
 
 def writer_for(path: Path) -> Callable[..., None]:
@@ -166,7 +150,7 @@ def writer_for(path: Path) -> Callable[..., None]:
     Args:
         path: File whose suffix selects the writer.
     """
-    return _require(path, WRITERS, "write")
+    return require(path.suffix, WRITERS, message=_CANNOT.format(action="write"))
 
 
 def read_state(

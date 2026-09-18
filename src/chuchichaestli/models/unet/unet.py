@@ -22,7 +22,8 @@ from chuchichaestli.models.downsampling import (
     DOWNSAMPLE_FUNCTIONS,
     DownsampleTypes,
 )
-from chuchichaestli.models.maps import DIM_TO_CONV_MAP, require_cls
+from chuchichaestli.models.maps import DIM_TO_CONV_MAP
+from chuchichaestli.utils.registry import require
 from chuchichaestli.models.spec import InitArgMixin
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.unet.time_embeddings import (
@@ -218,11 +219,11 @@ class UNet(InitArgMixin, nn.Module):
             upsample_type, n_samplers, "upsample_type", None, smplr_err_ctx
         )
         downsample_clss = [
-            require_cls(n, DOWNSAMPLE_FUNCTIONS, "sampling type for a U-Net")
+            require(n, DOWNSAMPLE_FUNCTIONS, "sampling type for a U-Net")
             for n in downsample_types
         ]
         upsample_clss = [
-            require_cls(n, UPSAMPLE_FUNCTIONS, "sampling type for a U-Net")
+            require(n, UPSAMPLE_FUNCTIONS, "sampling type for a U-Net")
             for n in upsample_types
         ]
         down_changes_channels = [cls.changes_channels for cls in downsample_clss]

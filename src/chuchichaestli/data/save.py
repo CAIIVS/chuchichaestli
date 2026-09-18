@@ -31,6 +31,7 @@ from chuchichaestli.data.hdf5 import HDF5Dataset
 from chuchichaestli.data.safetensors import SafetensorsDataset
 from chuchichaestli.utils import as_array
 from chuchichaestli.utils.io import staged
+from chuchichaestli.utils.registry import require
 
 
 __all__ = ["SAVERS", "save_dataset"]
@@ -207,9 +208,9 @@ def save_dataset(
             the format cannot hold this metadata.
     """
     path = Path(path)
-    saver = SAVERS.get(path.suffix)
-    if saver is None:
-        raise ValueError(f"Cannot write '{path.suffix}'; choose from {sorted(SAVERS)}.")
+    saver = require(
+        path.suffix, SAVERS, message="Cannot write '{name}'; choose from {options}."
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     saver(path, data, key, attrs, attrs_key)
     return path
