@@ -136,10 +136,23 @@ class OptimSpec:
     params: str | Sequence[str] | Callable[..., Any] | None = None
     scheduler: SchedulerSpec | None = None
 
+    @staticmethod
+    def needs_closure(optimizer: Optimizer | str) -> bool:
+        """Whether an optimizer requires a closure to step.
+
+        Args:
+            optimizer: A built optimizer, or the name of one.
+        """
+        if isinstance(optimizer, str):
+            return optimizer in CLOSURE_OPTIMIZERS
+        return isinstance(
+            optimizer, tuple(OPTIMIZER_MAP[name] for name in CLOSURE_OPTIMIZERS)
+        )
+
     @property
     def requires_closure(self) -> bool:
         """Whether stepping this optimizer needs a closure."""
-        return self.cls in CLOSURE_OPTIMIZERS
+        return OptimSpec.needs_closure(self.cls)
 
     def build(self, params: Any, **overrides: Any) -> Optimizer:
         """Build the optimizer.

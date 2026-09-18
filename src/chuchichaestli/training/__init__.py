@@ -7,6 +7,14 @@ Imports nothing from `chuchichaestli.runtime`; the dependency runs the other
 way.
 """
 
+from chuchichaestli.training.update import (
+    CLIP_FUNCTIONS,
+    ClipTypes,
+    ReductionTypes,
+    Ema,
+    Swa,
+    UpdatePolicy,
+)
 from chuchichaestli.training.optim import (
     OPTIMIZER_MAP,
     SCHEDULER_MAP,
@@ -26,4 +34,10 @@ __all__ = [
     "OPTIMIZER_MAP",
     "SCHEDULER_MAP",
     "disjoint_params",
+    "UpdatePolicy",
+    "Ema",
+    "Swa",
+    "ClipTypes",
+    "ReductionTypes",
+    "CLIP_FUNCTIONS",
 ]
