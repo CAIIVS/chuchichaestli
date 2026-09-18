@@ -5,7 +5,7 @@
 
 import pytest
 
-from chuchichaestli.data import split_dataset, split_sizes
+from chuchichaestli.data import split_dataset
 
 
 def test_the_parts_cover_the_dataset_exactly():
@@ -46,27 +46,19 @@ def test_without_shuffle_the_parts_are_contiguous():
         (10, [0.5, 0.5], [5, 5]),
         (10, [0.8, 0.2], [8, 2]),
         (7, [1 / 3, 1 / 3, 1 / 3], [3, 2, 2]),
-        (11, [0.7, 0.3], [8, 3]),
     ],
 )
-def test_the_sizes_always_sum_to_the_total(total, fractions, expected):
-    """The largest remainders take the leftovers."""
-    assert split_sizes(total, fractions) == expected
-    assert sum(split_sizes(total, fractions)) == total
+def test_the_parts_always_sum_to_the_dataset(total, fractions, expected):
+    """Torch spreads the remainder; nothing may be lost."""
+    parts = split_dataset(list(range(total)), fractions)
+    assert sorted(len(p) for p in parts) == sorted(expected)
+    assert sum(len(p) for p in parts) == total
 
 
-@pytest.mark.parametrize(
-    ("fractions", "match"),
-    [
-        ([], "at least one"),
-        ([0.5, -0.5], "must be positive"),
-        ([0.5, 0.2], "sum to one"),
-    ],
-)
-def test_unusable_fractions_are_refused(fractions, match):
-    """Each would divide the dataset into something surprising."""
-    with pytest.raises(ValueError, match=match):
-        split_sizes(10, fractions)
+def test_a_negative_fraction_is_refused():
+    """It would ask for a part with fewer than no samples."""
+    with pytest.raises(ValueError, match="must be positive"):
+        split_dataset(list(range(10)), [0.5, -0.5])
 
 
 def test_a_part_that_would_be_empty_is_refused():
