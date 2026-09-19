@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Reading named values out of a batch, whatever shape the loader returns."""
+
+from __future__ import annotations
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
+import torch
+
+
+__all__ = ["BatchType", "samples_in_batch", "unpack_batch"]
+
+
+BatchType = torch.Tensor | Mapping[str, Any] | Sequence[Any]
+
+
+def unpack_batch(
+    batch: BatchType, *names: str, reader: str = "Batch reader"
+) -> tuple[Any, ...]:
+    """Return the named values of a batch, in the order asked for.
+
+    A mapping is read by name and a sequence by position, which are the two
+    shapes `FileDataset.return_as` produces.
+
+    Args:
+        batch: A mapping, or a sequence holding one value per name.
+        names: Keys to read, e.g. `"x"` and `"y"`.
+        reader: What to call the caller in an error message.
+
+    Raises:
+        ValueError: If no name was asked for, or the batch holds no such
+            values.
+    """
+    if not names:
+        raise ValueError("Unpacking a batch needs at least one name.")
+    if isinstance(batch, Mapping):
+        missing = sorted(set(names) - set(batch))
+        if missing:
+            raise ValueError(
+                f"Batch has no {missing} to read; it holds {sorted(batch)}."
+            )
+        return tuple(batch[name] for name in names)
+    if isinstance(batch, Sequence) and not isinstance(batch, (str, bytes)):
+        if len(batch) != len(names):
+            raise ValueError(
+                f"{reader} reads {len(names)} values, got {len(batch)} items."
+            )
+        return tuple(batch)
+    raise ValueError(
+        f"{reader} reads {len(names)} values, got a {type(batch).__name__}."
+    )
+
+
+def samples_in_batch(batch: BatchType) -> int:
+    """Return how many samples a batch holds.
+
+    Args:
+        batch: A tensor, or a mapping or sequence holding one.
+    """
+    if isinstance(batch, torch.Tensor):
+        return len(batch)
+    if isinstance(batch, Mapping):
+        candidates: Iterable[Any] = batch.values()
+    elif isinstance(batch, Sequence) and not isinstance(batch, (str, bytes)):
+        candidates = batch
+    else:
+        return 1
+    for value in candidates:
+        if isinstance(value, torch.Tensor):
+            return len(value)
+    return 1

@@ -6,14 +6,18 @@
 from __future__ import annotations
 import math
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from multiprocessing.context import BaseContext
 from typing import Any
 import torch
 from torch.utils.data import (
     BatchSampler,
     DataLoader,
+    Dataset,
     RandomSampler,
+    Sampler,
     SequentialSampler,
 )
+from chuchichaestli.data.batch import BatchType
 from chuchichaestli.data.split import split_dataset
 from chuchichaestli.runtime.context import Context
 from chuchichaestli.runtime.traits import Topology
@@ -36,20 +40,20 @@ class DataManager:
 
     def __init__(
         self,
-        dataset: Any,
+        dataset: Dataset,
         batch_size: int = 1,
         *,
-        batches: Any = None,
+        batches: Sampler[list[int]] | Sequence[Sequence[int]] | None = None,
         shuffle: bool = True,
         drop_last: bool = False,
         num_workers: int = 0,
-        collate_fn: Callable[[Sequence[Any]], Any] | None = None,
+        collate_fn: Callable[[Sequence[Any]], BatchType] | None = None,
         pin_memory: bool = False,
         pin_memory_device: str = "",
         timeout: float = 0,
         prefetch_factor: int | None = None,
         persistent_workers: bool = False,
-        multiprocessing_context: Any = None,
+        multiprocessing_context: str | BaseContext | None = None,
         seed: int | None = None,
         split: Sequence[float] | Mapping[str, float] | None = None,
         part: str | int | None = None,
@@ -147,11 +151,11 @@ class DataManager:
 
     @staticmethod
     def _subset(
-        dataset: Any,
+        dataset: Dataset,
         split: Sequence[float] | Mapping[str, float],
         part: str | int,
         seed: int,
-    ) -> Any:
+    ) -> Dataset:
         """Return the part of a split dataset this manager draws from.
 
         Args:
@@ -223,7 +227,7 @@ class DataManager:
         """
         return self.shard(self.plan(ctx, epoch), ctx.topology)
 
-    def open(self, ctx: Context, epoch: int = 0, seek: int = 0) -> Iterator[Any]:
+    def open(self, ctx: Context, epoch: int = 0, seek: int = 0) -> Iterator[BatchType]:
         """Iterate this process's batches for one epoch.
 
         Args:

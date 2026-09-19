@@ -17,6 +17,7 @@ from chuchichaestli.data.safetensors import SafetensorsDataset, ZipSafetensorsDa
 from chuchichaestli.data.image import ImageDataset, ZipImageDataset
 from chuchichaestli.data.save import save_dataset
 from chuchichaestli.data.split import split_dataset
+from chuchichaestli.data.batch import BatchType, samples_in_batch, unpack_batch
 from chuchichaestli.data.procedural import (
     ProceduralDataset,  # abstract
     HalfMoonsDataset,
@@ -89,6 +90,9 @@ __all__ = [
     "ZipImageDataset",
     "save_dataset",
     "split_dataset",
+    "BatchType",
+    "samples_in_batch",
+    "unpack_batch",
     "ProceduralDataset",
     "HalfMoonsDataset",
     "SpiralsDataset",
