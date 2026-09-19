@@ -4,9 +4,13 @@
 """Structural interfaces the runtime expects of its components."""
 
 from __future__ import annotations
+from collections.abc import Sequence
+
+from chuchichaestli.data.batch import BatchType
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 import torch
 from torch import nn
+from chuchichaestli.training.objective import Loss
 from chuchichaestli.runtime.events import Event, Progress, Signal
 
 if TYPE_CHECKING:
@@ -17,6 +21,8 @@ if TYPE_CHECKING:
 __all__ = [
     "Stateful",
     "Stage",
+    "Objective",
+    "Update",
     "Hook",
     "CriticalHook",
     "StoreWriterHook",
@@ -87,6 +93,38 @@ class Stage(Stateful, Protocol):
 
     def progress(self) -> Progress:
         """Return where the stage currently is in its own work."""
+        ...
+
+
+@runtime_checkable
+class Objective(Protocol):
+    """Training objective computing a loss."""
+
+    def compute(self, batch: BatchType, ctx: Context) -> Loss:
+        """Compute the loss for one batch.
+
+        Args:
+            batch: One micro-batch of the stage's data.
+            ctx: Execution context, carrying the update group being applied.
+        """
+        ...
+
+
+@runtime_checkable
+class Update(Protocol):
+    """Applies one optimizer step."""
+
+    def apply(
+        self, objective: Objective, batches: Sequence[BatchType], ctx: Context
+    ) -> Loss:
+        """Run the objective over a step's micro-batches and step the optimizers.
+
+        Args:
+            objective: Produces the loss for each micro-batch.
+            batches: The micro-batches making up this step, materialized so a
+                multi-group update can replay them per group.
+            ctx: Execution context for the stage.
+        """
         ...
 
 

@@ -14,6 +14,7 @@ from chuchichaestli.runtime.ckpt import (
 )
 from chuchichaestli.runtime.context import Context, C3liContextError
 from chuchichaestli.runtime.data import C3liDataError, DataManager
+from chuchichaestli.runtime.objective import CompositeObjective, Criterion
 from chuchichaestli.runtime.events import (
     C3liRuntimeError,
     Event,
@@ -59,14 +60,22 @@ from chuchichaestli.runtime.stages import (
     When,
 )
 from chuchichaestli.runtime.topology import Local
+from chuchichaestli.runtime.update import (
+    Alternating,
+    Simultaneous,
+    Step,
+    Updater,
+)
 from chuchichaestli.runtime.traits import (
     CriticalHook,
     Hook,
+    Objective,
     RunAwareHook,
     Stage,
     Stateful,
     StoreWriterHook,
     Topology,
+    Update,
     is_critical,
     needs_store,
 )
@@ -124,4 +133,12 @@ __all__ = [
     "needs_store",
     "Topology",
     "Local",
+    "Objective",
+    "Update",
+    "Criterion",
+    "CompositeObjective",
+    "Updater",
+    "Step",
+    "Alternating",
+    "Simultaneous",
 ]
