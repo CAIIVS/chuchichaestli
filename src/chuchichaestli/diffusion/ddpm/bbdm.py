@@ -3,8 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Implementation of the Brownian Bridge Diffusion Model."""
 
-from collections.abc import Generator
-from typing import Any
+from collections.abc import Callable, Generator
 
 import torch
 from torch import Tensor
@@ -83,7 +82,7 @@ class BBDM(DiffusionProcess):
 
     def generate(
         self,
-        model: Any,
+        model: Callable[..., torch.Tensor],
         condition: torch.Tensor,
         n: int = 1,
         yield_intermediate: bool = False,

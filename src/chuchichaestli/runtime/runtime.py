@@ -8,7 +8,7 @@ import os
 import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Literal, NamedTuple
 import torch
 from torch import nn
 from chuchichaestli.runtime.ckpt import CheckpointStore
@@ -210,7 +210,7 @@ class Runtime:
             )
 
     def _check_stage(
-        self, stage: Any, available: set[str], problems: list[str], path: str
+        self, stage: Stage, available: set[str], problems: list[str], path: str
     ) -> set[str]:
         """Walk a subtree checking requirements against what is bound.
 

@@ -6,7 +6,7 @@
 from __future__ import annotations
 import os
 from enum import Enum
-from typing import Any
+from typing import IO
 
 
 __all__ = ["ANSIShade", "ansi_supported", "paint"]
@@ -25,7 +25,7 @@ class ANSIShade(str, Enum):
     RESET = "\033[0m"
 
 
-def ansi_supported(stream: Any) -> bool:
+def ansi_supported(stream: IO[str]) -> bool:
     """Whether a stream should be written to in colour.
 
     Honours the `NO_COLOR` convention, and answers `False` for anything that is

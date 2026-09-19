@@ -6,7 +6,7 @@
 from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 import torch
 from torch import nn
 from torch.optim import Optimizer
@@ -32,7 +32,7 @@ __all__ = [
 ClipTypes = Literal["norm", "value"]
 ReductionTypes = Literal["mean", "sum"]
 
-CLIP_FUNCTIONS: dict[str, Callable[..., Any]] = {
+CLIP_FUNCTIONS: dict[str, Callable[..., torch.Tensor | None]] = {
     "norm": nn.utils.clip_grad_norm_,
     "value": nn.utils.clip_grad_value_,
 }

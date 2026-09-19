@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from typing import Any
 import torch
 from chuchichaestli.models.spec import ModelSpec
+from chuchichaestli.runtime.traits import Stage
 
 
 __all__ = [
@@ -117,7 +118,7 @@ def merge_tree(tensors: Mapping[str, torch.Tensor], skeleton: Any) -> Any:
     return _restore_tensors(skeleton, tensors)
 
 
-def stage_signature(stage: Any) -> list[list[str]]:
+def stage_signature(stage: Stage) -> list[list[str]]:
     """Return the program's stages as `[path, class name]` pairs.
 
     Args:

@@ -4,8 +4,7 @@
 """Base class for diffusion processes."""
 
 from abc import ABC, abstractmethod
-from typing import Any
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 
 import torch
 
@@ -110,7 +109,7 @@ class DiffusionProcess(ABC):
     @abstractmethod
     def generate(
         self,
-        model: Any,
+        model: Callable[..., torch.Tensor],
         condition: torch.Tensor | None = None,
         n: int = 1,
         yield_intermediate: bool = False,

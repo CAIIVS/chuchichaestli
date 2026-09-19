@@ -10,6 +10,7 @@ from typing import Any, Literal
 import torch
 from torch import nn
 from torch.optim import Optimizer
+from torch.optim.optimizer import ParamsT
 from torch.optim.lr_scheduler import LRScheduler
 from chuchichaestli.models.spec import ModelSpec
 from chuchichaestli.utils.registry import require
@@ -133,7 +134,7 @@ class OptimSpec:
     cls: str = "adamw"
     lr: float = 1e-4
     kwargs: Mapping[str, Any] = field(default_factory=dict)
-    params: str | Sequence[str] | Callable[..., Any] | None = None
+    params: str | Sequence[str] | Callable[..., ParamsT] | None = None
     scheduler: SchedulerSpec | None = None
 
     @staticmethod
@@ -154,7 +155,7 @@ class OptimSpec:
         """Whether stepping this optimizer needs a closure."""
         return OptimSpec.needs_closure(self.cls)
 
-    def build(self, params: Any, **overrides: Any) -> Optimizer:
+    def build(self, params: ParamsT, **overrides: Any) -> Optimizer:
         """Build the optimizer.
 
         Args:
@@ -173,7 +174,7 @@ class OptimSpec:
     def adam(
         cls,
         lr: float = 1e-3,
-        params: str | Sequence[str] | Callable[..., Any] | None = None,
+        params: str | Sequence[str] | Callable[..., ParamsT] | None = None,
         **kwargs: Any,
     ) -> OptimSpec:
         """Describe an Adam optimizer.
@@ -189,7 +190,7 @@ class OptimSpec:
     def adamw(
         cls,
         lr: float = 1e-4,
-        params: str | Sequence[str] | Callable[..., Any] | None = None,
+        params: str | Sequence[str] | Callable[..., ParamsT] | None = None,
         **kwargs: Any,
     ) -> OptimSpec:
         """Describe an AdamW optimizer.
@@ -205,7 +206,7 @@ class OptimSpec:
     def sgd(
         cls,
         lr: float = 1e-2,
-        params: str | Sequence[str] | Callable[..., Any] | None = None,
+        params: str | Sequence[str] | Callable[..., ParamsT] | None = None,
         **kwargs: Any,
     ) -> OptimSpec:
         """Describe an SGD optimizer.
@@ -221,7 +222,7 @@ class OptimSpec:
     def rmsprop(
         cls,
         lr: float = 1e-2,
-        params: str | Sequence[str] | Callable[..., Any] | None = None,
+        params: str | Sequence[str] | Callable[..., ParamsT] | None = None,
         **kwargs: Any,
     ) -> OptimSpec:
         """Describe an RMSprop optimizer.
@@ -237,7 +238,7 @@ class OptimSpec:
     def adagrad(
         cls,
         lr: float = 1e-2,
-        params: str | Sequence[str] | Callable[..., Any] | None = None,
+        params: str | Sequence[str] | Callable[..., ParamsT] | None = None,
         **kwargs: Any,
     ) -> OptimSpec:
         """Describe an Adagrad optimizer.
@@ -253,7 +254,7 @@ class OptimSpec:
     def lbfgs(
         cls,
         lr: float = 1.0,
-        params: str | Sequence[str] | Callable[..., Any] | None = None,
+        params: str | Sequence[str] | Callable[..., ParamsT] | None = None,
         **kwargs: Any,
     ) -> OptimSpec:
         """Describe an L-BFGS optimizer.
@@ -266,7 +267,7 @@ class OptimSpec:
         return cls(cls="lbfgs", lr=lr, kwargs=kwargs, params=params)
 
     def with_params(
-        self, params: str | Sequence[str] | Callable[..., Any]
+        self, params: str | Sequence[str] | Callable[..., ParamsT]
     ) -> OptimSpec:
         """Return a copy owning the given parameters.
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from chuchichaestli.runtime.context import Context
 from chuchichaestli.runtime.events import EventType, Progress, Signal
+from chuchichaestli.runtime.traits import Stage
 from chuchichaestli.utils.io import read_state, staged, writer_for
 
 
@@ -266,7 +267,7 @@ class Phase:
     def __init__(
         self,
         name: str | None = None,
-        stages: Sequence[Any] = (),
+        stages: Sequence[Stage] = (),
         *,
         provide: Mapping[str, Any] | None = None,
         requires: Sequence[str] = (),
@@ -339,7 +340,7 @@ class Phase:
         ctx.progress = self._progress
         return Signal.DONE
 
-    def _close(self, child: Any) -> None:
+    def _close(self, child: Stage) -> None:
         """Finish with the current child and move to the next.
 
         Args:
@@ -417,7 +418,7 @@ class Program(Phase):
 
     def __init__(
         self,
-        stages: Sequence[Any] = (),
+        stages: Sequence[Stage] = (),
         *,
         name: str = "program",
         provide: Mapping[str, Any] | None = None,
@@ -441,7 +442,7 @@ class Program(Phase):
 class Repeat(Phase):
     """Run a stage a fixed number of times."""
 
-    def __init__(self, times: int, stage: Any, *, name: str | None = None):
+    def __init__(self, times: int, stage: Stage, *, name: str | None = None):
         """Constructor.
 
         Args:
@@ -465,7 +466,7 @@ class When(Phase):
     def __init__(
         self,
         predicate: Callable[[Context], bool],
-        stage: Any,
+        stage: Stage,
         *,
         name: str | None = None,
     ):
@@ -499,7 +500,7 @@ class When(Phase):
 class Every(Phase):
     """Run a stage on every nth visit."""
 
-    def __init__(self, n: int, stage: Any, *, name: str | None = None):
+    def __init__(self, n: int, stage: Stage, *, name: str | None = None):
         """Constructor.
 
         Args:

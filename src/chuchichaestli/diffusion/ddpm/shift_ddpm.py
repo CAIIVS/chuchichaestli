@@ -6,8 +6,7 @@
 import torch
 import torch.types
 
-from typing import Any
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 
 from chuchichaestli.diffusion.ddpm import DDPM
 
@@ -76,7 +75,7 @@ class ShiftDDPM(DDPM):
 
     def generate(
         self,
-        model: Any,
+        model: Callable[..., torch.Tensor],
         condition: torch.Tensor,
         n: int = 1,
         yield_intermediate: bool = False,

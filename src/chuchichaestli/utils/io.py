@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from torch import nn
 from safetensors import safe_open
 from safetensors.torch import load_file, save_file
 
@@ -52,7 +53,9 @@ def staged(*targets: Path) -> Iterator[list[Path]]:
         scratch.replace(target)
 
 
-def _read_safetensors(path: Path, spec_only: bool = False) -> Any:
+def _read_safetensors(
+    path: Path, spec_only: bool = False
+) -> str | None | tuple[dict[str, torch.Tensor], str | None]:
     """Read a safetensors file as `(state, spec)`, or the spec on its own.
 
     Reading the spec alone touches the metadata header rather than the
@@ -69,7 +72,9 @@ def _read_safetensors(path: Path, spec_only: bool = False) -> Any:
     return load_file(str(path)), stored
 
 
-def _read_torch(path: Path, spec_only: bool = False) -> Any:
+def _read_torch(
+    path: Path, spec_only: bool = False
+) -> str | None | tuple[dict[str, torch.Tensor], str | None]:
     """Read a torch archive as `(state, spec)`, or the spec on its own.
 
     Refuses to unpickle anything but tensors and plain strings.
@@ -209,7 +214,7 @@ def write_state(
     writer_for(path)(path, storable, spec.to_json() if spec is not None else None)
 
 
-def load_model(path: Path, strict: bool = True, **overrides: Any) -> Any:
+def load_model(path: Path, strict: bool = True, **overrides: Any) -> nn.Module:
     """Rebuild a model from a file and load its weights.
 
     Args:

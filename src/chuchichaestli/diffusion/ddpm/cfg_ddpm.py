@@ -8,8 +8,7 @@ import torch.types
 
 from chuchichaestli.diffusion.ddpm.base import DiffusionProcess
 
-from typing import Any
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 
 
 class CFGDDPM(DiffusionProcess):
@@ -96,7 +95,7 @@ class CFGDDPM(DiffusionProcess):
 
     def generate(
         self,
-        model: Any,
+        model: Callable[..., torch.Tensor],
         condition: torch.Tensor,
         n: int = 1,
         yield_intermediate: bool = False,

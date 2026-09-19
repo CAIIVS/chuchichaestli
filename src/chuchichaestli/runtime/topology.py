@@ -8,7 +8,7 @@ from typing import Any
 import os
 import torch
 from torch import nn
-from chuchichaestli.runtime.traits import Topology
+from chuchichaestli.runtime.traits import Stateful, Topology
 
 
 __all__ = ["Local", "default_device", "auto_topology"]
@@ -104,7 +104,7 @@ class Local:
         """
         return value
 
-    def state_of(self, stateful: Any) -> dict[str, Any]:
+    def state_of(self, stateful: Stateful) -> dict[str, Any]:
         """Capture a component's state.
 
         Args:
@@ -112,7 +112,7 @@ class Local:
         """
         return stateful.state_dict()
 
-    def load_state(self, stateful: Any, state: dict[str, Any]) -> None:
+    def load_state(self, stateful: Stateful, state: dict[str, Any]) -> None:
         """Restore state captured by `state_of`.
 
         Args:

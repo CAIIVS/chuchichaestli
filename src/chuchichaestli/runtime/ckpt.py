@@ -21,7 +21,7 @@ from chuchichaestli.runtime.serialize import (
     merge_tree,
     writable_spec,
 )
-from chuchichaestli.runtime.traits import Topology
+from chuchichaestli.runtime.traits import Stage, Topology
 from chuchichaestli.utils.io import read_state, staged, write_state
 from chuchichaestli.utils.rng import capture_rng_state
 from chuchichaestli.utils.registry import require
@@ -77,7 +77,7 @@ class Checkpoint:
     progress: Progress = field(default_factory=Progress)
     unit: str | None = None
     at: str | None = None
-    program: Any = None
+    program: Stage | None = None
     bindings: Mapping[str, Any] = field(default_factory=dict)
     specs: Mapping[str, ModelSpec] = field(default_factory=dict)
     weights: Mapping[str, Path] = field(default_factory=dict)
@@ -88,7 +88,7 @@ class Checkpoint:
         index, bindings = self.index, sorted(self.bindings)
         return f"Checkpoint({self.path.name!r}, {index=}, {bindings=})"
 
-    def build(self, name: str, strict: bool = True, **overrides: Any) -> Any:
+    def build(self, name: str, strict: bool = True, **overrides: Any) -> nn.Module:
         """Rebuild a binding from its spec and load its weights into it.
 
         Args:
@@ -318,7 +318,7 @@ class CheckpointStore:
         self,
         *,
         index: int,
-        program: Any,
+        program: Stage,
         bindings: Mapping[str, Any],
         topology: Topology,
         seed: int = 0,
@@ -486,7 +486,7 @@ class CheckpointStore:
         self,
         checkpoint: Checkpoint,
         *,
-        program: Any,
+        program: Stage,
         bindings: Mapping[str, Any],
         topology: Topology,
         allow_signature_change: bool = False,

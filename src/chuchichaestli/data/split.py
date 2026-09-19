@@ -5,8 +5,7 @@
 
 from __future__ import annotations
 from collections.abc import Mapping, Sequence
-from typing import Any
-from torch.utils.data import Subset, random_split
+from torch.utils.data import Dataset, Subset, random_split
 from chuchichaestli.utils.rng import rng_generator
 
 
@@ -14,7 +13,7 @@ __all__ = ["split_dataset"]
 
 
 def split_dataset(
-    dataset: Any,
+    dataset: Dataset,
     fractions: Sequence[float] | Mapping[str, float],
     seed: int = 0,
     shuffle: bool = True,

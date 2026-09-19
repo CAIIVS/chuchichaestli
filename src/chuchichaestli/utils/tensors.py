@@ -3,9 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Small tensor helpers shared across chuchichaestli."""
 
-from typing import Any
-
 import numpy as np
+import numpy.typing as npt
 import torch
 
 
@@ -55,7 +54,7 @@ def torch_to_npy_dtype(dtype: torch.dtype) -> np.dtype:
     return np.dtype(torch.empty((), dtype=dtype).numpy().dtype)
 
 
-def as_array(x: Any) -> np.ndarray:
+def as_array(x: torch.Tensor | npt.ArrayLike) -> np.ndarray:
     """Return the data as a numpy array, detached and on the host.
 
     A tensor is handed over as a view wherever numpy can share its memory,

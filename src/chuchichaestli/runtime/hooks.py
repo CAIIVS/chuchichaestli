@@ -12,6 +12,7 @@ import time
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
+from types import FrameType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO
 from chuchichaestli.debug import cli_pbar
 from chuchichaestli.utils.ansi import ANSIShade, ansi_supported, paint
@@ -427,7 +428,7 @@ class Cancel:
             signal.signal(number, previous)
         self._previous.clear()
 
-    def _catch(self, number: int, frame: Any) -> None:
+    def _catch(self, number: int, frame: FrameType | None) -> None:
         """Record the first signal, and let a second one through.
 
         Args:

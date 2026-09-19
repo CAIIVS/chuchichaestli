@@ -23,7 +23,7 @@ import numpy as np
 import torch
 from chuchichaestli.utils import nbytes, prod, torch_to_npy_dtype
 from typing import Protocol, Any
-from collections.abc import Generator, Iterator, KeysView, ValuesView, ItemsView
+from collections.abc import Generator, Iterator, KeysView, Mapping, ValuesView, ItemsView
 
 
 __all__ = [
@@ -574,19 +574,19 @@ class SharedDict:
         """Test 'in' dictionary in shared memory."""
         return key in self.read_buffer()
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         """Test equal dictionary in shared memory."""
         return self.read_buffer() == other
 
-    def __ne__(self, other: Any) -> bool:
+    def __ne__(self, other: object) -> bool:
         """Test not equal dictionary in shared memory."""
         return self.read_buffer() != other
 
-    def __or__(self, other: Any) -> dict:
+    def __or__(self, other: Mapping[str, Any]) -> dict:
         """Test 'or' dictionary in shared memory."""
         return self.read_buffer() | other
 
-    def __ror__(self, other: Any) -> dict:
+    def __ror__(self, other: Mapping[str, Any]) -> dict:
         """Test 'or' dictionary in shared memory."""
         return other | self.read_buffer()
 

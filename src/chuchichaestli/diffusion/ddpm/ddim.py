@@ -3,8 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Implementation of the Denoising Diffusion Implicit Model."""
 
-from collections.abc import Generator
-from typing import Any
+from collections.abc import Callable, Generator
 from chuchichaestli.diffusion.ddpm import DDPM
 
 import torch
@@ -57,7 +56,7 @@ class DDIM(DDPM):
 
     def generate(
         self,
-        model: Any,
+        model: Callable[..., torch.Tensor],
         condition: torch.Tensor | None = None,
         shape: tuple[int, ...] | None = None,
         n: int = 1,

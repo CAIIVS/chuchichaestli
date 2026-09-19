@@ -3,8 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Implementation of the Diffusion Probabilistic Model (DDPM) noise process."""
 
-from collections.abc import Generator
-from typing import Any
+from collections.abc import Callable, Generator
 
 import torch
 import torch.types
@@ -94,7 +93,7 @@ class DDPM(DiffusionProcess):
 
     def generate(
         self,
-        model: Any,
+        model: Callable[..., torch.Tensor],
         condition: torch.Tensor | None = None,
         shape: tuple[int, ...] | None = None,
         n: int = 1,
