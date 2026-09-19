@@ -11,7 +11,12 @@ import torch
 from torch import nn
 
 
-__all__ = ["Loss", "Term", "AdaptiveWeight", "Objective"]
+__all__ = [
+    "Loss",
+    "Term",
+    "AdaptiveWeight",
+    "Objective",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +35,22 @@ class Loss:
         """Return a short description of the loss."""
         total, parts = float(self.total), sorted(self.parts)
         return f"Loss({total=:.4g}, {parts=})"
+
+    @classmethod
+    def merge(cls, results: Mapping[str | None, Loss]) -> Loss:
+        """Return one loss from several, keeping each source's parts apart.
+
+        Args:
+            results: What each source produced, keyed by a name that prefixes
+                its parts, or `None` to leave them unprefixed.
+        """
+        total: torch.Tensor | None = None
+        parts: dict[str, torch.Tensor] = {}
+        for name, loss in results.items():
+            total = loss.total if total is None else total + loss.total
+            prefix = "" if name is None else f"{name}/"
+            parts.update({f"{prefix}{key}": v for key, v in loss.parts.items()})
+        return cls(total=torch.zeros(()) if total is None else total, parts=parts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +99,7 @@ class Term:
 
     Attributes:
         name: Identifies the term, and keys it in `Loss.parts`.
-        objective: Produces this term's loss.
+        criterion: Produces this term's loss.
         weight: Scales the term in the total.
         groups: Update groups this term feeds, or all of them when empty.
         after: Steps before the term switches on.
@@ -86,7 +107,7 @@ class Term:
     """
 
     name: str
-    objective: Any = None
+    criterion: Any = None
     weight: float | AdaptiveWeight = 1.0
     groups: tuple[str, ...] = ()
     after: int = 0
@@ -143,13 +164,13 @@ class Objective(nn.Module):
             raise ValueError(f"Every term needs its own name, got {names}.")
         self._terms = tuple(terms)
         self.criteria = nn.ModuleDict(
-            {t.name: t.objective for t in terms if isinstance(t.objective, nn.Module)}
+            {t.name: t.criterion for t in terms if isinstance(t.criterion, nn.Module)}
         )
 
     def __repr__(self) -> str:
         """Return a short description of the objective."""
         terms = [term.name for term in self._terms]
-        return f"Objective({terms=})"
+        return f"{type(self).__name__}({terms=})"
 
     def terms(
         self, group: str | None = None, step: int | None = None

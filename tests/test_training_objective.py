@@ -7,7 +7,12 @@ import pytest
 import torch
 from torch import nn
 
-from chuchichaestli.training import AdaptiveWeight, Loss, Objective, Term
+from chuchichaestli.training import (
+    AdaptiveWeight,
+    Loss,
+    Objective,
+    Term,
+)
 
 
 def terms() -> list[Term]:
@@ -112,7 +117,7 @@ def test_a_value_belonging_to_no_term_is_refused():
 def test_a_term_carrying_weights_moves_with_the_objective():
     """`LPIPSLoss` holds a VGG that must follow the run to its device."""
     inner = nn.Linear(2, 2)
-    objective = Objective([Term("perceptual", objective=inner), Term("plain")])
+    objective = Objective([Term("perceptual", criterion=inner), Term("plain")])
     assert list(objective.criteria) == ["perceptual"]
     assert any(p is inner.weight for p in objective.parameters())
 
@@ -183,3 +188,26 @@ def test_the_bounds_cap_the_ratio_and_the_scale_multiplies_it():
         reference, balanced, net.weight
     )
     assert scaled.item() == pytest.approx(1.0)
+
+
+def test_losses_merge_with_their_parts_kept_apart():
+    """Merging namespaces each source's parts and sums the totals."""
+    merged = Loss.merge(
+        {
+            "gen": Loss(torch.tensor(1.0), {"rec": torch.tensor(1.0)}),
+            "disc": Loss(torch.tensor(2.0), {"adv": torch.tensor(2.0)}),
+        }
+    )
+    assert float(merged.total) == 3.0
+    assert sorted(merged.parts) == ["disc/adv", "gen/rec"]
+
+
+def test_merging_one_unnamed_loss_leaves_its_parts_alone():
+    """A `None` key means the parts keep their own names."""
+    merged = Loss.merge({None: Loss(torch.tensor(1.0), {"rec": torch.tensor(1.0)})})
+    assert sorted(merged.parts) == ["rec"]
+
+
+def test_merging_nothing_gives_a_zero_loss():
+    """An empty merge is a zero total, not a crash."""
+    assert float(Loss.merge({}).total) == 0.0
