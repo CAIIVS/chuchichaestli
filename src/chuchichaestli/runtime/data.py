@@ -58,7 +58,7 @@ class DataManager:
         split: Sequence[float] | Mapping[str, float] | None = None,
         part: str | int | None = None,
         split_seed: int = 0,
-        sync_weights: bool = False,
+        balance_ranks: bool = False,
     ):
         """Constructor.
 
@@ -84,8 +84,9 @@ class DataManager:
                 the same dataset must pass the same shares and `split_seed`.
             part: Which share this manager draws from, named or indexed.
             split_seed: Seed the split derives from.
-            sync_weights: Whether a step all-reduces its sample count, to
-                weight ranks holding different numbers of samples.
+            balance_ranks: Whether a batch is weighed against every process's
+                samples rather than this one's alone, which differs only when
+                they hold unequal numbers.
 
         Raises:
             ValueError: If a number is out of range, if `split` and `part` are
@@ -144,10 +145,35 @@ class DataManager:
         self.persistent_workers = persistent_workers
         self.multiprocessing_context = multiprocessing_context
         self.seed = seed
-        self.sync_weights = sync_weights
+        self.balance_ranks = balance_ranks
         self._batches = (
             [list(batch) for batch in batches] if batches is not None else None
         )
+
+    @classmethod
+    def from_source(
+        cls, source: DataManager | Dataset | None, **kwargs: Any
+    ) -> DataManager:
+        """Return a manager for whatever a caller was given.
+
+        Args:
+            source: A manager, or a dataset to build one around.
+            kwargs: Passed to the constructor (for a dataset source).
+
+        Raises:
+            ValueError: If there is nothing to draw batches from, or options
+                a built manager would ignore.
+        """
+        if isinstance(source, DataManager):
+            if kwargs:
+                raise ValueError(
+                    f"{sorted(kwargs)} were given alongside a built "
+                    "DataManager, which carries its own; set them in one place."
+                )
+            return source
+        if source is None:
+            raise ValueError("A loop needs data to draw batches from.")
+        return cls(source, **kwargs)
 
     @staticmethod
     def _subset(
@@ -227,7 +253,7 @@ class DataManager:
         """
         return self.shard(self.plan(ctx, epoch), ctx.topology)
 
-    def open(self, ctx: Context, epoch: int = 0, seek: int = 0) -> Iterator[BatchType]:
+    def iter(self, ctx: Context, epoch: int = 0, seek: int = 0) -> Iterator[BatchType]:
         """Iterate this process's batches for one epoch.
 
         Args:

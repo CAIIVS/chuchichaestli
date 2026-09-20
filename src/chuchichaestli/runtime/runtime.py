@@ -24,7 +24,7 @@ from chuchichaestli.runtime.events import (
 )
 from chuchichaestli.runtime.hooks import Console
 from chuchichaestli.utils.rng import restore_rng_state, seed_ambient
-from chuchichaestli.runtime.stages import Phase
+from chuchichaestli.runtime.stages import Phase, Train
 from chuchichaestli.runtime.topology import auto_topology
 from chuchichaestli.runtime.traits import (
     Hook,
@@ -229,6 +229,10 @@ class Runtime:
                     f"{path!r} requires {name!r}, which nothing provides "
                     f"(available: {sorted(available) or 'nothing'})."
                 )
+        if isinstance(stage, Train) and stage.epochs is None and stage.steps is None:
+            problems.append(
+                f"{path!r} has neither epochs nor steps, causing infinite loop."
+            )
         if isinstance(stage, Phase):
             inner = available | set(stage.provide)
             for index, child in enumerate(stage.stages):
@@ -243,12 +247,23 @@ class Runtime:
         Each module is placed on the device before the topology wraps it,
         since a distributed wrapper requires a module already on its own.
         """
-        provide = getattr(self.program, "provide", None)
-        if not provide:
-            return
+        provide = getattr(self.program, "provide", None) or {}
         for key, value in list(provide.items()):
             if isinstance(value, nn.Module):
                 provide[key] = self.topology.wrap(value.to(self.device))
+        self._provision_stage(self.program)
+
+    def _provision_stage(self, stage: Stage) -> None:
+        """Place a model a stage holds directly rather than as a binding.
+
+        Args:
+            stage: The stage to provision, and whose children to walk.
+        """
+        model = getattr(stage, "model", None)
+        if isinstance(model, nn.Module):
+            stage.model = self.topology.wrap(model.to(self.device))
+        for child in getattr(stage, "stages", ()):
+            self._provision_stage(child)
 
     def run(self) -> Progress:
         """Execute the program and return where it finished.

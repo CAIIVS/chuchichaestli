@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from collections.abc import Mapping, Sequence
 from typing import Any
 import torch
 from torch import nn
 from torch.optim import Optimizer
+from torch.amp import GradScaler
 from torch.optim.lr_scheduler import LRScheduler
 from chuchichaestli.data.batch import BatchType, samples_in_batch
 from chuchichaestli.runtime.context import Context
@@ -32,6 +34,8 @@ class Updater(ABC):
 
     Attributes:
         frequencies: How often each group steps, relative to the others.
+        balance_ranks: Whether a micro-batch is weighed against every
+            process's samples rather than this one's alone.
         policy: Clipping, stepping and loss weighting.
         optimizers: The optimizer of each group, once bound.
         schedulers: The per-step scheduler of each group, once bound.
@@ -42,6 +46,7 @@ class Updater(ABC):
         groups: Sequence[str | None] | Mapping[str | None, int] | None = None,
         frequencies: Sequence[int] | Mapping[str | None, int] | None = None,
         policy: UpdatePolicy | None = None,
+        precision: torch.dtype | None = None,
     ):
         """Constructor.
 
@@ -52,6 +57,7 @@ class Updater(ABC):
                 named or one per group in the same order; missing groups step
                 every time.
             policy: Clipping, stepping and loss weighting.
+            precision: Precision the forward runs in, or `None` for full precision.
 
         Raises:
             ValueError: If frequencies are given twice, positional ones name
@@ -114,6 +120,9 @@ class Updater(ABC):
             )
         self._cadence = {g: most // rate for g, rate in self.frequencies.items()}
         self.policy = policy or UpdatePolicy()
+        self.precision = precision
+        self.balance_ranks = False
+        self._scalers: dict[str | None, GradScaler] = {}
         self.optimizers: dict[str | None, Optimizer] = {}
         self.schedulers: dict[str | None, LRScheduler] = {}
         self._params: dict[str | None, list[nn.Parameter]] = {}
@@ -203,19 +212,61 @@ class Updater(ABC):
         """
         view = ctx.at_group(group)
         counts = [samples_in_batch(batch) for batch in batches]
-        seen = sum(counts) or 1
+        rank_samples = self._rank_samples(sum(counts) or 1, ctx)
         total: torch.Tensor | None = None
         parts: dict[str, torch.Tensor] = {}
+        scaler = self._scaler(group, ctx)
         for batch, count in zip(batches, counts):
-            loss = objective.compute(batch, view)
-            share = self.policy.share(loss.total, count / seen)
-            share.backward()
+            with self._autocast(ctx):
+                loss = objective.compute(batch, view)
+            share = self.policy.share(loss.total, count / rank_samples)
+            scaler.scale(share).backward()
             reported = share.detach()
             total = reported if total is None else total + reported
             for name, value in loss.parts.items():
-                weighted = self.policy.share(value.detach(), count / seen)
+                weighted = self.policy.share(value.detach(), count / rank_samples)
                 parts[name] = weighted + parts.get(name, 0)
         return Loss(total=torch.zeros(()) if total is None else total, parts=parts)
+
+    def _rank_samples(self, samples: int, ctx: Context) -> float:
+        """Return the samples given, or their average across processes.
+
+        Args:
+            samples: Samples this process holds for the step.
+            ctx: Execution context, carrying the topology.
+        """
+        if not self.balance_ranks or ctx.topology.world_size == 1:
+            return float(samples)
+        total = ctx.topology.reduce(
+            torch.tensor(float(samples), device=ctx.device), "sum"
+        )
+        return float(total) / ctx.topology.world_size
+
+    def _autocast(self, ctx: Context) -> Any:
+        """Return the precision the forward runs under.
+
+        Args:
+            ctx: Execution context, naming the device to autocast for.
+        """
+        if self.precision is None:
+            return nullcontext()
+        return torch.autocast(device_type=ctx.device.type, dtype=self.precision)
+
+    def _scaler(self, group: str | None, ctx: Context) -> GradScaler:
+        """Return a group's gradient scaler, building it on first use.
+
+        Scaling is needed only for float16, whose gradients underflow; every
+        other precision gets a scaler that passes values through.
+
+        Args:
+            group: Update group being applied, or `None`.
+            ctx: Execution context, naming the device to scale for.
+        """
+        if group not in self._scalers:
+            self._scalers[group] = GradScaler(
+                ctx.device.type, enabled=self.precision is torch.float16
+            )
+        return self._scalers[group]
 
     def _step_group(self, group: str | None) -> None:
         """Clip, step the optimizer and advance its per-step scheduler.
@@ -223,7 +274,16 @@ class Updater(ABC):
         Args:
             group: Update group being applied, or `None`.
         """
-        self.policy.step(self.optimizers[group], self._params[group])
+        optimizer = self.optimizers[group]
+        scaler = self._scalers.get(group)
+        if scaler is not None and scaler.is_enabled():
+            if self.policy.clip is not None:
+                scaler.unscale_(optimizer)
+                self.policy.clip_grads(self._params[group])
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            self.policy.step(optimizer, self._params[group])
         scheduler = self.schedulers.get(group)
         if scheduler is not None:
             scheduler.step()
@@ -262,18 +322,27 @@ class Updater(ABC):
             optimizer.load_state_dict(state[self.state_key("optim", group)])
         for group, scheduler in self.schedulers.items():
             scheduler.load_state_dict(state[self.state_key("sched", group)])
+        for group, scaler in self._scalers.items():
+            saved = state.get(self.state_key("scaler", group))
+            if saved is not None:
+                scaler.load_state_dict(saved)
 
 
 class Step(Updater):
     """One optimizer step over a single group of parameters."""
 
-    def __init__(self, policy: UpdatePolicy | None = None):
+    def __init__(
+        self,
+        policy: UpdatePolicy | None = None,
+        precision: torch.dtype | None = None,
+    ):
         """Constructor.
 
         Args:
             policy: Clipping, stepping and loss weighting.
+            precision: Precision the forward runs in, or `None` for full precision.
         """
-        super().__init__((None,), policy=policy)
+        super().__init__((None,), policy=policy, precision=precision)
 
     def apply(
         self, objective: Objective, batches: Sequence[BatchType], ctx: Context

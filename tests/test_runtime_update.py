@@ -336,3 +336,46 @@ def test_positional_frequencies_need_groups_to_pair_with():
     """A bare tuple names nothing, so it cannot stand alone."""
     with pytest.raises(ValueError, match="name no groups"):
         Alternating(frequencies=(5, 1))
+
+
+def test_clipping_is_skipped_when_no_threshold_is_set():
+    """Without a threshold the gradients reach the optimizer untouched."""
+    model = linear()
+    update = Step()
+    update.bind({None: SGD(model.parameters(), lr=0.0)})
+    update.apply(
+        Criterion(nn.MSELoss(), model=model),
+        [(torch.full((4, 1), 3.0), torch.zeros(4, 1))],
+        a_context(),
+    )
+    loose = model.weight.grad.clone()
+
+    clipped = linear()
+    tight = Step(UpdatePolicy(clip=1e-3))
+    tight.bind({None: SGD(clipped.parameters(), lr=0.0)})
+    tight.apply(
+        Criterion(nn.MSELoss(), model=clipped),
+        [(torch.full((4, 1), 3.0), torch.zeros(4, 1))],
+        a_context(),
+    )
+    assert not torch.allclose(loose, clipped.weight.grad)
+    assert clipped.weight.grad.norm() <= 1e-3 + 1e-9
+
+
+def test_a_scaled_step_recovers_from_overflow_with_and_without_clipping():
+    """The float16 path unscales only when clipping, and steps once it settles."""
+    for policy in (UpdatePolicy(), UpdatePolicy(clip=1.0)):
+        model = linear()
+        before = model.weight.detach().clone()
+        update = Step(policy, precision=torch.float16)
+        update.bind({None: SGD(model.parameters(), lr=0.1)})
+        scales = []
+        for _ in range(20):
+            update.apply(
+                Criterion(nn.MSELoss(), model=model),
+                [(torch.ones(4, 1), torch.zeros(4, 1))],
+                a_context(),
+            )
+            scales.append(update._scalers[None].get_scale())
+        assert scales[-1] < scales[0]
+        assert not torch.equal(model.weight, before)

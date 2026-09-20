@@ -5,12 +5,30 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
+from dataclasses import replace
 from typing import Any
+import torch
+from torch import nn
+from torch.optim import Optimizer
+from torch.optim.optimizer import ParamsT
+from torch.utils.data import Dataset
+from chuchichaestli.data.batch import (
+    BatchType,
+    batch_to_device,
+    samples_in_batch,
+)
 from chuchichaestli.runtime.context import Context
+from chuchichaestli.runtime.data import DataManager
+from chuchichaestli.runtime.objective import CompositeObjective, Criterion
+from chuchichaestli.runtime.update import Step, Updater
 from chuchichaestli.runtime.events import EventType, Progress, Signal
-from chuchichaestli.runtime.traits import Stage
+from chuchichaestli.runtime.traits import Objective, Stage
+from chuchichaestli.training.objective import Loss, Term
+from chuchichaestli.training.optim import OptimSpec, disjoint_params
+from chuchichaestli.training.update import ClipTypes, ReductionTypes, UpdatePolicy
+from chuchichaestli.utils.functools import partialclass
 from chuchichaestli.utils.io import read_state, staged, writer_for
 
 
@@ -25,6 +43,9 @@ __all__ = [
     "Repeat",
     "When",
     "Every",
+    "StageLoop",
+    "Train",
+    "Finetune",
 ]
 
 
@@ -546,3 +567,429 @@ class Every(Phase):
         """
         super().load_state_dict(state)
         self._visits = int(state.get("visits", 0))
+
+
+class StageLoop(ABC):
+    """A stage that repeats a unit of work until it has done enough.
+
+    One `execute` is one unit (for training, one optimizer step over
+    `accumulate` micro-batches).
+
+    Attributes:
+        name: Identifies the stage within its parent.
+        data: What the loop draws batches from, or the name of a binding.
+        batch_size: Samples one forward sees, for a bare dataset.
+        epochs: Passes over the data to make, or `None`.
+        steps: Units of work to perform, or `None`.
+        accumulate: Micro-batches consumed per unit.
+        requires: Binding names that must resolve before the run starts.
+        provides: Binding names this stage publishes.
+    """
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        data: DataManager | Dataset | str | None = None,
+        batch_size: int | None = None,
+        epochs: int | None = None,
+        steps: int | None = None,
+        accumulate: int = 1,
+        requires: Sequence[str] = (),
+        provides: Sequence[str] = (),
+    ):
+        """Constructor.
+
+        Args:
+            name: Identifies the stage; defaults to the lowercased class name.
+            data: A `DataManager`, a dataset, or the name of a binding.
+            batch_size: Samples one forward sees, for a bare dataset. With
+                `accumulate` it says what a step consumes; a built
+                `DataManager` carries its own.
+            epochs: Passes over the data to make; `None` leaves it to `steps`.
+            steps: Units of work to perform; `None` leaves it to `epochs`.
+            accumulate: Micro-batches consumed per unit of work.
+            requires: Binding names that must resolve before the run starts.
+            provides: Binding names this stage publishes.
+
+        Raises:
+            ValueError: If `accumulate` is not positive.
+        """
+        if accumulate < 1:
+            raise ValueError(f"A step consumes at least one batch, got {accumulate!r}.")
+        self.name = name or type(self).__name__.lower()
+        self.data = data
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.steps = steps
+        self.accumulate = accumulate
+        self.requires = tuple(requires)
+        self.provides = tuple(provides)
+        self._progress = Progress()
+        self._manager: DataManager | None = None
+        self._world_size = 1
+        self._iterator: Iterator[BatchType] | None = None
+
+    def __repr__(self) -> str:
+        """Return a short description of the stage."""
+        return f"{type(self).__name__}({self.name!r})"
+
+    @property
+    def effective_batch(self) -> int | None:
+        """Return the samples one unit of work consumes across every process.
+
+        `None` until the stage is entered, since neither the batch size nor
+        the number of processes is settled before then.
+        """
+        if self._manager is None:
+            return None
+        return self._manager.batch_size * self.accumulate * self._world_size
+
+    @abstractmethod
+    def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
+        """Perform one unit of work.
+
+        Args:
+            batches: The micro-batches making up this unit.
+            ctx: Execution context for this entry.
+        """
+
+    def prepare(self, ctx: Context) -> None:
+        """Build whatever the loop needs, once per entry.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+
+    def enter(self, ctx: Context) -> Signal:
+        """Reset, build what the loop needs, and announce the stage.
+
+        The first `execute` starts the epoch rather than this, so a
+        checkpoint restored after `enter` decides where it begins.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        self._progress = Progress()
+        ctx.progress = self._progress
+        dm_kwargs = {} if self.batch_size is None else {"batch_size": self.batch_size}
+        self._manager = DataManager.from_source(ctx.resolve(self.data), **dm_kwargs)
+        self._world_size = ctx.topology.world_size
+        self._iterator = None
+        self.prepare(ctx)
+        return ctx.emit(EventType.STAGE_BEGAN, stage=type(self).__name__)
+
+    def execute(self, ctx: Context) -> Signal:
+        """Perform one unit of work, looping over epochs as they run out.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        if self._iterator is None:
+            self._draw_sweep(ctx)
+        batches = [batch_to_device(b, ctx.device) for b in self._take()]
+        if not batches:
+            return self._next_sweep(ctx)
+        loss = self.core(batches, ctx)
+        samples = sum(samples_in_batch(batch) for batch in batches)
+        self._progress = self._progress.next_step(samples)
+        ctx.progress = self._progress
+        reported = {} if loss is None else loss.as_floats()
+        signal = ctx.emit(EventType.STEP_ENDED, **reported)
+        if self.steps is not None and self._progress.global_step >= self.steps:
+            self._finish(ctx)
+            return Signal.DONE
+        return signal
+
+    def leave(self, ctx: Context) -> Signal:
+        """Announce that the stage is over.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        self._iterator = None
+        ctx.progress = self._progress
+        ctx.emit(EventType.STAGE_ENDED, stage=type(self).__name__)
+        return Signal.GO
+
+    def progress(self) -> Progress:
+        """Return where the stage currently is in its own work."""
+        return self._progress
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return the stage's resumable state."""
+        return {"progress": self._progress.to_dict()}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore state previously returned by `state_dict`.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+        """
+        self._progress = Progress.from_dict(state.get("progress", {}))
+
+    def _take(self) -> list[BatchType]:
+        """Return the next unit's micro-batches, short at an epoch's end."""
+        batches: list[BatchType] = []
+        for _ in range(self.accumulate):
+            batch = next(self._iterator, None)
+            if batch is None:
+                break
+            batches.append(batch)
+        return batches
+
+    def _draw_sweep(self, ctx: Context) -> None:
+        """Draw the batches one pass over the data will consume.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        self._iterator = self._manager.iter(
+            ctx,
+            epoch=self._progress.epoch,
+            seek=self._progress.step * self.accumulate,
+        )
+        ctx.emit(EventType.EPOCH_BEGAN, epoch=self._progress.epoch)
+
+    def _next_sweep(self, ctx: Context) -> Signal:
+        """Close the finished pass, then start the next one or stop.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        ctx.emit(EventType.EPOCH_ENDED, epoch=self._progress.epoch)
+        self._progress = self._progress.next_epoch()
+        ctx.progress = self._progress
+        done = self.epochs is not None and self._progress.epoch >= self.epochs
+        if done or (self.epochs is None and self.steps is None):
+            self._finish(ctx)
+            return Signal.DONE
+        self._draw_sweep(ctx)
+        return Signal.GO
+
+    def _finish(self, ctx: Context) -> None:
+        """Mark the stage finished.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        self._progress = self._progress.finish()
+        ctx.progress = self._progress
+
+
+class Train(StageLoop):
+    """Updates a model's parameters against an objective.
+
+    Attributes:
+        model: Model, or the name of a binding holding one.
+        objective: What produces the loss, or the terms it sums.
+        optim: The optimizer spec, or one per update group.
+        update: How the optimizers are stepped.
+    """
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        model: nn.Module | str = "model",
+        data: DataManager | Dataset | str | None = None,
+        batch_size: int | None = None,
+        loss: Callable[..., torch.Tensor] | None = None,
+        objective: Objective | Sequence[Term] | str | None = None,
+        optim: OptimSpec | Mapping[str, OptimSpec] | None = None,
+        lr: float | None = None,
+        update: Updater | None = None,
+        epochs: int | None = None,
+        steps: int | None = None,
+        accumulate: int = 1,
+        clip: float | None = None,
+        clip_mode: ClipTypes | None = None,
+        reduction: ReductionTypes | None = None,
+        precision: torch.dtype | None = None,
+        requires: Sequence[str] = (),
+        provides: Sequence[str] = (),
+    ):
+        """Constructor.
+
+        Args:
+            name: Identifies the stage; defaults to the lowercased class name.
+            model: Model, or the name of a binding holding one.
+            data: A `DataManager`, a dataset, or the name of a binding.
+            batch_size: Samples one forward sees, for a bare dataset.
+            loss: Compares the model's output to the batch's target, for the
+                default objective.
+            objective: What produces the loss: an object with `compute`, or a
+                sequence of `Term`s to sum. Overrides `loss`.
+            optim: The optimizer spec, or one per update group.
+            lr: Learning rate, when no `optim` spells one out.
+            update: How the optimizers are stepped; one `Step` by default.
+            epochs: Passes over the data to make.
+            steps: Optimizer steps to take.
+            accumulate: Micro-batches per optimizer step, weighted by their
+                sample counts.
+            clip: Threshold gradients are clipped to, or `None`.
+            clip_mode: Whether `clip` bounds the gradient norm or each value;
+                `"norm"` when absent.
+            reduction: How the objective reduced over its batch; `"mean"`
+                when absent.
+            precision: Precision the forward runs in, or `None` for full precision.
+            requires: Binding names that must resolve before the run starts.
+            provides: Binding names this stage publishes.
+
+        Raises:
+            ValueError: If neither `loss` nor `objective` says what to
+                compute, or an update is given alongside the settings that
+                would configure one.
+        """
+        if loss is None and objective is None:
+            raise ValueError(
+                f"Train({name!r}) has neither a loss nor an objective, so "
+                "there is nothing to minimise."
+            )
+        super().__init__(
+            name,
+            data=data,
+            batch_size=batch_size,
+            epochs=epochs,
+            steps=steps,
+            accumulate=accumulate,
+            requires=requires,
+            provides=provides,
+        )
+        self.model = model
+        self.loss = loss
+        self.objective = objective
+        self.optim = optim
+        self.lr = lr
+        if update is not None:
+            configured = {
+                name
+                for name, value in (
+                    ("clip", clip),
+                    ("clip_mode", clip_mode),
+                    ("reduction", reduction),
+                    ("precision", precision),
+                )
+                if value is not None
+            }
+            if configured:
+                raise ValueError(
+                    f"{sorted(configured)} configure an update, but {update!r} "
+                    "was given and carries its own; set them in one place."
+                )
+        self.policy = UpdatePolicy(
+            clip=clip,
+            clip_mode="norm" if clip_mode is None else clip_mode,
+            reduction="mean" if reduction is None else reduction,
+        )
+        self.precision = precision
+        self.update = update or Step(policy=self.policy, precision=precision)
+        self._objective: Objective | None = None
+
+    def _build_objective(self, ctx: Context) -> Objective:
+        """Return what this stage optimizes.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        if self.objective is None:
+            return Criterion(self.loss, model=self.model)
+        resolved = ctx.resolve(self.objective)
+        if isinstance(resolved, Sequence) and not isinstance(resolved, (str, bytes)):
+            return CompositeObjective(resolved, model=self.model)
+        return resolved
+
+    def prepare(self, ctx: Context) -> None:
+        """Build the objective and bind the optimizers to the update.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        self._objective = self._build_objective(ctx)
+        self.update.balance_ranks = bool(getattr(self._manager, "balance_ranks", False))
+        self.update.bind(self._optimizers(ctx))
+
+    def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
+        """Take one optimizer step over the micro-batches.
+
+        Args:
+            batches: The micro-batches making up this step.
+            ctx: Execution context for this entry.
+        """
+        ctx.clear_cache()
+        return self.update.apply(self._objective, batches, ctx)
+
+    def _params(self, spec: OptimSpec, ctx: Context) -> ParamsT:
+        """Return the trainable parameters an optimizer spec selects.
+
+        Frozen parameters are left out, so an optimizer never holds state for
+        weights it cannot move.
+
+        Args:
+            spec: Says which bindings the optimizer owns.
+            ctx: Execution context for this entry.
+
+        Raises:
+            ValueError: If nothing it selects can be trained.
+        """
+        chosen = spec.params if spec.params is not None else self.model
+        if isinstance(chosen, nn.Module):
+            found = list(chosen.parameters())
+        elif callable(chosen) and not isinstance(chosen, str):
+            found = list(chosen(ctx))
+        else:
+            names = [chosen] if isinstance(chosen, str) else list(chosen)
+            found = [p for name in names for p in ctx.resolve(name).parameters()]
+        params = [p for p in found if p.requires_grad]
+        if not params:
+            raise ValueError(
+                f"Train({self.name!r}) selects {len(found)} parameter(s), none "
+                "of them trainable; a frozen model has nothing to optimise."
+            )
+        return params
+
+    def _optimizers(self, ctx: Context) -> dict[str | None, Optimizer]:
+        """Build one optimizer per update group.
+
+        Args:
+            ctx: Execution context for this entry.
+
+        Raises:
+            ValueError: If the optimizers do not cover the update's groups.
+        """
+        groups = self.update.groups()
+        if not isinstance(self.optim, Mapping):
+            spec = self.optim or OptimSpec.adamw(lr=self.lr if self.lr else 1e-4)
+            if self.lr is not None and self.optim is not None:
+                spec = replace(spec, lr=self.lr)
+            return {group: spec.build(self._params(spec, ctx)) for group in groups}
+        missing = sorted(str(g) for g in groups if g not in self.optim)
+        if missing:
+            raise ValueError(
+                f"Train({self.name!r}) has no optimizer for groups {missing}; "
+                f"it was given {sorted(self.optim)}."
+            )
+        selected = {group: self._params(self.optim[group], ctx) for group in groups}
+        disjoint = disjoint_params(selected)
+        return {group: self.optim[group].build(disjoint[group]) for group in groups}
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return the stage's resumable state."""
+        return {**super().state_dict(), **self.update.state_dict()}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore state previously returned by `state_dict`.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+        """
+        super().load_state_dict(state)
+        self.update.load_state_dict(state)
+
+
+Finetune = partialclass(
+    "Finetune",
+    Train,
+    lr=1e-5,
+    __doc__="A `Train` preset that refines an already-trained model gently.",
+)

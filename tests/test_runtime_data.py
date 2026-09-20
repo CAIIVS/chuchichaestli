@@ -67,7 +67,7 @@ def drawn(stream: DataManager, context: Context, epoch: int = 0, seek: int = 0):
         epoch: Which pass over the dataset.
         seek: Batches to skip.
     """
-    return [batch.tolist() for batch in stream.open(context, epoch, seek)]
+    return [batch.tolist() for batch in stream.iter(context, epoch, seek)]
 
 
 def test_the_same_seed_gives_the_same_order():
@@ -254,7 +254,7 @@ def test_the_loader_options_reach_the_loader():
         persistent_workers=True,
         multiprocessing_context="spawn",
     )
-    assert [batch.tolist() for batch in stream.open(ctx())] == drawn(
+    assert [batch.tolist() for batch in stream.iter(ctx())] == drawn(
         DataManager(Counting(12), batch_size=3), ctx()
     )
 

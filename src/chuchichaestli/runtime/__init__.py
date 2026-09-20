@@ -48,6 +48,9 @@ from chuchichaestli.runtime.serialize import (
     writable_spec,
 )
 from chuchichaestli.runtime.stages import (
+    Finetune,
+    StageLoop,
+    Train,
     Barrier,
     Call,
     Every,
@@ -133,6 +136,9 @@ __all__ = [
     "needs_store",
     "Topology",
     "Local",
+    "StageLoop",
+    "Train",
+    "Finetune",
     "Objective",
     "Update",
     "Criterion",
