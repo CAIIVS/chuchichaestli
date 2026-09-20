@@ -36,6 +36,15 @@ class Loss:
         total, parts = float(self.total), sorted(self.parts)
         return f"Loss({total=:.4g}, {parts=})"
 
+    def as_floats(self) -> dict[str, float]:
+        """Return the total and its parts as plain numbers.
+
+        Keyed `"loss"` for the total, and by term name for the rest.
+        """
+        values = {"loss": float(self.total.detach())}
+        values.update({name: float(v.detach()) for name, v in self.parts.items()})
+        return values
+
     @classmethod
     def merge(cls, results: Mapping[str | None, Loss]) -> Loss:
         """Return one loss from several, keeping each source's parts apart.

@@ -211,3 +211,16 @@ def test_merging_one_unnamed_loss_leaves_its_parts_alone():
 def test_merging_nothing_gives_a_zero_loss():
     """An empty merge is a zero total, not a crash."""
     assert float(Loss.merge({}).total) == 0.0
+
+
+def test_a_loss_flattens_to_plain_numbers():
+    """The total keys as `loss`, the parts by their term names."""
+    loss = Loss(torch.tensor(3.0), {"rec": torch.tensor(1.0), "kl": torch.tensor(2.0)})
+    assert loss.as_floats() == {"loss": 3.0, "rec": 1.0, "kl": 2.0}
+
+
+def test_flattening_detaches_a_graph_bound_loss():
+    """A loss still attached to a graph converts without complaint."""
+    weight = torch.ones(1, requires_grad=True)
+    flattened = Loss((weight * 2).sum(), {"rec": (weight * 3).sum()}).as_floats()
+    assert flattened == {"loss": 2.0, "rec": 3.0}
