@@ -921,10 +921,15 @@ class Train(StageLoop):
     def prepare(self, ctx: Context) -> None:
         """Build the objective and bind the optimizers to the update.
 
+        The objective is placed on the device here rather than by the
+        runtime, since it is built per entry and belongs to this stage alone.
+
         Args:
             ctx: Execution context for this entry.
         """
         self._objective = self._build_objective(ctx)
+        if isinstance(self._objective, nn.Module):
+            self._objective.to(ctx.device)
         self.update.balance_ranks = bool(getattr(self._manager, "balance_ranks", False))
         self.update.bind(self._optimizers(ctx))
         self._averaged = self._build_ema(ctx)
