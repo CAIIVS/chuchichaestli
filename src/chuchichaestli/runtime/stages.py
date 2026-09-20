@@ -1281,12 +1281,12 @@ class Predict(Inference):
         model = self.resolved_model(ctx)
         with torch.inference_mode():
             for batch in batches:
-                produced = model(input_in_batch(batch, self.inputs))
-                produced = produced.detach().cpu().clone()
+                y = model(input_in_batch(batch, self.inputs))
+                y = y.detach().cpu().clone()
                 if self._writer is not None:
-                    self._writer.write(produced)
+                    self._writer.write(y)
                 elif self.archive is None:
-                    self._predictions.append(produced)
+                    self._predictions.append(y)
         return None
 
     def leave(self, ctx: Context) -> Signal:
@@ -1301,7 +1301,7 @@ class Predict(Inference):
         if self.archive is not None:
             ctx.publish(f"{self.name}/archive", self.archive)
         else:
-            produced = self.predictions
-            if produced is not None:
-                ctx.publish(f"{self.name}/predictions", produced)
+            y = self.predictions
+            if y is not None:
+                ctx.publish(f"{self.name}/predictions", y)
         return super().leave(ctx)
