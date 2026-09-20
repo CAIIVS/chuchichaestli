@@ -17,6 +17,13 @@ from chuchichaestli.data.safetensors import SafetensorsDataset, ZipSafetensorsDa
 from chuchichaestli.data.image import ImageDataset, ZipImageDataset
 from chuchichaestli.data.save import save_dataset
 from chuchichaestli.data.split import split_dataset
+from chuchichaestli.data.archive import (
+    ARCHIVES,
+    Archive,
+    BufferedArchive,
+    Hdf5Archive,
+    archive_for,
+)
 from chuchichaestli.data.batch import (
     BatchType,
     batch_to_device,
@@ -96,6 +103,11 @@ __all__ = [
     "ZipImageDataset",
     "save_dataset",
     "split_dataset",
+    "ARCHIVES",
+    "Archive",
+    "BufferedArchive",
+    "Hdf5Archive",
+    "archive_for",
     "BatchType",
     "batch_to_device",
     "input_in_batch",
