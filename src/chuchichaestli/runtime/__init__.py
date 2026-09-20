@@ -26,6 +26,8 @@ from chuchichaestli.runtime.events import (
 from chuchichaestli.runtime.hooks import (
     CHECKPOINT_UNIT_MAP,
     Cancel,
+    ModeTypes,
+    ThresholdModeTypes,
     Checkpointer,
     CheckpointUnitTypes,
     Console,
@@ -120,6 +122,8 @@ __all__ = [
     "CheckpointStore",
     "CheckpointFormats",
     "CheckpointUnitTypes",
+    "ModeTypes",
+    "ThresholdModeTypes",
     "CHECKPOINT_UNIT_MAP",
     "C3liCheckpointError",
     "unpack_tree",
