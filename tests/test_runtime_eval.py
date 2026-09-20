@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the stages that read a model without changing it."""
 
+import h5py
+import numpy as np
 import pytest
 import torch
 from torch import nn
@@ -141,16 +143,50 @@ def test_predict_collects_every_output():
     assert tuple(stage.predictions.shape) == (8, 1)
 
 
-def test_predict_writes_its_archive(tmp_path):
-    """The suffix picks the format, through the repo's own saver.
+def test_predict_streams_to_an_appendable_archive(tmp_path):
+    """Batches reach the file as they are produced, not at the end.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    archive = tmp_path / "out.h5"
+    stage = Predict("out", model=linear(), data=ramp(8), batch_size=4, archive=archive)
+    Runtime(stage, hooks=(), device="cpu").run()
+    with h5py.File(archive) as handle:
+        assert handle["data"].shape == (8, 1)
+    assert stage.predictions is None
+
+
+def test_predict_still_writes_a_format_it_cannot_append_to(tmp_path):
+    """The fallback buffers, and says so.
 
     Args:
         tmp_path: Directory pytest gives the test.
     """
     archive = tmp_path / "out.npy"
     stage = Predict("out", model=linear(), data=ramp(8), batch_size=4, archive=archive)
-    Runtime(stage, hooks=(), device="cpu").run()
-    assert archive.exists()
+    with pytest.warns(UserWarning, match="cannot be appended to"):
+        Runtime(stage, hooks=(), device="cpu").run()
+    assert np.load(archive).shape == (8, 1)
+
+
+def test_predict_publishes_the_archive_it_wrote(tmp_path):
+    """A later sibling learns where the predictions went.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    seen: dict[str, object] = {}
+    archive = tmp_path / "out.h5"
+    program = Program(
+        provide={"model": linear()},
+        stages=[
+            Predict("out", data=ramp(8), batch_size=4, archive=archive),
+            Call("read", fn=lambda ctx: seen.update(p=ctx["out/archive"])),
+        ],
+    )
+    Runtime(program, hooks=(), device="cpu").run()
+    assert seen["p"] == archive
 
 
 def test_predict_publishes_what_it_produced():

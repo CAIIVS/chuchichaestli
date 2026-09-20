@@ -4,6 +4,7 @@
 """The stage register: blocks that run once, and phases that hold stages."""
 
 from __future__ import annotations
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
@@ -14,6 +15,7 @@ from torch import nn
 from torch.optim import Optimizer
 from torch.optim.optimizer import ParamsT
 from torch.utils.data import Dataset
+from chuchichaestli.data.archive import Archive, archive_for
 from chuchichaestli.data.batch import (
     BatchType,
     input_in_batch,
@@ -36,7 +38,6 @@ from chuchichaestli.training.update import (
     UpdatePolicy,
 )
 from chuchichaestli.utils.functools import partialclass
-from chuchichaestli.data.save import save_dataset
 from chuchichaestli.utils.io import read_state, staged, writer_for
 from chuchichaestli.utils.registry import require
 
@@ -1207,9 +1208,13 @@ class Eval(Inference):
 class Predict(Inference):
     """Runs a model over a pass and writes what it produced.
 
+    Given an `archive` the predictions stream to it and are not kept; without
+    one they are kept in memory and published for later siblings.
+
     Attributes:
-        archive: File the predictions are written to, or `None` to keep
-            them in memory only.
+        archive: File the predictions are written to, or `None` to keep them
+            in memory only.
+        key: Name the predictions are stored under.
     """
 
     def __init__(
@@ -1226,31 +1231,43 @@ class Predict(Inference):
             name: Identifies the stage; defaults to the lowercased class name.
             archive: File the predictions are written to; its suffix picks the
                 format. Kept in memory when absent.
-            key: Name the predictions are stored under, for formats that key.
+            key: Name the predictions are stored under, for formats that name.
             kwargs: Passed to `Inference`.
         """
         super().__init__(name, **kwargs)
         self.archive = Path(archive) if archive is not None else None
         self.key = key
+        self._writer: Archive | None = None
         self._predictions: list[torch.Tensor] = []
 
     def prepare(self, ctx: Context) -> None:
-        """Drop anything kept from an earlier entry.
+        """Open the archive, or clear what an earlier entry kept.
 
         Args:
             ctx: Execution context for this entry.
         """
         self._predictions = []
+        self._writer = None
+        if self.archive is None:
+            return
+        if ctx.topology.world_size > 1:
+            warnings.warn(
+                f"Predict({self.name!r}) writes only what rank 0 produced; "
+                "the other processes hold the rest.",
+                stacklevel=2,
+            )
+        if ctx.topology.is_main:
+            self._writer = archive_for(self.archive, self.key)
 
     @property
     def predictions(self) -> torch.Tensor | None:
-        """Return what the stage produced, or `None` before it has run."""
+        """Return what the stage kept, or `None` when it streamed instead."""
         if not self._predictions:
             return None
         return torch.cat(self._predictions)
 
     def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
-        """Run the model and keep what it produced.
+        """Run the model, writing or keeping what it produced.
 
         Args:
             batches: The micro-batches making up this unit.
@@ -1259,19 +1276,27 @@ class Predict(Inference):
         model = self.resolved_model(ctx)
         with torch.inference_mode():
             for batch in batches:
-                prediction = model(input_in_batch(batch, self.inputs))
-                self._predictions.append(prediction.detach().cpu().clone())
+                produced = model(input_in_batch(batch, self.inputs))
+                produced = produced.detach().cpu().clone()
+                if self._writer is not None:
+                    self._writer.write(produced)
+                elif self.archive is None:
+                    self._predictions.append(produced)
         return None
 
     def leave(self, ctx: Context) -> Signal:
-        """Write the predictions out, and publish them for later siblings.
+        """Finish the archive, or publish what was kept.
 
         Args:
             ctx: Execution context for this entry.
         """
-        produced = self.predictions
-        if produced is not None:
-            if self.archive is not None and ctx.topology.is_main:
-                save_dataset(self.archive, produced, key=self.key)
-            ctx.publish(f"{self.name}/predictions", produced)
+        if self._writer is not None:
+            self._writer.close()
+            self._writer = None
+        if self.archive is not None:
+            ctx.publish(f"{self.name}/archive", self.archive)
+        else:
+            produced = self.predictions
+            if produced is not None:
+                ctx.publish(f"{self.name}/predictions", produced)
         return super().leave(ctx)
