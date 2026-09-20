@@ -16,20 +16,29 @@ from torch.optim.optimizer import ParamsT
 from torch.utils.data import Dataset
 from chuchichaestli.data.batch import (
     BatchType,
+    input_in_batch,
+    unpack_batch,
     batch_to_device,
     samples_in_batch,
 )
 from chuchichaestli.runtime.context import Context
 from chuchichaestli.runtime.data import DataManager
 from chuchichaestli.runtime.objective import CompositeObjective, Criterion
-from chuchichaestli.runtime.update import Step, Updater
+from chuchichaestli.runtime.update import Step, Updater, WeightsTypes
 from chuchichaestli.runtime.events import EventType, Progress, Signal
-from chuchichaestli.runtime.traits import Objective, Stage
+from chuchichaestli.runtime.traits import Objective, Stage, Stateful
 from chuchichaestli.training.objective import Loss, Term
 from chuchichaestli.training.optim import OptimSpec, disjoint_params
-from chuchichaestli.training.update import ClipTypes, ReductionTypes, UpdatePolicy
+from chuchichaestli.training.update import (
+    ClipTypes,
+    Ema,
+    ReductionTypes,
+    UpdatePolicy,
+)
 from chuchichaestli.utils.functools import partialclass
+from chuchichaestli.data.save import save_dataset
 from chuchichaestli.utils.io import read_state, staged, writer_for
+from chuchichaestli.utils.registry import require
 
 
 __all__ = [
@@ -46,6 +55,9 @@ __all__ = [
     "StageLoop",
     "Train",
     "Finetune",
+    "Inference",
+    "Eval",
+    "Predict",
 ]
 
 
@@ -799,6 +811,7 @@ class Train(StageLoop):
         optim: OptimSpec | Mapping[str, OptimSpec] | None = None,
         lr: float | None = None,
         update: Updater | None = None,
+        ema: float | Ema | None = None,
         epochs: int | None = None,
         steps: int | None = None,
         accumulate: int = 1,
@@ -823,6 +836,9 @@ class Train(StageLoop):
             optim: The optimizer spec, or one per update group.
             lr: Learning rate, when no `optim` spells one out.
             update: How the optimizers are stepped; one `Step` by default.
+            ema: Decay of an exponential moving average of the model,
+                or a built one. Published as `"<model>/ema"` for later
+                stages to evaluate or predict with.
             epochs: Passes over the data to make.
             steps: Optimizer steps to take.
             accumulate: Micro-batches per optimizer step, weighted by their
@@ -884,6 +900,8 @@ class Train(StageLoop):
         )
         self.precision = precision
         self.update = update or Step(policy=self.policy, precision=precision)
+        self.ema = ema
+        self._averaged: Ema | None = None
         self._objective: Objective | None = None
 
     def _build_objective(self, ctx: Context) -> Objective:
@@ -908,6 +926,7 @@ class Train(StageLoop):
         self._objective = self._build_objective(ctx)
         self.update.balance_ranks = bool(getattr(self._manager, "balance_ranks", False))
         self.update.bind(self._optimizers(ctx))
+        self._averaged = self._build_ema(ctx)
 
     def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
         """Take one optimizer step over the micro-batches.
@@ -917,7 +936,24 @@ class Train(StageLoop):
             ctx: Execution context for this entry.
         """
         ctx.clear_cache()
-        return self.update.apply(self._objective, batches, ctx)
+        loss = self.update.apply(self._objective, batches, ctx)
+        if self._averaged is not None:
+            self._averaged.update_parameters(ctx.resolve(self.model))
+        return loss
+
+    def _build_ema(self, ctx: Context) -> Ema | None:
+        """Build the moving average this stage keeps, and publish it.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        if self.ema is None:
+            return None
+        model = ctx.resolve(self.model)
+        averaged = self.ema if isinstance(self.ema, Ema) else Ema(model, self.ema)
+        target = self.model if isinstance(self.model, str) else "model"
+        ctx.publish(f"{target}/ema", averaged)
+        return averaged
 
     def _params(self, spec: OptimSpec, ctx: Context) -> ParamsT:
         """Return the trainable parameters an optimizer spec selects.
@@ -975,7 +1011,10 @@ class Train(StageLoop):
 
     def state_dict(self) -> dict[str, Any]:
         """Return the stage's resumable state."""
-        return {**super().state_dict(), **self.update.state_dict()}
+        state = {**super().state_dict(), **self.update.state_dict()}
+        if self._averaged is not None:
+            state["ema"] = self._averaged.state_dict()
+        return state
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         """Restore state previously returned by `state_dict`.
@@ -985,6 +1024,8 @@ class Train(StageLoop):
         """
         super().load_state_dict(state)
         self.update.load_state_dict(state)
+        if self._averaged is not None and "ema" in state:
+            self._averaged.load_state_dict(state["ema"])
 
 
 Finetune = partialclass(
@@ -993,3 +1034,244 @@ Finetune = partialclass(
     lr=1e-5,
     __doc__="A `Train` preset that refines an already-trained model gently.",
 )
+
+
+class Inference(StageLoop):
+    """A loop that reads a model without changing it.
+
+    Attributes:
+        model: Model, or the name of a binding holding one.
+        weights: Which parameters to read: `"model"` or `"ema"`.
+        inputs: Key the model's input is read from.
+    """
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        model: nn.Module | str = "model",
+        data: DataManager | Dataset | str | None = None,
+        batch_size: int | None = None,
+        weights: WeightsTypes = "model",
+        inputs: str = "x",
+        epochs: int | None = None,
+        steps: int | None = None,
+        requires: Sequence[str] = (),
+        provides: Sequence[str] = (),
+    ):
+        """Constructor.
+
+        Args:
+            name: Identifies the stage; defaults to the lowercased class name.
+            model: Model, or the name of a binding holding one.
+            data: A `DataManager`, a dataset, or the name of a binding.
+            batch_size: Samples one forward sees, for a bare dataset.
+            weights: Which parameters to read: the model's own, or the moving
+                average a `Train` published beside it.
+            inputs: Key the model's input is read from, for mapping batches.
+            epochs: Passes over the data; one when absent.
+            steps: Units of work; the whole pass when absent.
+            requires: Binding names that must resolve before the run starts.
+            provides: Binding names this stage publishes.
+
+        Raises:
+            ValueError: If `weights` names neither.
+        """
+        require(weights, ("model", "ema"), "weights")
+        super().__init__(
+            name,
+            data=data,
+            batch_size=batch_size,
+            epochs=epochs,
+            steps=steps,
+            requires=requires,
+            provides=provides,
+        )
+        self.model = model
+        self.weights = weights
+        self.inputs = inputs
+
+    def resolved_model(self, ctx: Context) -> nn.Module:
+        """Return the module whose parameters this stage reads.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        if self.weights == "model":
+            return ctx.resolve(self.model)
+        target = self.model if isinstance(self.model, str) else "model"
+        return ctx[f"{target}/ema"]
+
+
+class Eval(Inference):
+    """Accumulates metrics over a pass, publishing each when it ends.
+
+    Attributes:
+        metrics: What to accumulate, keyed by the name each publishes under.
+        targets: Key the target is read from.
+    """
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        metrics: Sequence[Any] | Mapping[str, Any] = (),
+        targets: str = "y",
+        **kwargs: Any,
+    ):
+        """Constructor.
+
+        Args:
+            name: Identifies the stage; defaults to the lowercased class name.
+            metrics: What to accumulate, either named or keyed by their own
+                lowercased class names.
+            targets: Key the target is read from, for mapping batches.
+            kwargs: Passed to `Inference`.
+
+        Raises:
+            ValueError: If no metric was given.
+        """
+        super().__init__(name, **kwargs)
+        self.metrics = (
+            dict(metrics)
+            if isinstance(metrics, Mapping)
+            else {type(m).__name__.lower(): m for m in metrics}
+        )
+        if not self.metrics:
+            raise ValueError(f"Eval({self.name!r}) was given no metric to compute.")
+        self.targets = targets
+
+    def prepare(self, ctx: Context) -> None:
+        """Move the metrics to the device and clear what they hold.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        for metric in self.metrics.values():
+            metric.to(ctx.device)
+            metric.reset()
+
+    def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
+        """Update every metric from the batches, changing nothing.
+
+        Args:
+            batches: The micro-batches making up this unit.
+            ctx: Execution context for this entry.
+        """
+        model = self.resolved_model(ctx)
+        with torch.inference_mode():
+            for batch in batches:
+                inputs, targets = unpack_batch(
+                    batch, self.inputs, self.targets, reader=type(self).__name__
+                )
+                prediction = model(inputs)
+                for metric in self.metrics.values():
+                    metric.update(prediction, targets)
+        return None
+
+    def leave(self, ctx: Context) -> Signal:
+        """Publish what each metric computed, for later siblings to read.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        for key, metric in self.metrics.items():
+            value = metric.compute()
+            if value is not None:
+                ctx.publish(f"{self.name}/{key}", float(value))
+        return super().leave(ctx)
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return the stage's resumable state, metrics included."""
+        state = super().state_dict()
+        state["metrics"] = {
+            key: metric.state_dict()
+            for key, metric in self.metrics.items()
+            if isinstance(metric, Stateful)
+        }
+        return state
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore state previously returned by `state_dict`.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+        """
+        super().load_state_dict(state)
+        for key, saved in state.get("metrics", {}).items():
+            metric = self.metrics.get(key)
+            if isinstance(metric, Stateful):
+                metric.load_state_dict(saved)
+
+
+class Predict(Inference):
+    """Runs a model over a pass and writes what it produced.
+
+    Attributes:
+        archive: File the predictions are written to, or `None` to keep
+            them in memory only.
+    """
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        archive: str | Path | None = None,
+        key: str = "data",
+        **kwargs: Any,
+    ):
+        """Constructor.
+
+        Args:
+            name: Identifies the stage; defaults to the lowercased class name.
+            archive: File the predictions are written to; its suffix picks the
+                format. Kept in memory when absent.
+            key: Name the predictions are stored under, for formats that key.
+            kwargs: Passed to `Inference`.
+        """
+        super().__init__(name, **kwargs)
+        self.archive = Path(archive) if archive is not None else None
+        self.key = key
+        self._predictions: list[torch.Tensor] = []
+
+    def prepare(self, ctx: Context) -> None:
+        """Drop anything kept from an earlier entry.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        self._predictions = []
+
+    @property
+    def predictions(self) -> torch.Tensor | None:
+        """Return what the stage produced, or `None` before it has run."""
+        if not self._predictions:
+            return None
+        return torch.cat(self._predictions)
+
+    def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
+        """Run the model and keep what it produced.
+
+        Args:
+            batches: The micro-batches making up this unit.
+            ctx: Execution context for this entry.
+        """
+        model = self.resolved_model(ctx)
+        with torch.inference_mode():
+            for batch in batches:
+                prediction = model(input_in_batch(batch, self.inputs))
+                self._predictions.append(prediction.detach().cpu().clone())
+        return None
+
+    def leave(self, ctx: Context) -> Signal:
+        """Write the predictions out, and publish them for later siblings.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        produced = self.predictions
+        if produced is not None:
+            if self.archive is not None and ctx.topology.is_main:
+                save_dataset(self.archive, produced, key=self.key)
+            ctx.publish(f"{self.name}/predictions", produced)
+        return super().leave(ctx)

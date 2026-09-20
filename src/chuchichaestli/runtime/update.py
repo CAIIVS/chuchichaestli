@@ -7,7 +7,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 import torch
 from torch import nn
 from torch.optim import Optimizer
@@ -22,11 +22,15 @@ from chuchichaestli.training.update import UpdatePolicy
 
 
 __all__ = [
+    "WeightsTypes",
     "Updater",
     "Step",
     "Alternating",
     "Simultaneous",
 ]
+
+
+WeightsTypes = Literal["model", "ema"]
 
 
 class Updater(ABC):

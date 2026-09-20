@@ -50,7 +50,10 @@ from chuchichaestli.runtime.serialize import (
     writable_spec,
 )
 from chuchichaestli.runtime.stages import (
+    Eval,
     Finetune,
+    Inference,
+    Predict,
     StageLoop,
     Train,
     Barrier,
@@ -66,6 +69,7 @@ from chuchichaestli.runtime.stages import (
 )
 from chuchichaestli.runtime.topology import Local
 from chuchichaestli.runtime.update import (
+    WeightsTypes,
     Alternating,
     Simultaneous,
     Step,
@@ -124,6 +128,7 @@ __all__ = [
     "CheckpointUnitTypes",
     "ModeTypes",
     "ThresholdModeTypes",
+    "WeightsTypes",
     "CHECKPOINT_UNIT_MAP",
     "C3liCheckpointError",
     "unpack_tree",
@@ -143,6 +148,9 @@ __all__ = [
     "StageLoop",
     "Train",
     "Finetune",
+    "Inference",
+    "Eval",
+    "Predict",
     "Objective",
     "Update",
     "Criterion",
