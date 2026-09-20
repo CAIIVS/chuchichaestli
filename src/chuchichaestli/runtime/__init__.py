@@ -14,7 +14,20 @@ from chuchichaestli.runtime.ckpt import (
 )
 from chuchichaestli.runtime.context import Context, C3liContextError
 from chuchichaestli.runtime.data import C3liDataError, DataManager
-from chuchichaestli.runtime.objective import CompositeObjective, Criterion
+from chuchichaestli.runtime.objective import (
+    KL,
+    Adversarial,
+    CompositeObjective,
+    Computes,
+    Criterion,
+    Diffusion,
+    DiscriminatorAdv,
+    GeneratorAdv,
+    Perceptual,
+    ModelCriterion,
+    Output,
+    Reconstruction,
+)
 from chuchichaestli.runtime.events import (
     C3liRuntimeError,
     Event,
@@ -76,6 +89,7 @@ from chuchichaestli.runtime.update import (
     Updater,
 )
 from chuchichaestli.runtime.traits import (
+    DiffusionLike,
     CriticalHook,
     Hook,
     Objective,
@@ -143,6 +157,7 @@ __all__ = [
     "RunAwareHook",
     "is_critical",
     "needs_store",
+    "DiffusionLike",
     "Topology",
     "Local",
     "StageLoop",
@@ -153,8 +168,18 @@ __all__ = [
     "Predict",
     "Objective",
     "Update",
+    "Computes",
     "Criterion",
     "CompositeObjective",
+    "ModelCriterion",
+    "Output",
+    "Reconstruction",
+    "Perceptual",
+    "KL",
+    "Adversarial",
+    "GeneratorAdv",
+    "DiscriminatorAdv",
+    "Diffusion",
     "Updater",
     "Step",
     "Alternating",

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 __all__ = [
     "Stateful",
     "Stage",
+    "DiffusionLike",
     "Objective",
     "Update",
     "Hook",
@@ -124,6 +125,27 @@ class Update(Protocol):
             batches: The micro-batches making up this step, materialized so a
                 multi-group update can replay them per group.
             ctx: Execution context for the stage.
+        """
+        ...
+
+
+@runtime_checkable
+class DiffusionLike(Protocol):
+    """Interface a denoising objective expects of a diffusion process.
+
+    Any object supplying the forward noising step can be passed; inheriting
+    from `DiffusionProcess` is not required.
+    """
+
+    def noise_step(
+        self, x_t: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return a noised sample, the noise that made it, and the timesteps.
+
+        Args:
+            x_t: Clean samples to noise.
+            args: Further arguments the process takes.
+            kwargs: Further keyword arguments the process takes.
         """
         ...
 
