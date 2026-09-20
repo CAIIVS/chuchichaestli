@@ -6,60 +6,7 @@
 import torch
 
 
-__all__ = ["EvalMetric", "sanitize_ndim", "as_tri_channel", "as_batched_slices"]
-
-
-def sanitize_ndim(x: torch.Tensor, check_2D: bool = True, check_3D: bool = False):
-    """Standardize image dimensionality to (B, C, W, H)."""
-    if x.ndim == 3:
-        x = x.unsqueeze(0)
-    if x.ndim == 2:
-        x = x.unsqueeze(0).unsqueeze(0)
-    if check_2D and check_3D and (x.ndim != 4 and x.ndim != 5):
-        raise ValueError(
-            f"Require input of shape {'(C, W, H) or (B, C, W, H)' if check_2D else ''}"
-            f"{' or (B, C, W, H, D)' if check_3D else ''}."
-        )
-    elif check_3D and not check_2D and x.ndim != 5:
-        raise ValueError("Require input of shape (B, C, W, H, D).")
-    elif check_2D and not check_3D and x.ndim != 4:
-        raise ValueError("Require input of shape (C, W, H) or (B, C, W, H).")
-    return x
-
-
-def as_tri_channel(x: torch.Tensor):
-    """Morph input to resemble a three-channel image."""
-    if x.shape[1] == 1:
-        x = x.repeat(1, 3, 1, 1)
-    elif x.shape[1] < 3:
-        x = x[:, 0:1, :, :].repeat(1, 3, 1, 1)
-    if x.shape[1] > 3:
-        raise ValueError(f"Input has more than three channels ({x.shape[1]})!")
-    return x
-
-
-def as_batched_slices(x: torch.Tensor, sample: int = 0) -> torch.Tensor:
-    """Convert batches of volumetric 5D tensors into 4D slice-wise image tensors.
-
-    Args:
-        x: Volumetric 5D input tensor.
-        sample: If `> 0`, the volume depth is sampled `sample` times from the centre.
-    """
-    if x.ndim == 5:
-        B, C, W, H, D = x.shape
-        if sample > 0:
-            sample = min(sample, D)
-            center = D // 2
-            window = sample // 2
-            start = center - window
-            end = start + sample
-            if sample % 2 == 0:
-                start = center - window
-                end = center + window
-            x = x[..., start:end]
-            D = sample
-        x = x.permute(0, 4, 1, 2, 3).contiguous().view(B * D, C, W, H)
-    return x
+__all__ = ["EvalMetric"]
 
 
 class EvalMetric:

@@ -9,11 +9,11 @@ import torch
 from torch.nn import Module
 from torch.nn.functional import interpolate
 from torchvision import models as tv
-from chuchichaestli.metrics.base import (
-    EvalMetric,
-    sanitize_ndim,
-    as_tri_channel,
+from chuchichaestli.metrics.base import EvalMetric
+from chuchichaestli.utils.tensors import (
     as_batched_slices,
+    as_tri_channel,
+    sanitize_ndim,
 )
 
 

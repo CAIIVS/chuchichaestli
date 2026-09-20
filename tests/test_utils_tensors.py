@@ -8,7 +8,10 @@ import pytest
 import torch
 from chuchichaestli.utils.tensors import (
     as_array,
+    as_batched_slices,
+    as_tri_channel,
     npy_to_torch_dtype,
+    sanitize_ndim,
     torch_to_npy_dtype,
 )
 
@@ -115,8 +118,15 @@ class TestTorchToNpyDtype:
 
     @pytest.mark.parametrize(
         "dtype",
-        [torch.bool, torch.uint8, torch.int16, torch.int64, torch.float32,
-         torch.float64, torch.complex128],
+        [
+            torch.bool,
+            torch.uint8,
+            torch.int16,
+            torch.int64,
+            torch.float32,
+            torch.float64,
+            torch.complex128,
+        ],
     )
     def test_round_trips(self, dtype):
         """The two directions are inverses wherever both dtypes exist."""
@@ -132,3 +142,78 @@ class TestTorchToNpyDtype:
         """A dtype numpy has no counterpart for fails loudly, not silently."""
         with pytest.raises(TypeError):
             torch_to_npy_dtype(torch.bfloat16)
+
+
+class TestSanitizeNdim:
+    """Unit tests for sanitize_ndim."""
+
+    @pytest.mark.parametrize(
+        "x",
+        [
+            torch.rand((10, 10)),
+            torch.rand((1, 10, 10)),
+            torch.rand((1, 1, 10, 10)),
+        ],
+    )
+    def test_standardises_to_four_dimensions(self, x):
+        """Two, three and four dimensional input all come out as (B, C, W, H).
+
+        Args:
+            x: The input tensor under test.
+        """
+        assert sanitize_ndim(x).shape == (1, 1, 10, 10)
+
+    def test_refuses_five_dimensions(self):
+        """A volume is not an image, so it is rejected."""
+        with pytest.raises(ValueError):
+            sanitize_ndim(torch.rand((1, 1, 10, 10, 10)))
+
+    def test_refuses_six_dimensions_when_volumes_are_allowed(self):
+        """Even allowing volumes, six dimensions names nothing."""
+        with pytest.raises(ValueError):
+            sanitize_ndim(
+                torch.rand((1, 1, 10, 10, 10, 1)), check_2D=True, check_3D=True
+            )
+
+    def test_refuses_an_image_when_only_volumes_are_allowed(self):
+        """Asking for a volume and giving an image is an error."""
+        with pytest.raises(ValueError):
+            sanitize_ndim(torch.rand((1, 1, 10, 10)), check_2D=False, check_3D=True)
+
+
+class TestAsTriChannel:
+    """Unit tests for as_tri_channel."""
+
+    @pytest.mark.parametrize("channel", [1, 2, 3])
+    def test_fills_up_to_three_channels(self, channel):
+        """Fewer channels than three are repeated up to three.
+
+        Args:
+            channel: How many channels the input carries.
+        """
+        assert as_tri_channel(torch.rand((1, channel, 10, 10))).shape == (1, 3, 10, 10)
+
+    def test_refuses_more_than_three_channels(self):
+        """There is no way to reduce four channels to three."""
+        with pytest.raises(ValueError):
+            as_tri_channel(torch.rand((1, 4, 10, 10)))
+
+
+class TestAsBatchedSlices:
+    """Unit tests for as_batched_slices."""
+
+    @pytest.mark.parametrize("sample", [0, 1, 3, 4, 8])
+    def test_slices_a_volume_into_images(self, sample):
+        """Every slice becomes its own image, or `sample` of them do.
+
+        Args:
+            sample: How many slices to take from the centre, or all of them.
+        """
+        sliced = as_batched_slices(torch.rand((2, 1, 8, 8, 4)), sample=sample)
+        target = 2 * 4 if sample == 0 else 2 * min(sample, 4)
+        assert sliced.shape == (target, 1, 8, 8)
+
+    def test_passes_a_non_volume_through(self):
+        """An input that is not five dimensional is already sliced."""
+        x = torch.rand((2, 1, 8, 8))
+        assert as_batched_slices(x).shape == x.shape
