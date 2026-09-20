@@ -6,7 +6,7 @@
 import pytest
 import torch
 
-from chuchichaestli.data import samples_in_batch, unpack_batch
+from chuchichaestli.data import batch_to_device, samples_in_batch, unpack_batch
 
 
 def test_a_mapping_is_read_by_name():
@@ -72,3 +72,11 @@ def test_samples_in_batch_falls_back_to_one():
     """A batch holding no tensor counts as a single sample."""
     assert samples_in_batch(object()) == 1
     assert samples_in_batch({"meta": "no tensors here"}) == 1
+
+
+def test_a_batch_moves_to_a_device_whatever_shape_it_has():
+    """Every tensor moves, and the container keeps its shape."""
+    pair = batch_to_device((torch.ones(2, 2), torch.zeros(2, 1)), "cpu")
+    assert isinstance(pair, tuple) and all(t.device.type == "cpu" for t in pair)
+    mapping = batch_to_device({"x": torch.ones(2, 2)}, "cpu")
+    assert isinstance(mapping, dict) and mapping["x"].device.type == "cpu"

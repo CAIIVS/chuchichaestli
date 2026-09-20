@@ -8,8 +8,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 import torch
 
+from chuchichaestli.utils.functools import map_nested
 
-__all__ = ["BatchType", "samples_in_batch", "unpack_batch"]
+
+__all__ = ["BatchType", "batch_to_device", "samples_in_batch", "unpack_batch"]
 
 
 BatchType = torch.Tensor | Mapping[str, Any] | Sequence[Any]
@@ -70,3 +72,13 @@ def samples_in_batch(batch: BatchType) -> int:
         if isinstance(value, torch.Tensor):
             return len(value)
     return 1
+
+
+def batch_to_device(batch: BatchType, device: torch.device | str) -> BatchType:
+    """Return a batch with every tensor in it on a device.
+
+    Args:
+        batch: A batch as the loader produced it.
+        device: Where its tensors should land.
+    """
+    return map_nested(batch, lambda tensor: tensor.to(device, non_blocking=True))
