@@ -7,7 +7,15 @@ Imports nothing from `chuchichaestli.runtime`; the dependency runs the other
 way.
 """
 
+from chuchichaestli.training.adversarial import (
+    ADV_DISC_LOSSES,
+    ADV_GEN_LOSSES,
+    AdversarialTypes,
+)
 from chuchichaestli.training.objective import (
+    RECONSTRUCTION_LOSSES,
+    PerceptualBackboneTypes,
+    ReconstructionLossTypes,
     AdaptiveWeight,
     Loss,
     Objective,
@@ -33,6 +41,12 @@ from chuchichaestli.training.optim import (
 
 
 __all__ = [
+    "AdversarialTypes",
+    "ADV_GEN_LOSSES",
+    "ADV_DISC_LOSSES",
+    "ReconstructionLossTypes",
+    "PerceptualBackboneTypes",
+    "RECONSTRUCTION_LOSSES",
     "OptimSpec",
     "SchedulerSpec",
     "OptimizerTypes",

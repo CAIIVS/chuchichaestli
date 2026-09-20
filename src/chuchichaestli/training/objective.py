@@ -6,17 +6,41 @@
 from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 import torch
 from torch import nn
 
 
 __all__ = [
+    "ReconstructionLossTypes",
+    "PerceptualBackboneTypes",
+    "RECONSTRUCTION_LOSSES",
     "Loss",
     "Term",
     "AdaptiveWeight",
     "Objective",
 ]
+
+
+ReconstructionLossTypes = Literal["l1", "l2", "huber", "smooth_l1"]
+PerceptualBackboneTypes = Literal[
+    "vgg16",
+    "vgg",
+    "alexnet",
+    "squeezenet",
+    "resnet18",
+    "resnet",
+    "convnext",
+    "vit",
+    "swinv2",
+]
+
+RECONSTRUCTION_LOSSES: dict[str, type[nn.Module]] = {
+    "l1": nn.L1Loss,
+    "l2": nn.MSELoss,
+    "huber": nn.HuberLoss,
+    "smooth_l1": nn.SmoothL1Loss,
+}
 
 
 @dataclass(frozen=True, slots=True)
