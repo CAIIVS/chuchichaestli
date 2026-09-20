@@ -6,7 +6,12 @@
 import pytest
 import torch
 
-from chuchichaestli.data import batch_to_device, samples_in_batch, unpack_batch
+from chuchichaestli.data import (
+    batch_to_device,
+    input_in_batch,
+    samples_in_batch,
+    unpack_batch,
+)
 
 
 def test_a_mapping_is_read_by_name():
@@ -80,3 +85,20 @@ def test_a_batch_moves_to_a_device_whatever_shape_it_has():
     assert isinstance(pair, tuple) and all(t.device.type == "cpu" for t in pair)
     mapping = batch_to_device({"x": torch.ones(2, 2)}, "cpu")
     assert isinstance(mapping, dict) and mapping["x"].device.type == "cpu"
+
+
+def test_the_leading_value_ignores_what_else_a_batch_carries():
+    """A batch holding a target alongside its input still yields the input."""
+    x, y = torch.ones(2, 3), torch.zeros(2, 1)
+    assert input_in_batch({"x": x, "y": y}) is x
+    assert input_in_batch((x, y)) is x
+    assert input_in_batch(x) is x
+    assert input_in_batch({"img": x}, "img") is x
+
+
+def test_the_leading_value_is_stricter_than_nothing():
+    """A mapping without the key, or an empty batch, says so."""
+    with pytest.raises(ValueError, match="no 'x' to read"):
+        input_in_batch({"a": torch.ones(2)})
+    with pytest.raises(ValueError, match="leads with nothing"):
+        input_in_batch(())

@@ -20,6 +20,7 @@ from chuchichaestli.data.split import split_dataset
 from chuchichaestli.data.batch import (
     BatchType,
     batch_to_device,
+    input_in_batch,
     samples_in_batch,
     unpack_batch,
 )
@@ -97,6 +98,7 @@ __all__ = [
     "split_dataset",
     "BatchType",
     "batch_to_device",
+    "input_in_batch",
     "samples_in_batch",
     "unpack_batch",
     "ProceduralDataset",

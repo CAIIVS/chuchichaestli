@@ -11,7 +11,13 @@ import torch
 from chuchichaestli.utils.functools import map_nested
 
 
-__all__ = ["BatchType", "batch_to_device", "samples_in_batch", "unpack_batch"]
+__all__ = [
+    "BatchType",
+    "batch_to_device",
+    "input_in_batch",
+    "samples_in_batch",
+    "unpack_batch",
+]
 
 
 BatchType = torch.Tensor | Mapping[str, Any] | Sequence[Any]
@@ -82,3 +88,29 @@ def batch_to_device(batch: BatchType, device: torch.device | str) -> BatchType:
         device: Where its tensors should land.
     """
     return map_nested(batch, lambda tensor: tensor.to(device, non_blocking=True))
+
+
+def input_in_batch(batch: BatchType, name: str = "x") -> Any:
+    """Return the one value a batch leads with.
+
+    Unlike `unpack_batch` this ignores whatever else the batch carries, so a
+    batch holding a target alongside its input still yields the input.
+
+    Args:
+        batch: A mapping, a sequence, or a lone tensor.
+        name: Key the value is read from, for mapping batches.
+
+    Raises:
+        ValueError: If a mapping does not hold the name.
+    """
+    if isinstance(batch, Mapping):
+        if name not in batch:
+            raise ValueError(
+                f"Batch has no {name!r} to read; it holds {sorted(batch)}."
+            )
+        return batch[name]
+    if isinstance(batch, Sequence) and not isinstance(batch, (str, bytes)):
+        if not batch:
+            raise ValueError("Batch is empty, so it leads with nothing.")
+        return batch[0]
+    return batch
