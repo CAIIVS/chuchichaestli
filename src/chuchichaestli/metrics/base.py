@@ -106,3 +106,39 @@ class EvalMetric:
             device=self.device,
             **kwargs,
         )
+
+    def state_dict(self) -> dict[str, torch.Tensor]:
+        """Return what the metric has accumulated so far.
+
+        Every tensor attribute is state; the rest is configuration.
+        """
+        return {
+            name: value
+            for name, value in vars(self).items()
+            if isinstance(value, torch.Tensor)
+        }
+
+    def load_state_dict(self, state: dict[str, torch.Tensor]) -> None:
+        """Restore state previously returned by `state_dict`.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+
+        Raises:
+            KeyError: If the state names something the metric does not hold.
+        """
+        unknown = sorted(
+            set(state)
+            - {
+                name
+                for name, value in vars(self).items()
+                if isinstance(value, torch.Tensor)
+            }
+        )
+        if unknown:
+            raise KeyError(
+                f"{type(self).__name__} holds no {unknown}; the state was "
+                "written by a different metric."
+            )
+        for name, value in state.items():
+            setattr(self, name, value.to(self.device))
