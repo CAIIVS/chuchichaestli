@@ -3,18 +3,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for writing a dataset that grows, one batch at a time."""
 
+import struct
 
 import h5py
 import numpy as np
 import pytest
 import torch
+from safetensors.torch import load_file
 
 from chuchichaestli.data import (
     BufferedArchive,
     Hdf5Archive,
     archive_for,
 )
-from chuchichaestli.data.archive import NpyArchive
+from chuchichaestli.data.archive import NpyArchive, SafetensorsArchive
 
 
 def test_hdf5_appends_as_it_goes(tmp_path):
@@ -104,8 +106,10 @@ def test_the_suffix_picks_the_archive(tmp_path):
     assert archive_for(tmp_path / "a.h5").appends
     assert isinstance(archive_for(tmp_path / "a.npy"), NpyArchive)
     assert archive_for(tmp_path / "a.npy").appends
+    assert isinstance(archive_for(tmp_path / "a.safetensors"), SafetensorsArchive)
+    assert archive_for(tmp_path / "a.safetensors").appends
     with pytest.warns(UserWarning, match="cannot be appended to"):
-        fallback = archive_for(tmp_path / "a.safetensors")
+        fallback = archive_for(tmp_path / "a.npz")
     assert isinstance(fallback, BufferedArchive)
     assert not fallback.appends
 
@@ -120,7 +124,7 @@ def test_the_fallback_warning_can_be_silenced(tmp_path):
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        archive_for(tmp_path / "a.safetensors", warn=False)
+        archive_for(tmp_path / "a.npz", warn=False)
 
 
 def test_an_empty_archive_writes_nothing(tmp_path):
@@ -203,3 +207,65 @@ def test_an_aborted_npy_archive_leaves_nothing(tmp_path):
     assert not path.exists()
 
 
+def test_safetensors_appends_as_it_goes(tmp_path):
+    """Each batch reaches the file without the others being held.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / "out.safetensors"
+    with SafetensorsArchive(path, "preds") as archive:
+        for value in range(3):
+            archive.write(torch.full((4, 2), float(value)))
+    stored = load_file(str(path))["preds"]
+    assert tuple(stored.shape) == (12, 2)
+    assert stored[:, 0].tolist() == [0.0] * 4 + [1.0] * 4 + [2.0] * 4
+
+
+def test_the_safetensors_header_leaves_the_data_aligned(tmp_path):
+    """The format asks for it, and padding the header is what delivers it.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / "out.safetensors"
+    with SafetensorsArchive(path) as archive:
+        archive.write(torch.arange(4.0).reshape(2, 2))
+    with open(path, "rb") as handle:
+        length = struct.unpack("<Q", handle.read(8))[0]
+    assert (8 + length) % 8 == 0
+
+
+def test_a_safetensors_archive_keeps_the_dtype_it_was_given(tmp_path):
+    """Streaming writes raw bytes, so nothing silently widens them.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / "out.safetensors"
+    with SafetensorsArchive(path) as archive:
+        archive.write(torch.arange(4, dtype=torch.uint8).reshape(2, 2))
+    assert load_file(str(path))["data"].dtype == torch.uint8
+
+
+def test_a_type_safetensors_cannot_name_is_refused(tmp_path):
+    """Better than writing a header no reader can make sense of.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    with pytest.raises(ValueError, match="safetensors dtype"):
+        SafetensorsArchive(tmp_path / "out.safetensors").write(
+            torch.ones(2, 2, dtype=torch.complex64)
+        )
+
+
+def test_an_empty_safetensors_archive_writes_nothing(tmp_path):
+    """A stage that produced nothing leaves no file behind.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / "out.safetensors"
+    SafetensorsArchive(path).close()
+    assert not path.exists()

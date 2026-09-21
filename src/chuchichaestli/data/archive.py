@@ -7,6 +7,8 @@ from __future__ import annotations
 import warnings
 from abc import ABC, abstractmethod
 import io
+import json
+import struct
 from contextlib import ExitStack
 from pathlib import Path
 from types import TracebackType
@@ -15,8 +17,10 @@ import numpy as np
 from numpy.lib import format as npy_format
 import torch
 from chuchichaestli.data.hdf5 import HDF5Dataset
+from chuchichaestli.data.safetensors import SafetensorsDataset
 from chuchichaestli.data.save import save_dataset
 from chuchichaestli.utils.io import staged
+from chuchichaestli.utils.registry import require
 from chuchichaestli.utils.tensors import as_array
 
 
@@ -24,6 +28,8 @@ __all__ = [
     "Archive",
     "Hdf5Archive",
     "NpyArchive",
+    "SAFETENSORS_DTYPES",
+    "SafetensorsArchive",
     "BufferedArchive",
     "ARCHIVES",
     "archive_for",
@@ -223,6 +229,115 @@ class NpyArchive(Archive):
             self._stack = None
 
 
+SAFETENSORS_DTYPES: dict[str, str] = {
+    "float64": "F64",
+    "float32": "F32",
+    "float16": "F16",
+    "int64": "I64",
+    "int32": "I32",
+    "int16": "I16",
+    "int8": "I8",
+    "uint8": "U8",
+    "bool": "BOOL",
+}
+
+
+class SafetensorsArchive(Archive):
+    """Appends each batch to a single named tensor."""
+
+    appends = True
+    MAX_ROWS = 2**63 - 1
+    ALIGN = 8
+
+    def __init__(self, path: str | Path, key: str = "data"):
+        """Constructor.
+
+        Args:
+            path: File the batches land in.
+            key: Name the batches are stored under.
+        """
+        super().__init__(path, key)
+        self._stack: ExitStack | None = None
+        self._handle: io.BufferedWriter | None = None
+        self._sample: tuple[int, ...] = ()
+        self._dtype = ""
+        self._itemsize = 0
+        self._width = 0
+        self._rows = 0
+
+    def _header(self, rows: int, width: int | None = None) -> bytes:
+        """Return the header bytes naming a row count.
+
+        Args:
+            rows: Samples the file holds.
+            width: Length to pad to, or `None` for the header's own length.
+        """
+        size = rows * self._itemsize
+        for extent in self._sample:
+            size *= extent
+        body = json.dumps(
+            {
+                self.key: {
+                    "dtype": self._dtype,
+                    "shape": [rows, *self._sample],
+                    "data_offsets": [0, size],
+                }
+            },
+            separators=(",", ":"),
+        ).encode()
+        if width is None:
+            width = -(-(len(body) + self.ALIGN) // self.ALIGN) * self.ALIGN
+        return body.ljust(width)
+
+    def write(self, batch: torch.Tensor) -> None:
+        """Append one batch's rows, opening the file on the first.
+
+        Args:
+            batch: Samples to add, the first axis being the batch.
+
+        Raises:
+            ValueError: If safetensors has no name for the batch's type.
+        """
+        array = as_array(batch)
+        if self._handle is None:
+            self._sample = array.shape[1:]
+            self._dtype = require(
+                array.dtype.name, SAFETENSORS_DTYPES, "safetensors dtype"
+            )
+            self._itemsize = array.dtype.itemsize
+            reserved = self._header(self.MAX_ROWS)
+            self._width = len(reserved)
+            self._stack = ExitStack()
+            scratch = self._stack.enter_context(staged(self.path))[0]
+            self._handle = open(scratch, "wb")
+            self._handle.write(struct.pack("<Q", self._width))
+            self._handle.write(reserved)
+        self._handle.write(array.tobytes())
+        self._rows += len(array)
+
+    def close(self) -> None:
+        """Write the real shape and byte range in, and move the file over."""
+        if self._handle is None:
+            return
+        self._handle.seek(struct.calcsize("<Q"))
+        self._handle.write(self._header(self._rows, self._width))
+        self._handle.close()
+        self._handle = None
+        if self._stack is not None:
+            self._stack.close()
+            self._stack = None
+
+    def abort(self) -> None:
+        """Close the file and discard it."""
+        if self._handle is None:
+            return
+        self._handle.close()
+        self._handle = None
+        if self._stack is not None:
+            self._stack.__exit__(RuntimeError, RuntimeError("aborted"), None)
+            self._stack = None
+
+
 class BufferedArchive(Archive):
     """Holds every batch until close, for formats that cannot append."""
 
@@ -257,6 +372,7 @@ class BufferedArchive(Archive):
 
 ARCHIVES: dict[str, type[Archive]] = {
     **dict.fromkeys(HDF5Dataset.FILE_EXTENSIONS, Hdf5Archive),
+    **dict.fromkeys(SafetensorsDataset.FILE_EXTENSIONS, SafetensorsArchive),
     ".npy": NpyArchive,
 }
 

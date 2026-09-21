@@ -7,7 +7,6 @@ import h5py
 import warnings
 
 import numpy as np
-from safetensors.torch import load_file
 import pytest
 import torch
 from torch import nn
@@ -166,11 +165,11 @@ def test_predict_still_writes_a_format_it_cannot_append_to(tmp_path):
     Args:
         tmp_path: Directory pytest gives the test.
     """
-    archive = tmp_path / "out.safetensors"
+    archive = tmp_path / "out.npz"
     stage = Predict("out", model=linear(), data=ramp(8), batch_size=4, archive=archive)
     with pytest.warns(UserWarning, match="cannot be appended to"):
         Runtime(stage, hooks=(), device="cpu").run()
-    assert load_file(str(archive))["data"].shape == (8, 1)
+    assert np.load(archive)["data"].shape == (8, 1)
 
 
 def test_predict_publishes_the_archive_it_wrote(tmp_path):
