@@ -14,6 +14,7 @@ from torch.utils.data import TensorDataset
 from chuchichaestli.runtime import (
     Checkpointer,
     Eval,
+    Predict,
     DataManager,
     Ddp,
     EventType,
@@ -23,6 +24,7 @@ from chuchichaestli.runtime import (
     Train,
 )
 from chuchichaestli.runtime.events import C3liRuntimeError
+from chuchichaestli.data.archive import read_archive
 from chuchichaestli.metrics import MSE
 from chuchichaestli.training import OptimSpec
 
@@ -345,6 +347,116 @@ def test_a_reduced_metric_saw_the_whole_dataset():
     Runtime(Program(stages=[alone]), seed=42, hooks=[]).run()
     assert reported[0][1] == float(alone.metrics["mse"].n_observations)
     assert reported[0][0] == pytest.approx(float(alone.metrics["mse"].compute()))
+
+
+def _weighs_uneven_shards(rank, world, results, port, balance):
+    """Take one step over shards of different sizes and report the weights.
+
+    Six samples in batches of four leave rank 0 with four and rank 1 with
+    two, which is the case the balancing exists for.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+        balance: Whether a batch is weighed against every rank's share.
+    """
+    topology = join_group(rank, world, port)
+    try:
+        trainer = Train(
+            "fit",
+            data=DataManager(ramp(6), batch_size=4, balance_ranks=balance),
+            loss=nn.MSELoss(),
+            steps=1,
+            optim=OptimSpec.sgd(lr=1.0),
+        )
+        program = Program(provide={"model": model()}, stages=[trainer])
+        Runtime(program, seed=42, topology=topology, hooks=[]).run()
+        weights = topology.state_of(program.provide["model"])
+        results[rank] = weights["weight"].tolist()
+    finally:
+        topology.close()
+
+
+def one_step_over_everything() -> list:
+    """Return the weights one process reaches seeing all six samples at once."""
+    trainer = Train(
+        "fit",
+        data=DataManager(ramp(6), batch_size=6),
+        loss=nn.MSELoss(),
+        steps=1,
+        optim=OptimSpec.sgd(lr=1.0),
+    )
+    program = Program(provide={"model": model()}, stages=[trainer])
+    Runtime(program, seed=42, hooks=[]).run()
+    return program.provide["model"].weight.detach().tolist()
+
+
+def test_balancing_ranks_weighs_a_shard_by_what_it_holds():
+    """Averaged gradients would otherwise count a short shard in full."""
+    balanced = under_ddp(_weighs_uneven_shards, free_port(), True)
+    alone = torch.tensor(one_step_over_everything())
+    assert torch.allclose(torch.tensor(balanced[0]), alone, atol=1e-6)
+
+
+def test_without_balancing_a_short_shard_counts_in_full():
+    """The correction is off by default, so the mis-weighting is observable."""
+    plain_shards = under_ddp(_weighs_uneven_shards, free_port(), False)
+    alone = torch.tensor(one_step_over_everything())
+    assert not torch.allclose(torch.tensor(plain_shards[0]), alone, atol=1e-6)
+
+
+def _predicts(rank, world, results, port, archive, merge):
+    """Predict on every rank and report what this one wrote.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+        archive: File the predictions are written to.
+        merge: Whether the shards are joined when the run ends.
+    """
+    topology = join_group(rank, world, port)
+    try:
+        sampler = Predict(
+            "sample",
+            model=model(),
+            data=ramp(8),
+            batch_size=2,
+            archive=archive,
+            merge=merge,
+        )
+        Runtime(Program(stages=[sampler]), seed=42, topology=topology, hooks=[]).run()
+        results[rank] = str(sampler._written)
+    finally:
+        topology.close()
+
+
+def test_the_shards_are_joined_into_one_file(tmp_path):
+    """Ranks see different data, and the run should leave one file, not many."""
+    archive = tmp_path / "out.h5"
+    reported = under_ddp(_predicts, free_port(), str(archive), True)
+    assert sorted(p.name for p in tmp_path.glob("*.h5")) == ["out.h5"]
+    assert set(reported.values()) == {str(archive)}
+    rows = torch.cat(list(read_archive(archive, "data")))
+    assert len(rows) == 8
+
+
+def test_the_shards_can_be_left_apart(tmp_path):
+    """A large output need not be funnelled through one process."""
+    archive = tmp_path / "out.h5"
+    under_ddp(_predicts, free_port(), str(archive), False)
+    assert sorted(p.name for p in tmp_path.glob("*.h5")) == [
+        "out.rank0.h5",
+        "out.rank1.h5",
+    ]
+    rows = sum(
+        len(torch.cat(list(read_archive(shard, "data"))))
+        for shard in tmp_path.glob("*.h5")
+    )
+    assert rows == 8
 
 
 def test_every_rank_agrees_on_the_weights():
