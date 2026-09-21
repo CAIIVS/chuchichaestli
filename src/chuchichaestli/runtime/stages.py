@@ -332,6 +332,7 @@ class Phase:
         self._index = 0
         self._entered = False
         self._child_ctx: Context | None = None
+        self._restored: dict[str, Any] | None = None
 
     def __repr__(self) -> str:
         """Return a short description of the phase."""
@@ -347,6 +348,7 @@ class Phase:
         self._index = 0
         self._entered = False
         self._child_ctx = None
+        self._restored = None
         for key, value in self.provide.items():
             ctx.bind(key, value)
         ctx.progress = self._progress
@@ -365,9 +367,12 @@ class Phase:
             if not self._entered:
                 self._entered = True
                 signal = ctx.topology.broadcast(child.enter(self._child_ctx))
+                restored, self._restored = self._restored, None
                 if signal.halts or signal is Signal.SKIP:
                     self._close(child)
                     continue
+                if restored is not None:
+                    child.load_state_dict(restored)
             signal = ctx.topology.broadcast(child.execute(self._child_ctx))
             if signal.halts:
                 self._close(child)
@@ -399,7 +404,8 @@ class Phase:
             ctx: Execution context for this entry.
         """
         if self._entered and self._index < len(self.stages):
-            self._close(self.stages[self._index])
+            self.stages[self._index].leave(self._child_ctx)
+            self._child_ctx = None
         ctx.progress = self._progress
         ctx.emit(EventType.STAGE_ENDED, stage=type(self).__name__)
         return Signal.GO
@@ -447,11 +453,10 @@ class Phase:
         """
         self._progress = Progress.from_dict(state.get("progress", {}))
         self._index = int(state.get("index", 0))
-        self._entered = bool(state.get("entered", False))
+        self._entered = False
         self._child_ctx = None
         child = state.get("child")
-        if child is not None and self._index < len(self.stages):
-            self.stages[self._index].load_state_dict(child)
+        self._restored = child if self._index < len(self.stages) else None
 
 
 class Program(Phase):
