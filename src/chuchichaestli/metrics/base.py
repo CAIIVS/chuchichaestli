@@ -10,7 +10,28 @@ __all__ = ["EvalMetric"]
 
 
 class EvalMetric:
-    """Base class for image evaluation metrics."""
+    """Base class for image evaluation metrics.
+
+    Attributes:
+        ADDITIVE: State that combines across processes by summing.
+        SMALLEST: State that combines by taking the lowest seen.
+        LARGEST: State that combines by taking the highest seen.
+        FLAGS: State that is true across processes if true on any of them.
+
+    A subclass accumulating state of its own extends whichever of these it
+    belongs to, so that a distributed run can combine it. Anything left out
+    is derived rather than accumulated, and is recomputed from the rest.
+    """
+
+    ADDITIVE: tuple[str, ...] = (
+        "nan_count",
+        "n_observations",
+        "n_images",
+        "aggregate",
+    )
+    SMALLEST: tuple[str, ...] = ("min_value",)
+    LARGEST: tuple[str, ...] = ("max_value",)
+    FLAGS: tuple[str, ...] = ("is_nan",)
 
     def __init__(
         self,

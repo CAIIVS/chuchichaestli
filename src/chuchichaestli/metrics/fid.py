@@ -75,6 +75,15 @@ class FIDInceptionV3(Module):
 class FID(EvalMetric):
     """Frechet inception distance."""
 
+    ADDITIVE = EvalMetric.ADDITIVE + (
+        "n_images_fake",
+        "n_images_real",
+        "aggregate_fake",
+        "aggregate_real",
+        "aggregate_cov_fake",
+        "aggregate_cov_real",
+    )
+
     def __init__(
         self,
         model: Module | None = None,
