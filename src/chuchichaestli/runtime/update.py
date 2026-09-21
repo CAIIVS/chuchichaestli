@@ -6,23 +6,25 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Literal
 import torch
 from torch import nn
 from torch.optim import Optimizer
 from torch.amp import GradScaler
 from torch.optim.lr_scheduler import LRScheduler
+from torch.optim.swa_utils import SWALR
 from chuchichaestli.data.batch import BatchType, samples_in_batch
 from chuchichaestli.runtime.context import Context
 from chuchichaestli.runtime.traits import Objective
 from chuchichaestli.training.objective import Loss
 from chuchichaestli.training.optim import OptimSpec
-from chuchichaestli.training.update import UpdatePolicy
+from chuchichaestli.training.update import Swa, UpdatePolicy, average_targets
 
 
 __all__ = [
     "WeightsTypes",
+    "SwaWindow",
     "Updater",
     "Step",
     "Alternating",
@@ -30,7 +32,160 @@ __all__ = [
 ]
 
 
-WeightsTypes = Literal["model", "ema"]
+WeightsTypes = Literal["model", "ema", "swa"]
+
+
+class SwaWindow:
+    """The tail of a run over which weights are averaged equally.
+
+    Attributes:
+        request: What to average, in any spelling `average_targets` accepts.
+        start: Fraction of the run after which the window opens.
+        lr: Rate `SWALR` holds once it does, or `None` for no handover.
+        anneal: Passes `SWALR` takes to reach that rate.
+        averages: The average kept per binding name.
+        schedulers: The `SWALR` bound to each update group.
+    """
+
+    def __init__(
+        self,
+        request: bool | str | Sequence[str] | None = None,
+        start: float = 0.75,
+        lr: float | None = None,
+        anneal: int = 10,
+    ):
+        """Constructor.
+
+        Args:
+            request: What to average, in any spelling `average_targets`
+                accepts. `None` averages nothing.
+            start: Fraction of the run after which the window opens.
+            lr: Rate to hold once it does. Setting it hands the schedule over
+                to `SWALR` and retires whatever ran before.
+            anneal: Passes `SWALR` takes to reach `lr`.
+
+        Raises:
+            ValueError: If `start` lies outside `[0, 1)`, or a rate is given
+                with nothing to average.
+        """
+        if request is not None and not 0.0 <= start < 1.0:
+            raise ValueError(f"swa_start is a fraction of the run, got {start!r}.")
+        if lr is not None and request is None:
+            raise ValueError(
+                f"swa_lr={lr} schedules the averaging window, but the stage "
+                "was not asked to average."
+            )
+        self.request = request
+        self.start = start
+        self.lr = lr
+        self.anneal = anneal
+        self.averages: dict[str, Swa] = {}
+        self.schedulers: dict[str | None, LRScheduler] = {}
+
+    def __bool__(self) -> bool:
+        """Whether this window averages anything at all."""
+        return bool(self.averages)
+
+    def build(
+        self,
+        default: str,
+        optimizers: Mapping[str | None, Optimizer],
+        ctx: Context,
+    ) -> None:
+        """Build the averages and the rate schedule, and publish each average.
+
+        Args:
+            default: Binding to average when the request names none.
+            optimizers: The optimizer of each update group.
+            ctx: Execution context for this entry.
+        """
+        self.averages = {}
+        for name in average_targets(self.request, default):
+            averaged = Swa(ctx.resolve(name))
+            ctx.publish(f"{name}/swa", averaged)
+            self.averages[name] = averaged
+        self.schedulers = (
+            {}
+            if self.lr is None
+            else {
+                group: SWALR(optimizer, swa_lr=self.lr, anneal_epochs=self.anneal)
+                for group, optimizer in optimizers.items()
+            }
+        )
+
+    def is_open(self, epoch: int, epochs: int | None) -> bool:
+        """Whether a pass falls in the tail being averaged.
+
+        Args:
+            epoch: Pass that just finished, counted from zero.
+            epochs: Passes the run makes in total, or `None` if open-ended.
+        """
+        if not self.averages or epochs is None:
+            return False
+        return epoch + 1 > self.start * epochs
+
+    def hand_over(self, *registries: dict[str | None, LRScheduler]) -> None:
+        """Retire the schedules that ran before the window opened.
+
+        Torch's recipe holds the rate `SWALR` asks for, so whatever ran
+        before must stop rather than compete with it. Without a rate of its
+        own the window takes nothing over, and they are left running.
+
+        Args:
+            registries: Where the retired schedules are registered.
+        """
+        for group in self.schedulers:
+            for registry in registries:
+                registry.pop(group, None)
+
+    def take(self, ctx: Context) -> None:
+        """Fold the current weights into each average and advance the rate.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        for scheduler in self.schedulers.values():
+            scheduler.step()
+        for name, averaged in self.averages.items():
+            averaged.update_parameters(ctx.resolve(name))
+
+    def refresh_batch_stats(
+        self,
+        batches: Callable[[], Iterable[Any]],
+        device: torch.device | str | None = None,
+    ) -> None:
+        """Recompute the batch statistics each average inherited.
+
+        Args:
+            batches: Called per average to open a fresh pass over the data.
+            device: Device to run the pass on.
+        """
+        for averaged in self.averages.values():
+            if averaged.has_batch_norm:
+                averaged.refresh_batch_stats(batches(), device=device)
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return the window's resumable state."""
+        state: dict[str, Any] = {
+            f"swa/{n}": a.state_dict() for n, a in self.averages.items()
+        }
+        state.update({f"swalr/{g}": s.state_dict() for g, s in self.schedulers.items()})
+        return state
+
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+        """Restore state previously returned by `state_dict`.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+        """
+        for name, averaged in self.averages.items():
+            saved = state.get(f"swa/{name}")
+            if saved is not None:
+                averaged.load_state_dict(saved)
+        for group, scheduler in self.schedulers.items():
+            saved = state.get(f"swalr/{group}")
+            if saved is not None:
+                scheduler.load_state_dict(saved)
 
 
 class Updater(ABC):

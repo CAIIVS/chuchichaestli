@@ -133,7 +133,7 @@ def test_weights_ema_reads_the_average_a_train_published():
 def test_an_unknown_weights_choice_is_refused():
     """Only the model or its average can be read."""
     with pytest.raises(ValueError, match="weights"):
-        Eval("probe", model=linear(), data=ramp(), metrics=[MSE()], weights="swa")
+        Eval("probe", model=linear(), data=ramp(), metrics=[MSE()], weights="ewa")
 
 
 def test_predict_collects_every_output():

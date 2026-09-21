@@ -10,6 +10,7 @@ from torch.optim import SGD, LBFGS
 
 from chuchichaestli.runtime import (
     Alternating,
+    SwaWindow,
     CompositeObjective,
     Context,
     Criterion,
@@ -379,3 +380,60 @@ def test_a_scaled_step_recovers_from_overflow_with_and_without_clipping():
             scales.append(update._scalers[None].get_scale())
         assert scales[-1] < scales[0]
         assert not torch.equal(model.weight, before)
+
+
+def test_the_window_opens_on_the_tail_it_was_given():
+    """The fraction is of the run, so it ports between runs of any length."""
+    window = SwaWindow(True, start=0.75)
+    window.averages = {"model": None}
+    assert [window.is_open(e, 8) for e in range(8)] == [
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+        True,
+    ]
+
+
+def test_an_open_ended_run_has_no_tail_to_average():
+    """There is no fraction of a run whose length is unknown."""
+    window = SwaWindow(True, start=0.75)
+    window.averages = {"model": None}
+    assert not window.is_open(100, None)
+
+
+def test_a_window_averaging_nothing_never_opens():
+    """Its fraction has nothing to apply to."""
+    assert not SwaWindow(None).is_open(7, 8)
+
+
+def test_the_window_retires_only_the_groups_it_takes_over():
+    """A group SWALR does not drive keeps whatever schedule it had."""
+    window = SwaWindow(True, lr=0.01)
+    window.schedulers = {"gen": object()}
+    sweepwise = {"gen": object(), "disc": object()}
+    window.hand_over(sweepwise)
+    assert list(sweepwise) == ["disc"]
+
+
+def test_a_window_without_a_rate_retires_nothing():
+    """Nothing took the rate over, so the schedules must go on."""
+    window = SwaWindow(True)
+    sweepwise = {"gen": object(), "disc": object()}
+    window.hand_over(sweepwise)
+    assert sorted(sweepwise) == ["disc", "gen"]
+
+
+def test_a_rate_without_averaging_is_refused():
+    """It would schedule a window that never opens."""
+    with pytest.raises(ValueError, match="was not asked to average"):
+        SwaWindow(None, lr=0.01)
+
+
+def test_the_start_of_the_window_is_a_fraction():
+    """An epoch number would not port between runs of different lengths."""
+    with pytest.raises(ValueError, match="fraction of the run"):
+        SwaWindow(True, start=3)

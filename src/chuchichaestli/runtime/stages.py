@@ -13,6 +13,7 @@ from typing import Any
 import torch
 from torch import nn
 from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.optimizer import ParamsT
 from torch.utils.data import Dataset
 from chuchichaestli.data.archive import Archive, archive_for
@@ -26,7 +27,12 @@ from chuchichaestli.data.batch import (
 from chuchichaestli.runtime.context import Context
 from chuchichaestli.runtime.data import DataManager
 from chuchichaestli.runtime.objective import CompositeObjective, Criterion
-from chuchichaestli.runtime.update import Step, Updater, WeightsTypes
+from chuchichaestli.runtime.update import (
+    Step,
+    SwaWindow,
+    Updater,
+    WeightsTypes,
+)
 from chuchichaestli.runtime.events import EventType, Progress, Signal
 from chuchichaestli.runtime.traits import Objective, Stage, Stateful
 from chuchichaestli.training.objective import Loss, Term
@@ -36,6 +42,7 @@ from chuchichaestli.training.update import (
     Ema,
     ReductionTypes,
     UpdatePolicy,
+    average_targets,
 )
 from chuchichaestli.utils.functools import partialclass
 from chuchichaestli.utils.io import read_state, staged, writer_for
@@ -751,6 +758,15 @@ class StageLoop(ABC):
             batches.append(batch)
         return batches
 
+    @property
+    def model_binding(self) -> str:
+        """Name the model is bound under.
+
+        A model handed over outright is bound under the default name rather
+        than one of its own.
+        """
+        return self.model if isinstance(self.model, str) else "model"
+
     def _draw_sweep(self, ctx: Context) -> None:
         """Draw the batches one pass over the data will consume.
 
@@ -764,12 +780,20 @@ class StageLoop(ABC):
         )
         ctx.emit(EventType.EPOCH_BEGAN, epoch=self._progress.epoch)
 
+    def finalize_sweep(self, ctx: Context) -> None:
+        """React to a pass over the data finishing.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+
     def _next_sweep(self, ctx: Context) -> Signal:
         """Close the finished pass, then start the next one or stop.
 
         Args:
             ctx: Execution context for this entry.
         """
+        self.finalize_sweep(ctx)
         ctx.emit(EventType.EPOCH_ENDED, epoch=self._progress.epoch)
         self._progress = self._progress.next_epoch()
         ctx.progress = self._progress
@@ -798,6 +822,7 @@ class Train(StageLoop):
         objective: What produces the loss, or the terms it sums.
         optim: The optimizer spec, or one per update group.
         update: How the optimizers are stepped.
+        swa_window: The tail of the run over which weights are averaged.
     """
 
     def __init__(
@@ -812,7 +837,11 @@ class Train(StageLoop):
         optim: OptimSpec | Mapping[str, OptimSpec] | None = None,
         lr: float | None = None,
         update: Updater | None = None,
-        ema: float | Ema | None = None,
+        ema: float | Ema | Mapping[str, float | Ema] | None = None,
+        swa: bool | str | Sequence[str] | None = None,
+        swa_start: float = 0.75,
+        swa_lr: float | None = None,
+        swa_anneal: int = 10,
         epochs: int | None = None,
         steps: int | None = None,
         accumulate: int = 1,
@@ -837,9 +866,18 @@ class Train(StageLoop):
             optim: The optimizer spec, or one per update group.
             lr: Learning rate, when no `optim` spells one out.
             update: How the optimizers are stepped; one `Step` by default.
-            ema: Decay of an exponential moving average of the model,
-                or a built one. Published as `"<model>/ema"` for later
-                stages to evaluate or predict with.
+            ema: Decay of an exponential moving average, a built one, or one
+                per binding name. Each is published as `"<binding>/ema"` for
+                later stages to evaluate or predict with.
+            swa: Whether to average weights equally over the tail of the run,
+                or the bindings to average. Published as `"<binding>/swa"`.
+            swa_start: Fraction of the epochs after which averaging begins;
+                averaging from the start would drag the untrained beginning
+                into an equally weighted mean.
+            swa_lr: Rate to hold while averaging. Setting it hands the
+                schedule over to `SWALR` at `swa_start` and stops whatever
+                schedule ran before, as torch's recipe does.
+            swa_anneal: Number of passes `SWALR` takes to reach `swa_lr`.
             epochs: Passes over the data to make.
             steps: Optimizer steps to take.
             accumulate: Micro-batches per optimizer step, weighted by their
@@ -855,9 +893,15 @@ class Train(StageLoop):
 
         Raises:
             ValueError: If neither `loss` nor `objective` says what to
-                compute, or an update is given alongside the settings that
-                would configure one.
+                compute, an update is given alongside the settings that would
+                configure one, `swa_start` lies outside `[0, 1)`, or `swa` is
+                asked for without the epochs it averages over.
         """
+        if swa is not None and epochs is None:
+            raise ValueError(
+                f"Train({name!r}) averages weights once a pass, so swa "
+                "needs epochs= to average over."
+            )
         if loss is None and objective is None:
             raise ValueError(
                 f"Train({name!r}) has neither a loss nor an objective, so "
@@ -902,7 +946,10 @@ class Train(StageLoop):
         self.precision = precision
         self.update = update or Step(policy=self.policy, precision=precision)
         self.ema = ema
-        self._averaged: Ema | None = None
+        self.swa_window = SwaWindow(swa, swa_start, swa_lr, swa_anneal)
+        self._ema: dict[str, Ema] = {}
+        self._sweepwise_schedulers: dict[str | None, LRScheduler] = {}
+        self._specs: dict[str | None, OptimSpec] = {}
         self._objective: Objective | None = None
 
     def _build_objective(self, ctx: Context) -> Objective:
@@ -927,12 +974,17 @@ class Train(StageLoop):
         Args:
             ctx: Execution context for this entry.
         """
+        if not isinstance(self.model, str):
+            ctx.bind("model", self.model)
         self._objective = self._build_objective(ctx)
         if isinstance(self._objective, nn.Module):
             self._objective.to(ctx.device)
         self.update.balance_ranks = bool(getattr(self._manager, "balance_ranks", False))
-        self.update.bind(self._optimizers(ctx))
-        self._averaged = self._build_ema(ctx)
+        optimizers = self._optimizers(ctx)
+        stepwise_schedulers, self._sweepwise_schedulers = self._schedulers(optimizers)
+        self.update.bind(optimizers, stepwise_schedulers)
+        self._ema = self._build_ema(ctx)
+        self.swa_window.build(self.model_binding, optimizers, ctx)
 
     def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
         """Take one optimizer step over the micro-batches.
@@ -943,29 +995,41 @@ class Train(StageLoop):
         """
         ctx.clear_cache()
         loss = self.update.apply(self._objective, batches, ctx)
-        if self._averaged is not None:
-            self._averaged.update_parameters(ctx.resolve(self.model))
+        for name, averaged in self._ema.items():
+            averaged.update_parameters(ctx.resolve(name))
         return loss
 
-    def _build_ema(self, ctx: Context) -> Ema | None:
-        """Build the moving average this stage keeps, and publish it.
+    def finalize_sweep(self, ctx: Context) -> None:
+        """Run actions at the end of a pass, for instance updating schedulers.
 
         Args:
             ctx: Execution context for this entry.
         """
-        if self.ema is None:
-            return None
-        model = ctx.resolve(self.model)
-        averaged = self.ema if isinstance(self.ema, Ema) else Ema(model, self.ema)
-        target = self.model if isinstance(self.model, str) else "model"
-        ctx.publish(f"{target}/ema", averaged)
-        return averaged
+        if self.swa_window.is_open(self._progress.epoch, self.epochs):
+            self.swa_window.hand_over(
+                self._sweepwise_schedulers, self.update.schedulers
+            )
+            self.swa_window.take(ctx)
+        for scheduler in self._sweepwise_schedulers.values():
+            scheduler.step()
+
+    def _build_ema(self, ctx: Context) -> dict[str, Ema]:
+        """Build every moving average this stage keeps, and publish them.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        built: dict[str, Ema] = {}
+        for name, decay in average_targets(self.ema, self.model_binding).items():
+            averaged = (
+                decay if isinstance(decay, Ema) else Ema(ctx.resolve(name), decay)
+            )
+            ctx.publish(f"{name}/ema", averaged)
+            built[name] = averaged
+        return built
 
     def _params(self, spec: OptimSpec, ctx: Context) -> ParamsT:
         """Return the trainable parameters an optimizer spec selects.
-
-        Frozen parameters are left out, so an optimizer never holds state for
-        weights it cannot move.
 
         Args:
             spec: Says which bindings the optimizer owns.
@@ -1000,26 +1064,84 @@ class Train(StageLoop):
             ValueError: If the optimizers do not cover the update's groups.
         """
         groups = self.update.groups()
+        self._specs = self._optim_specs(groups)
+        if not isinstance(self.optim, Mapping):
+            spec = self._specs[groups[0]]
+            return {group: spec.build(self._params(spec, ctx)) for group in groups}
+        selected = {group: self._params(self._specs[group], ctx) for group in groups}
+        disjoint = disjoint_params(selected)
+        return {group: self._specs[group].build(disjoint[group]) for group in groups}
+
+    def _optim_specs(self, groups: Sequence[str | None]) -> dict[str | None, OptimSpec]:
+        """Return the optimizer spec of every update group.
+
+        Args:
+            groups: The update groups to cover.
+
+        Raises:
+            ValueError: If the optimizers do not cover the update's groups.
+        """
         if not isinstance(self.optim, Mapping):
             spec = self.optim or OptimSpec.adamw(lr=self.lr if self.lr else 1e-4)
             if self.lr is not None and self.optim is not None:
                 spec = replace(spec, lr=self.lr)
-            return {group: spec.build(self._params(spec, ctx)) for group in groups}
+            return dict.fromkeys(groups, spec)
         missing = sorted(str(g) for g in groups if g not in self.optim)
         if missing:
             raise ValueError(
                 f"Train({self.name!r}) has no optimizer for groups {missing}; "
                 f"it was given {sorted(self.optim)}."
             )
-        selected = {group: self._params(self.optim[group], ctx) for group in groups}
-        disjoint = disjoint_params(selected)
-        return {group: self.optim[group].build(disjoint[group]) for group in groups}
+        return {group: self.optim[group] for group in groups}
+
+    def _schedulers(
+        self, optimizers: Mapping[str | None, Optimizer]
+    ) -> tuple[dict[str | None, LRScheduler], dict[str | None, LRScheduler]]:
+        """Return each group's scheduler, split by how often it is stepped.
+
+        The first advance once per optimizer step, the second once per pass.
+
+        Args:
+            optimizers: The optimizer of each group.
+        """
+        stepwise_schedulers: dict[str | None, LRScheduler] = {}
+        sweepwise_schedulers: dict[str | None, LRScheduler] = {}
+        for group, optimizer in optimizers.items():
+            spec = self._specs[group].scheduler
+            if spec is None:
+                continue
+            landing = (
+                stepwise_schedulers if spec.interval == "step" else sweepwise_schedulers
+            )
+            landing[group] = spec.build(optimizer)
+        return stepwise_schedulers, sweepwise_schedulers
+
+    def leave(self, ctx: Context) -> Signal:
+        """Refresh any averaged batch statistics, then end the stage.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        self.swa_window.refresh_batch_stats(
+            lambda: (
+                input_in_batch(batch, getattr(self._objective, "inputs", "x"))
+                for batch in self._manager.iter(ctx, epoch=0)
+            ),
+            device=ctx.device,
+        )
+        return super().leave(ctx)
 
     def state_dict(self) -> dict[str, Any]:
         """Return the stage's resumable state."""
         state = {**super().state_dict(), **self.update.state_dict()}
-        if self._averaged is not None:
-            state["ema"] = self._averaged.state_dict()
+        state.update({f"ema/{n}": a.state_dict() for n, a in self._ema.items()})
+        state.update(self.swa_window.state_dict())
+        state.update(
+            {
+                f"sched/{g}": s.state_dict()
+                for g, s in self._sweepwise_schedulers.items()
+            }
+        )
         return state
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
@@ -1030,8 +1152,15 @@ class Train(StageLoop):
         """
         super().load_state_dict(state)
         self.update.load_state_dict(state)
-        if self._averaged is not None and "ema" in state:
-            self._averaged.load_state_dict(state["ema"])
+        for name, averaged in self._ema.items():
+            saved = state.get(f"ema/{name}")
+            if saved is not None:
+                averaged.load_state_dict(saved)
+        self.swa_window.load_state_dict(state)
+        for group, scheduler in self._sweepwise_schedulers.items():
+            saved = state.get(f"sched/{group}")
+            if saved is not None:
+                scheduler.load_state_dict(saved)
 
 
 Finetune = partialclass(
@@ -1072,7 +1201,7 @@ class Inference(StageLoop):
             model: Model, or the name of a binding holding one.
             data: A `DataManager`, a dataset, or the name of a binding.
             batch_size: Samples one forward sees, for a bare dataset.
-            weights: Which parameters to read: the model's own, or the moving
+            weights: Which parameters to read: the model's own, or an
                 average a `Train` published beside it.
             inputs: Key the model's input is read from, for mapping batches.
             epochs: Passes over the data; one when absent.
@@ -1083,7 +1212,7 @@ class Inference(StageLoop):
         Raises:
             ValueError: If `weights` names neither.
         """
-        require(weights, ("model", "ema"), "weights")
+        require(weights, ("model", "ema", "swa"), "weights")
         super().__init__(
             name,
             data=data,
@@ -1105,8 +1234,7 @@ class Inference(StageLoop):
         """
         if self.weights == "model":
             return ctx.resolve(self.model)
-        target = self.model if isinstance(self.model, str) else "model"
-        return ctx[f"{target}/ema"]
+        return ctx[f"{self.model_binding}/{self.weights}"]
 
 
 class Eval(Inference):

@@ -7,7 +7,13 @@ import pytest
 import torch
 from torch import nn
 
-from chuchichaestli.training import Ema, OptimSpec, Swa, UpdatePolicy
+from chuchichaestli.training import (
+    Ema,
+    OptimSpec,
+    Swa,
+    UpdatePolicy,
+    average_targets,
+)
 
 
 def model(fill: float = 1.0) -> nn.Module:
@@ -204,3 +210,49 @@ def test_an_unusable_decay_is_refused():
     for decay in (1.5, -0.1):
         with pytest.raises(ValueError, match="lies in"):
             Ema(model(), decay=decay)
+
+
+def test_an_averaging_request_names_the_default_binding():
+    """Asking for averaging without naming anything averages the model."""
+    assert average_targets(True, "model") == {"model": None}
+    assert average_targets(0.999, "gen") == {"gen": 0.999}
+
+
+def test_an_averaging_request_names_its_own_bindings():
+    """A name, several names, or a setting per name all reach the same shape."""
+    assert average_targets("gen", "model") == {"gen": None}
+    assert average_targets(("gen", "disc"), "model") == {"gen": None, "disc": None}
+    assert average_targets({"gen": 0.999}, "model") == {"gen": 0.999}
+
+
+def test_no_averaging_is_asked_for():
+    """Both spellings of declining mean the same thing."""
+    assert average_targets(None, "model") == {}
+    assert average_targets(False, "model") == {}
+
+
+def test_a_prebuilt_average_stands_for_its_binding():
+    """It is passed through rather than treated as a decay."""
+    built = Ema(model(), decay=0.9)
+    assert average_targets(built, "model") == {"model": built}
+
+
+def test_a_plain_average_has_no_batch_statistics():
+    """Nothing needs a pass over the data when there is no normalisation."""
+    assert not Swa(model()).has_batch_norm
+
+
+def test_an_average_reports_the_batch_statistics_it_inherited():
+    """They come from the last iterate rather than from the average."""
+    net = nn.Sequential(nn.Linear(2, 2, bias=False), nn.BatchNorm1d(2))
+    averaged = Swa(net)
+    assert averaged.has_batch_norm
+
+
+def test_refreshing_recomputes_the_batch_statistics():
+    """A pass over the data replaces whatever the last iterate left behind."""
+    net = nn.Sequential(nn.Linear(2, 2, bias=False), nn.BatchNorm1d(2))
+    averaged = Swa(net)
+    averaged.module[1].running_mean.fill_(99.0)
+    averaged.refresh_batch_stats([torch.randn(8, 2) for _ in range(4)])
+    assert averaged.module[1].running_mean.abs().max() < 10.0

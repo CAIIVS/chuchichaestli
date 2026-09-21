@@ -4,9 +4,9 @@
 """Gradient clipping, optimizer stepping and weight averaging."""
 
 from __future__ import annotations
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 import torch
 from torch import nn
 from torch.optim import Optimizer
@@ -14,6 +14,7 @@ from torch.optim.swa_utils import (
     AveragedModel,
     get_ema_multi_avg_fn,
     get_swa_multi_avg_fn,
+    update_bn,
 )
 from chuchichaestli.training.optim import OptimSpec
 from chuchichaestli.utils.registry import require
@@ -26,6 +27,7 @@ __all__ = [
     "UpdatePolicy",
     "Ema",
     "Swa",
+    "average_targets",
 ]
 
 
@@ -184,7 +186,7 @@ class Swa(AveragedModel):
 
     Buffers are left alone by default: an equally weighted running average
     divides, which integer buffers such as a batch norm's `num_batches_tracked`
-    cannot survive. Call `update_bn` afterwards to restore them.
+    cannot survive. Call `refresh_batch_stats` afterwards to restore them.
     """
 
     def __init__(
@@ -207,3 +209,49 @@ class Swa(AveragedModel):
             multi_avg_fn=get_swa_multi_avg_fn(),
             use_buffers=use_buffers,
         )
+
+    @property
+    def has_batch_norm(self) -> bool:
+        """Whether the averaged weights carry batch statistics."""
+        return any(
+            isinstance(module, nn.modules.batchnorm._BatchNorm)
+            for module in self.modules()
+        )
+
+    def refresh_batch_stats(
+        self,
+        batches: Iterable[Any],
+        device: torch.device | str | None = None,
+    ) -> None:
+        """Recompute the batch statistics from a pass over the data.
+
+        The average carries whichever running statistics the last iterate
+        left behind, so a model with batch normalisation needs this pass
+        before the averaged weights can be used.
+
+        Args:
+            batches: Model inputs to run through the averaged weights.
+            device: Device to run the pass on.
+        """
+        update_bn(batches, self, device=device)
+
+
+def average_targets(request: Any, default: str) -> dict[str, Any]:
+    """Normalize an averaging request into a setting per binding name.
+
+    Args:
+        request: What to average: nothing, a flag, the binding to average,
+            several of them, or a mapping carrying a setting per binding.
+        default: Binding to average when the request names none.
+    """
+    if request is None or request is False:
+        return {}
+    if request is True:
+        return {default: None}
+    if isinstance(request, Mapping):
+        return dict(request)
+    if isinstance(request, str):
+        return {request: None}
+    if isinstance(request, (float, int, Ema)):
+        return {default: request}
+    return dict.fromkeys(request)

@@ -19,6 +19,7 @@ from chuchichaestli.runtime import (
     Train,
 )
 from chuchichaestli.runtime.runtime import C3liProgramError
+from chuchichaestli.training import OptimSpec
 
 
 def linear(out: int = 1, fill: float | None = None) -> nn.Module:
@@ -494,3 +495,197 @@ def test_a_fully_frozen_model_is_refused():
     stage = Train("t", model=model, data=ramp(), loss=nn.MSELoss(), steps=1)
     with pytest.raises(ValueError, match="none of them trainable"):
         stage.enter(Context("t"))
+
+
+def test_swa_averages_only_the_tail_of_the_run():
+    """Equal weighting would drag the untrained start into the mean."""
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=ramp(8),
+        batch_size=4,
+        loss=nn.MSELoss(),
+        epochs=4,
+        lr=0.1,
+        swa=True,
+        swa_start=0.5,
+    )
+    Runtime(stage, hooks=(), device="cpu").run()
+    assert int(stage.swa_window.averages["model"].n_averaged) == 2
+
+
+def test_swa_needs_epochs_to_average_over():
+    """It averages once a pass, so a step budget alone would never fire."""
+    with pytest.raises(ValueError, match="swa needs epochs"):
+        Train("fit", model=linear(), data=ramp(), loss=nn.MSELoss(), steps=4, swa=True)
+
+
+def test_swa_start_is_a_fraction():
+    """An epoch number would not port between runs of different lengths."""
+    with pytest.raises(ValueError, match="fraction of the run"):
+        Train(
+            "fit",
+            model=linear(),
+            data=ramp(),
+            loss=nn.MSELoss(),
+            epochs=4,
+            swa=True,
+            swa_start=3,
+        )
+
+
+def test_swa_restores_the_batch_statistics_it_did_not_average():
+    """Averaged weights inherit stale running stats until `update_bn` runs."""
+    model = nn.Sequential(nn.Linear(3, 3), nn.BatchNorm1d(3), nn.Linear(3, 1))
+    stage = Train(
+        "fit",
+        model=model,
+        data=ramp(16),
+        batch_size=4,
+        loss=nn.MSELoss(),
+        epochs=4,
+        lr=0.1,
+        swa=True,
+        swa_start=0.5,
+    )
+    Runtime(stage, hooks=(), device="cpu").run()
+    averaged = stage.swa_window.averages["model"].module[1]
+    assert not torch.equal(averaged.running_mean, torch.zeros(3))
+
+
+def test_swa_rides_in_the_stage_state():
+    """A resumed run keeps the average it had accumulated."""
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=ramp(8),
+        batch_size=4,
+        loss=nn.MSELoss(),
+        epochs=2,
+        lr=0.1,
+        swa="model",
+        swa_start=0.0,
+    )
+    Runtime(stage, hooks=(), device="cpu").run()
+    assert "swa/model" in stage.state_dict()
+
+
+def test_swalr_takes_over_from_the_main_schedule():
+    """The rate follows the main schedule, then whatever SWALR holds."""
+    rates: list[float] = []
+
+    class Watching:
+        """Records the learning rate at each pass boundary."""
+
+        def on(self, event):
+            """Record the rate when a pass ends.
+
+            Args:
+                event: What the runtime just did.
+            """
+            if event.type is EventType.EPOCH_ENDED:
+                rates.append(
+                    round(stage.update.optimizers[None].param_groups[0]["lr"], 4)
+                )
+            return Signal.GO
+
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=ramp(16),
+        batch_size=8,
+        loss=nn.MSELoss(),
+        epochs=8,
+        swa=True,
+        swa_start=0.5,
+        swa_lr=0.01,
+        swa_anneal=2,
+        optim=OptimSpec.adamw(lr=0.5).with_exponential_schedule(0.5),
+    )
+    Runtime(stage, hooks=(Watching(),), device="cpu").run()
+    assert rates[:4] == [0.25, 0.125, 0.0625, 0.0312]
+    assert rates[-2:] == [0.01, 0.01]
+
+
+def test_the_main_schedule_is_retired_at_the_handover():
+    """It would otherwise compete with the rate SWALR holds."""
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=ramp(16),
+        batch_size=8,
+        loss=nn.MSELoss(),
+        epochs=4,
+        swa=True,
+        swa_start=0.5,
+        swa_lr=0.01,
+        optim=OptimSpec.adamw(lr=0.5).with_exponential_schedule(0.5),
+    )
+    Runtime(stage, hooks=(), device="cpu").run()
+    assert not stage._sweepwise_schedulers
+    assert not stage.update.schedulers
+
+
+def test_averaging_without_a_swa_rate_leaves_the_main_schedule_running():
+    """Nothing takes the rate over, so the schedule that was there must go on."""
+    rates: list[float] = []
+
+    class Watching:
+        """Records the learning rate at each pass boundary."""
+
+        def on(self, event):
+            """Record the rate when a pass ends.
+
+            Args:
+                event: What the runtime just did.
+            """
+            if event.type is EventType.EPOCH_ENDED:
+                rates.append(
+                    round(stage.update.optimizers[None].param_groups[0]["lr"], 4)
+                )
+            return Signal.GO
+
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=ramp(16),
+        batch_size=8,
+        loss=nn.MSELoss(),
+        epochs=6,
+        swa=True,
+        swa_start=0.5,
+        optim=OptimSpec.adamw(lr=0.5).with_exponential_schedule(0.5),
+    )
+    Runtime(stage, hooks=(Watching(),), device="cpu").run()
+    assert rates == [0.25, 0.125, 0.0625, 0.0312, 0.0156, 0.0078]
+    assert int(stage.swa_window.averages["model"].n_averaged) == 3
+
+
+def test_a_swa_rate_without_averaging_is_refused():
+    """It would schedule a window that never opens."""
+    with pytest.raises(ValueError, match="was not asked to average"):
+        Train(
+            "fit",
+            model=linear(),
+            data=ramp(),
+            loss=nn.MSELoss(),
+            epochs=4,
+            swa_lr=0.01,
+        )
+
+
+def test_the_swa_schedule_rides_in_the_stage_state():
+    """A resumed run keeps where the annealing had reached."""
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=ramp(16),
+        batch_size=8,
+        loss=nn.MSELoss(),
+        epochs=4,
+        swa=True,
+        swa_start=0.5,
+        swa_lr=0.01,
+    )
+    Runtime(stage, hooks=(), device="cpu").run()
+    assert "swalr/None" in stage.state_dict()

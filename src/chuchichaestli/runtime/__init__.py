@@ -86,6 +86,7 @@ from chuchichaestli.runtime.update import (
     Alternating,
     Simultaneous,
     Step,
+    SwaWindow,
     Updater,
 )
 from chuchichaestli.runtime.traits import (
@@ -180,6 +181,7 @@ __all__ = [
     "GeneratorAdv",
     "DiscriminatorAdv",
     "Diffusion",
+    "SwaWindow",
     "Updater",
     "Step",
     "Alternating",

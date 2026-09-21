@@ -27,6 +27,7 @@ from chuchichaestli.training.update import (
     ReductionTypes,
     Ema,
     Swa,
+    average_targets,
     UpdatePolicy,
 )
 from chuchichaestli.training.optim import (
@@ -57,6 +58,7 @@ __all__ = [
     "UpdatePolicy",
     "Ema",
     "Swa",
+    "average_targets",
     "ClipTypes",
     "ReductionTypes",
     "CLIP_FUNCTIONS",

@@ -492,3 +492,96 @@ def test_diffusion_inherits_the_model_criterion_configuration():
     term = Diffusion(Noising(), model="unet", inputs="image")
     assert isinstance(term, ModelCriterion)
     assert (term.model, term.inputs) == ("unet", "image")
+
+
+def gan_stage(**kwargs):
+    """Build a two-group GAN stage over a generator and a discriminator.
+
+    Args:
+        kwargs: Passed to `Train`.
+    """
+    return Train(
+        "gan",
+        data=TensorDataset(torch.randn(8, 3), torch.zeros(8, 1)),
+        batch_size=4,
+        objective=[
+            Term("g", GeneratorAdv(), groups=("gen",)),
+            Term("d", DiscriminatorAdv(), groups=("disc",)),
+        ],
+        update=Alternating(("disc", "gen")),
+        **kwargs,
+    )
+
+
+def gan_program(stage, gen, disc):
+    """Wrap a stage with the bindings it needs.
+
+    Args:
+        stage: The stage to run.
+        gen: The generator, bound as `model`.
+        disc: The discriminator.
+    """
+    return Program(provide={"model": gen, "disc": disc}, stages=[stage])
+
+
+def test_an_average_is_kept_per_binding():
+    """`ema={...}` keeps one moving average for each binding it names."""
+    torch.manual_seed(0)
+    gen, disc = nn.Linear(3, 3, bias=False), nn.Linear(3, 1, bias=False)
+    stage = gan_stage(
+        epochs=1,
+        optim={
+            "disc": OptimSpec.adam(lr=0.05, params="disc"),
+            "gen": OptimSpec.adam(lr=0.05, params="model"),
+        },
+        ema={"model": 0.5, "disc": 0.9},
+    )
+    Runtime(gan_program(stage, gen, disc), hooks=(), device="cpu").run()
+    assert sorted(stage._ema) == ["disc", "model"]
+    assert sorted(k for k in stage.state_dict() if k.startswith("ema/")) == [
+        "ema/disc",
+        "ema/model",
+    ]
+
+
+def test_a_schedule_is_stepped_at_the_interval_it_asks_for():
+    """Per-epoch schedules move once a pass; per-step ones move every step."""
+    torch.manual_seed(0)
+    gen, disc = nn.Linear(3, 3, bias=False), nn.Linear(3, 1, bias=False)
+    stage = gan_stage(
+        epochs=2,
+        optim={
+            "disc": OptimSpec.adam(lr=0.05, params="disc").with_step_schedule(
+                1, gamma=0.5
+            ),
+            "gen": OptimSpec.adam(lr=0.05, params="model").with_cosine_schedule(
+                4, interval="step"
+            ),
+        },
+    )
+    Runtime(gan_program(stage, gen, disc), hooks=(), device="cpu").run()
+    assert sorted(str(g) for g in stage.update.schedulers) == ["gen"]
+    assert sorted(str(g) for g in stage._sweepwise_schedulers) == ["disc"]
+    assert stage.update.optimizers["disc"].param_groups[0]["lr"] == pytest.approx(
+        0.0125
+    )
+
+
+def test_every_scheduler_rides_in_the_stage_state():
+    """Both intervals are restored, under keys that cannot collide."""
+    torch.manual_seed(0)
+    gen, disc = nn.Linear(3, 3, bias=False), nn.Linear(3, 1, bias=False)
+    stage = gan_stage(
+        steps=1,
+        optim={
+            "disc": OptimSpec.adam(lr=0.05, params="disc").with_step_schedule(1),
+            "gen": OptimSpec.adam(lr=0.05, params="model").with_cosine_schedule(
+                4, interval="step"
+            ),
+        },
+    )
+    Runtime(gan_program(stage, gen, disc), hooks=(), device="cpu").run()
+    assert sorted(k for k in stage.state_dict() if k.startswith("sched/")) == [
+        "sched/disc",
+        "sched/gen",
+    ]
