@@ -180,21 +180,26 @@ class Ema(AveragedModel):
 
 
 class Swa(AveragedModel):
-    """Equally weighted average of the models seen so far."""
+    """Equally weighted average of the models seen so far.
+
+    Buffers are left alone by default: an equally weighted running average
+    divides, which integer buffers such as a batch norm's `num_batches_tracked`
+    cannot survive. Call `update_bn` afterwards to restore them.
+    """
 
     def __init__(
         self,
         model: nn.Module,
         device: torch.device | str | None = None,
-        use_buffers: bool = True,
+        use_buffers: bool = False,
     ):
         """Constructor.
 
         Args:
             model: Model whose weights are averaged.
             device: Device the average is kept on; the model's when absent.
-            use_buffers: Whether buffers are averaged too. `False` leaves
-                them at their first value until `update_bn` is called.
+            use_buffers: Whether buffers are averaged too. `True` fails on
+                integer buffers once more than one model has been averaged.
         """
         super().__init__(
             model,
