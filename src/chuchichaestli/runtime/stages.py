@@ -783,6 +783,7 @@ class StageLoop(ABC):
             epoch=self._progress.epoch,
             seek=self._progress.step * self.accumulate,
         )
+        ctx.progress = self._progress
         ctx.emit(EventType.EPOCH_BEGAN, epoch=self._progress.epoch)
 
     def finalize_sweep(self, ctx: Context) -> None:
