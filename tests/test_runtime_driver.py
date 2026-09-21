@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the runtime driver: pre-flight, control flow and placement."""
 
+import socket
+
 import pytest
 import torch
 from torch import nn
@@ -15,7 +17,7 @@ from chuchichaestli.runtime.runtime import (
     apply_backends_settings,
 )
 from chuchichaestli.runtime.stages import Call, Program, Repeat
-from chuchichaestli.runtime.topology import Local, auto_topology, default_device
+from chuchichaestli.runtime.topology import Ddp, Local, auto_topology, default_device
 
 
 class Record:
@@ -379,12 +381,22 @@ def test_plan_errors_name_the_offending_value():
         Runtime(Program([]), resume="last", hooks=[]).check()
 
 
-def test_auto_topology_refuses_torchrun_until_ddp_lands(monkeypatch):
-    """Better an explicit refusal than every rank landing on device zero."""
+def test_auto_topology_goes_distributed_under_torchrun(monkeypatch):
+    """`RANK` and `WORLD_SIZE` are how a launcher says a run is distributed."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
     monkeypatch.setenv("RANK", "0")
-    monkeypatch.setenv("WORLD_SIZE", "2")
-    with pytest.raises(NotImplementedError, match="not supported yet"):
-        auto_topology()
+    monkeypatch.setenv("WORLD_SIZE", "1")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+    monkeypatch.setenv("MASTER_PORT", str(port))
+    topology = auto_topology(device="cpu")
+    try:
+        assert isinstance(topology, Ddp)
+        assert topology.is_main
+        assert topology.world_size == 1
+    finally:
+        topology.close()
 
 
 def test_device_comes_from_the_topology():

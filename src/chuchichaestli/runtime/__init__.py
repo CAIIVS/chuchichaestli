@@ -80,7 +80,7 @@ from chuchichaestli.runtime.stages import (
     StageBlock,
     When,
 )
-from chuchichaestli.runtime.topology import Local
+from chuchichaestli.runtime.topology import Ddp, Local, reduce_metrics
 from chuchichaestli.runtime.update import (
     WeightsTypes,
     Alternating,
@@ -161,6 +161,8 @@ __all__ = [
     "DiffusionLike",
     "Topology",
     "Local",
+    "Ddp",
+    "reduce_metrics",
     "StageLoop",
     "Train",
     "Finetune",

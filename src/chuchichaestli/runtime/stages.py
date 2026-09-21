@@ -34,6 +34,7 @@ from chuchichaestli.runtime.update import (
     WeightsTypes,
 )
 from chuchichaestli.runtime.events import EventType, Progress, Signal
+from chuchichaestli.runtime.topology import lockstep, reduce_metrics
 from chuchichaestli.runtime.traits import Objective, Stage, Stateful
 from chuchichaestli.training.objective import Loss, Term
 from chuchichaestli.training.optim import OptimSpec, disjoint_params
@@ -366,14 +367,14 @@ class Phase:
                 self._child_ctx = ctx.child(self._index, child.name)
             if not self._entered:
                 self._entered = True
-                signal = ctx.topology.broadcast(child.enter(self._child_ctx))
+                signal = lockstep(ctx.topology, lambda: child.enter(self._child_ctx))
                 restored, self._restored = self._restored, None
                 if signal.halts or signal is Signal.SKIP:
                     self._close(child)
                     continue
                 if restored is not None:
                     child.load_state_dict(restored)
-            signal = ctx.topology.broadcast(child.execute(self._child_ctx))
+            signal = lockstep(ctx.topology, lambda: child.execute(self._child_ctx))
             if signal.halts:
                 self._close(child)
             self._progress = self._progress.next_step()
@@ -1312,9 +1313,13 @@ class Eval(Inference):
     def leave(self, ctx: Context) -> Signal:
         """Publish what each metric computed, for later siblings to read.
 
+        Every process sees the same value, since a later `When` reading one
+        must reach the same decision on all of them.
+
         Args:
             ctx: Execution context for this entry.
         """
+        reduce_metrics(self.metrics.values(), ctx.topology)
         for key, metric in self.metrics.items():
             value = metric.compute()
             if value is not None:

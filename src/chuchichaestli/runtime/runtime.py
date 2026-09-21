@@ -25,7 +25,7 @@ from chuchichaestli.runtime.events import (
 from chuchichaestli.runtime.hooks import Console
 from chuchichaestli.utils.rng import restore_rng_state, seed_ambient
 from chuchichaestli.runtime.stages import Phase, Train
-from chuchichaestli.runtime.topology import auto_topology
+from chuchichaestli.runtime.topology import auto_topology, lockstep
 from chuchichaestli.runtime.traits import (
     Hook,
     RunAwareHook,
@@ -380,14 +380,7 @@ class Runtime:
         Raises:
             C3liRuntimeError: If rank 0 reports that some process aborted.
         """
-        try:
-            outcome: tuple[Signal, str | None] = (call(), None)
-        except C3liRuntimeError as exc:
-            outcome = (Signal.BREAK, str(exc) or "aborted")
-        signal, reason = self.topology.broadcast(outcome)
-        if reason is not None:
-            raise C3liRuntimeError(reason)
-        return signal
+        return lockstep(self.topology, call)
 
     def __repr__(self) -> str:
         """Return a short description of the runtime."""
