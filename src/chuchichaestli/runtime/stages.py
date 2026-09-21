@@ -4,7 +4,6 @@
 """The stage register: blocks that run once, and phases that hold stages."""
 
 from __future__ import annotations
-import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
@@ -16,7 +15,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.optimizer import ParamsT
 from torch.utils.data import Dataset
-from chuchichaestli.data.archive import Archive, archive_for
+from chuchichaestli.data.archive import Archive, archive_for, merge_archives
 from chuchichaestli.data.batch import (
     BatchType,
     input_in_batch,
@@ -1366,6 +1365,7 @@ class Predict(Inference):
         name: str | None = None,
         *,
         archive: str | Path | None = None,
+        merge: bool = True,
         key: str = "data",
         **kwargs: Any,
     ):
@@ -1373,6 +1373,9 @@ class Predict(Inference):
 
         Args:
             name: Identifies the stage; defaults to the lowercased class name.
+            merge: Whether the processes' shards are joined into one file
+                when the run ends. Leaving them apart keeps a large output
+                off a single process.
             archive: File the predictions are written to; its suffix picks the
                 format. Kept in memory when absent.
             key: Name the predictions are stored under, for formats that name.
@@ -1380,8 +1383,10 @@ class Predict(Inference):
         """
         super().__init__(name, **kwargs)
         self.archive = Path(archive) if archive is not None else None
+        self.merge = merge
         self.key = key
         self._writer: Archive | None = None
+        self._written: Path | None = None
         self._predictions: list[torch.Tensor] = []
 
     def prepare(self, ctx: Context) -> None:
@@ -1394,14 +1399,46 @@ class Predict(Inference):
         self._writer = None
         if self.archive is None:
             return
-        if ctx.topology.world_size > 1:
-            warnings.warn(
-                f"Predict({self.name!r}) writes only what rank 0 produced; "
-                "the other processes hold the rest.",
-                stacklevel=2,
-            )
+        self._written = self.shard_path(
+            None if ctx.topology.world_size == 1 else ctx.topology.rank
+        )
+        self._writer = archive_for(self._written, self.key)
+
+    def shard_path(self, rank: int | None = None) -> Path | None:
+        """Return the file one process writes its predictions to.
+
+        Ranks hold different predictions, so each writes its own file rather
+        than one of them writing the fraction it happened to see. A run in a
+        single process writes the file it was given, unchanged.
+
+        Args:
+            rank: Which process, or `None` for a run in one process.
+        """
+        if self.archive is None or rank is None:
+            return self.archive
+        return self.archive.with_name(
+            f"{self.archive.stem}.rank{rank}{self.archive.suffix}"
+        )
+
+    def _gather_shards(self, ctx: Context) -> Path | None:
+        """Join every process's shard into the file that was asked for.
+
+        The shards are read in rank order and removed once they are in, so a
+        distributed run leaves behind the single file a local one would.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        if ctx.topology.world_size == 1 or not self.merge:
+            return self._written
+        ctx.topology.barrier()
+        shards = [self.shard_path(rank) for rank in range(ctx.topology.world_size)]
         if ctx.topology.is_main:
-            self._writer = archive_for(self.archive, self.key)
+            merge_archives(shards, self.archive, self.key)
+            for shard in shards:
+                shard.unlink(missing_ok=True)
+        ctx.topology.barrier()
+        return self.archive
 
     @property
     def predictions(self) -> torch.Tensor | None:
@@ -1437,8 +1474,9 @@ class Predict(Inference):
         if self._writer is not None:
             self._writer.close()
             self._writer = None
-        if self.archive is not None:
-            ctx.publish(f"{self.name}/archive", self.archive)
+        if self._written is not None:
+            self._written = self._gather_shards(ctx)
+            ctx.publish(f"{self.name}/archive", self._written)
         else:
             y = self.predictions
             if y is not None:

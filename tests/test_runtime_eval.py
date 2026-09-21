@@ -13,6 +13,7 @@ from torch import nn
 from torch.utils.data import TensorDataset
 
 from chuchichaestli.metrics import MSE, PSNR
+from chuchichaestli.data.archive import ARCHIVES, read_archive
 from chuchichaestli.runtime import (
     Call,
     Context,
@@ -205,16 +206,18 @@ def test_predict_publishes_what_it_produced():
     assert tuple(seen["p"].shape) == (8, 1)
 
 
-def test_predict_streams_a_format_it_can_append_to(tmp_path):
+@pytest.mark.parametrize("suffix", sorted(ARCHIVES))
+def test_predict_streams_every_format_that_can_append(suffix, tmp_path):
     """Nothing is held back, so a large prediction run stays bounded.
 
     Args:
+        suffix: Extension under test.
         tmp_path: Directory pytest gives the test.
     """
-    archive = tmp_path / "out.npy"
+    archive = tmp_path / f"out{suffix}"
     stage = Predict("out", model=linear(), data=ramp(8), batch_size=4, archive=archive)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         Runtime(stage, hooks=(), device="cpu").run()
     assert stage._writer is None
-    assert np.load(archive).shape == (8, 1)
+    assert len(torch.cat(list(read_archive(archive, "data")))) == 8
