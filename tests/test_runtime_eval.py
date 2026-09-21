@@ -4,7 +4,10 @@
 """Tests for the stages that read a model without changing it."""
 
 import h5py
+import warnings
+
 import numpy as np
+from safetensors.torch import load_file
 import pytest
 import torch
 from torch import nn
@@ -163,11 +166,11 @@ def test_predict_still_writes_a_format_it_cannot_append_to(tmp_path):
     Args:
         tmp_path: Directory pytest gives the test.
     """
-    archive = tmp_path / "out.npy"
+    archive = tmp_path / "out.safetensors"
     stage = Predict("out", model=linear(), data=ramp(8), batch_size=4, archive=archive)
     with pytest.warns(UserWarning, match="cannot be appended to"):
         Runtime(stage, hooks=(), device="cpu").run()
-    assert np.load(archive).shape == (8, 1)
+    assert load_file(str(archive))["data"].shape == (8, 1)
 
 
 def test_predict_publishes_the_archive_it_wrote(tmp_path):
@@ -201,3 +204,18 @@ def test_predict_publishes_what_it_produced():
     )
     Runtime(program, hooks=(), device="cpu").run()
     assert tuple(seen["p"].shape) == (8, 1)
+
+
+def test_predict_streams_a_format_it_can_append_to(tmp_path):
+    """Nothing is held back, so a large prediction run stays bounded.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    archive = tmp_path / "out.npy"
+    stage = Predict("out", model=linear(), data=ramp(8), batch_size=4, archive=archive)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        Runtime(stage, hooks=(), device="cpu").run()
+    assert stage._writer is None
+    assert np.load(archive).shape == (8, 1)

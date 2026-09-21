@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for writing a dataset that grows, one batch at a time."""
 
+
 import h5py
 import numpy as np
 import pytest
@@ -13,6 +14,7 @@ from chuchichaestli.data import (
     Hdf5Archive,
     archive_for,
 )
+from chuchichaestli.data.archive import NpyArchive
 
 
 def test_hdf5_appends_as_it_goes(tmp_path):
@@ -100,8 +102,10 @@ def test_the_suffix_picks_the_archive(tmp_path):
     """
     assert isinstance(archive_for(tmp_path / "a.h5"), Hdf5Archive)
     assert archive_for(tmp_path / "a.h5").appends
+    assert isinstance(archive_for(tmp_path / "a.npy"), NpyArchive)
+    assert archive_for(tmp_path / "a.npy").appends
     with pytest.warns(UserWarning, match="cannot be appended to"):
-        fallback = archive_for(tmp_path / "a.npy")
+        fallback = archive_for(tmp_path / "a.safetensors")
     assert isinstance(fallback, BufferedArchive)
     assert not fallback.appends
 
@@ -116,7 +120,7 @@ def test_the_fallback_warning_can_be_silenced(tmp_path):
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        archive_for(tmp_path / "a.npy", warn=False)
+        archive_for(tmp_path / "a.safetensors", warn=False)
 
 
 def test_an_empty_archive_writes_nothing(tmp_path):
@@ -128,3 +132,74 @@ def test_an_empty_archive_writes_nothing(tmp_path):
     path = tmp_path / "out.npy"
     BufferedArchive(path).close()
     assert not path.exists()
+
+
+def test_npy_appends_as_it_goes(tmp_path):
+    """Each batch reaches the file without the others being held.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / "out.npy"
+    with NpyArchive(path) as archive:
+        for value in range(3):
+            archive.write(torch.full((4, 2), float(value)))
+    stored = np.load(path)
+    assert stored.shape == (12, 2)
+    assert stored[:, 0].tolist() == [0.0] * 4 + [1.0] * 4 + [2.0] * 4
+
+
+def test_the_npy_row_count_is_written_in_without_moving_the_data(tmp_path):
+    """The header is reserved at full width, so patching it cannot shift rows.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / "out.npy"
+    with NpyArchive(path) as archive:
+        archive.write(torch.arange(4.0).reshape(2, 2))
+    with open(path, "rb") as handle:
+        assert np.lib.format.read_magic(handle) == (2, 0)
+        shape, fortran, dtype = np.lib.format.read_array_header_2_0(handle)
+        assert handle.tell() == 128
+    assert shape == (2, 2)
+    assert not fortran
+    assert dtype == np.dtype("float32")
+
+
+def test_an_npy_archive_keeps_the_dtype_it_was_given(tmp_path):
+    """Streaming writes raw bytes, so nothing silently widens them.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / "out.npy"
+    with NpyArchive(path) as archive:
+        archive.write(torch.arange(4, dtype=torch.uint8).reshape(2, 2))
+    assert np.load(path).dtype == np.uint8
+
+
+def test_an_empty_npy_archive_writes_nothing(tmp_path):
+    """A stage that produced nothing leaves no file behind.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / "out.npy"
+    NpyArchive(path).close()
+    assert not path.exists()
+
+
+def test_an_aborted_npy_archive_leaves_nothing(tmp_path):
+    """A run that failed partway must not leave a half-written file.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / "out.npy"
+    archive = NpyArchive(path)
+    archive.write(torch.zeros(2, 2))
+    archive.abort()
+    assert not path.exists()
+
+

@@ -6,10 +6,13 @@
 from __future__ import annotations
 import warnings
 from abc import ABC, abstractmethod
+import io
 from contextlib import ExitStack
 from pathlib import Path
 from types import TracebackType
 import h5py
+import numpy as np
+from numpy.lib import format as npy_format
 import torch
 from chuchichaestli.data.hdf5 import HDF5Dataset
 from chuchichaestli.data.save import save_dataset
@@ -17,7 +20,14 @@ from chuchichaestli.utils.io import staged
 from chuchichaestli.utils.tensors import as_array
 
 
-__all__ = ["Archive", "Hdf5Archive", "BufferedArchive", "ARCHIVES", "archive_for"]
+__all__ = [
+    "Archive",
+    "Hdf5Archive",
+    "NpyArchive",
+    "BufferedArchive",
+    "ARCHIVES",
+    "archive_for",
+]
 
 
 class Archive(ABC):
@@ -133,12 +143,88 @@ class Hdf5Archive(Archive):
         self._stack.__exit__(RuntimeError, RuntimeError("aborted"), None)
 
 
-class BufferedArchive(Archive):
-    """Holds every batch until close, for formats that cannot be appended to.
+class NpyArchive(Archive):
+    """Appends each batch to a single nameless array."""
 
-    `.safetensors` and `.npz` fix their layout when the file is written, so
-    there is nowhere to put a later batch.
-    """
+    appends = True
+    MAX_ROWS = 2**63 - 1
+
+    def __init__(self, path: str | Path, key: str = "data"):
+        """Constructor.
+
+        Args:
+            path: File the batches land in.
+            key: Unused; a `.npy` file holds one nameless array.
+        """
+        super().__init__(path, key)
+        self._stack: ExitStack | None = None
+        self._handle: io.BufferedWriter | None = None
+        self._sample: tuple[int, ...] = ()
+        self._descr: str = ""
+        self._offset = 0
+        self._rows = 0
+
+    def _header(self, rows: int) -> bytes:
+        """Return the header bytes declaring a row count.
+
+        Args:
+            rows: Samples the file holds.
+        """
+        raw = io.BytesIO()
+        npy_format.write_array_header_2_0(
+            raw,
+            {
+                "descr": self._descr,
+                "fortran_order": False,
+                "shape": (rows, *self._sample),
+            },
+        )
+        return raw.getvalue()
+
+    def write(self, batch: torch.Tensor) -> None:
+        """Append one batch's rows, opening the file on the first.
+
+        Args:
+            batch: Samples to add, the first axis being the batch.
+        """
+        array = np.ascontiguousarray(as_array(batch))
+        if self._handle is None:
+            self._sample = array.shape[1:]
+            self._descr = npy_format.dtype_to_descr(array.dtype)
+            self._stack = ExitStack()
+            scratch = self._stack.enter_context(staged(self.path))[0]
+            self._handle = open(scratch, "wb")
+            self._handle.write(self._header(self.MAX_ROWS))
+            self._offset = self._handle.tell()
+        self._handle.write(array.tobytes())
+        self._rows += len(array)
+
+    def close(self) -> None:
+        """Write the real row count in, and move the file into place."""
+        if self._handle is None:
+            return
+        header = self._header(self._rows)
+        self._handle.seek(0)
+        self._handle.write(header[:-1].ljust(self._offset - 1) + b"\n")
+        self._handle.close()
+        self._handle = None
+        if self._stack is not None:
+            self._stack.close()
+            self._stack = None
+
+    def abort(self) -> None:
+        """Close the file and discard it."""
+        if self._handle is None:
+            return
+        self._handle.close()
+        self._handle = None
+        if self._stack is not None:
+            self._stack.__exit__(RuntimeError, RuntimeError("aborted"), None)
+            self._stack = None
+
+
+class BufferedArchive(Archive):
+    """Holds every batch until close, for formats that cannot append."""
 
     def __init__(self, path: str | Path, key: str = "data"):
         """Constructor.
@@ -169,9 +255,10 @@ class BufferedArchive(Archive):
         self._batches = []
 
 
-ARCHIVES: dict[str, type[Archive]] = dict.fromkeys(
-    HDF5Dataset.FILE_EXTENSIONS, Hdf5Archive
-)
+ARCHIVES: dict[str, type[Archive]] = {
+    **dict.fromkeys(HDF5Dataset.FILE_EXTENSIONS, Hdf5Archive),
+    ".npy": NpyArchive,
+}
 
 
 def archive_for(path: str | Path, key: str = "data", warn: bool = True) -> Archive:
