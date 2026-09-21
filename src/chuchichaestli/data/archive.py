@@ -6,6 +6,7 @@
 from __future__ import annotations
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Iterator, Sequence
 import io
 import json
 import struct
@@ -16,7 +17,9 @@ import h5py
 import numpy as np
 from numpy.lib import format as npy_format
 import torch
+from torch.utils.data import Dataset
 from chuchichaestli.data.hdf5 import HDF5Dataset
+from chuchichaestli.data.numpy import NumpyDataset
 from chuchichaestli.data.safetensors import SafetensorsDataset
 from chuchichaestli.data.save import save_dataset
 from chuchichaestli.utils.io import staged
@@ -32,7 +35,11 @@ __all__ = [
     "SafetensorsArchive",
     "BufferedArchive",
     "ARCHIVES",
+    "DATASETS",
     "archive_for",
+    "open_archive",
+    "read_archive",
+    "merge_archives",
 ]
 
 
@@ -398,3 +405,80 @@ def archive_for(path: str | Path, key: str = "data", warn: bool = True) -> Archi
             stacklevel=2,
         )
     return BufferedArchive(path, key)
+
+
+DATASETS: dict[str, tuple[type, str]] = {
+    **dict.fromkeys(HDF5Dataset.FILE_EXTENSIONS, (HDF5Dataset, "groups")),
+    **dict.fromkeys(SafetensorsDataset.FILE_EXTENSIONS, (SafetensorsDataset, "keys")),
+    **dict.fromkeys(NumpyDataset.FILE_EXTENSIONS, (NumpyDataset, "keys")),
+}
+
+
+def open_archive(
+    sources: str | Path | Sequence[str | Path],
+    key: str = "data",
+    dtype: torch.dtype = torch.float32,
+) -> Dataset:
+    """Return the dataset that reads the format a suffix names.
+
+    Several files open as one, their indices fused in the order given, which
+    is what lets archives be joined without concatenating them by hand.
+
+    Args:
+        sources: File or files to read.
+        key: Name the batches were stored under.
+        dtype: Type the samples come back as. A dataset names its own rather
+            than inheriting the file's, so a merge states it too.
+
+    Raises:
+        ValueError: If nothing can read the format the suffix names.
+    """
+    if isinstance(sources, (str, Path)):
+        sources = [sources]
+    paths = [Path(source) for source in sources]
+    dataset, selector = require(paths[0].suffix, DATASETS, "archive format")
+    return dataset(
+        paths, cache=False, dtype=dtype, return_as="tuple", **{selector: key}
+    )
+
+
+def read_archive(
+    path: str | Path | Sequence[str | Path],
+    key: str = "data",
+    chunk: int = 1024,
+    dtype: torch.dtype = torch.float32,
+) -> Iterator[torch.Tensor]:
+    """Yield what an archive holds, a chunk of rows at a time.
+
+    Args:
+        path: File or files to read.
+        key: Name the batches were stored under.
+        chunk: Rows to read at once, so a large archive need not be held whole.
+        dtype: Type the samples come back as.
+    """
+    dataset = open_archive(path, key, dtype)
+    for start in range(0, len(dataset), chunk):
+        stop = min(start + chunk, len(dataset))
+        yield torch.stack([dataset[index] for index in range(start, stop)])
+
+
+def merge_archives(
+    sources: Sequence[str | Path],
+    target: str | Path,
+    key: str = "data",
+    chunk: int = 1024,
+    dtype: torch.dtype = torch.float32,
+) -> Path:
+    """Join several archives into one, in the order they are given.
+
+    Args:
+        sources: Files to read, ordered as their contents should appear.
+        target: File to write.
+        key: Name the batches are stored under.
+        chunk: Rows read at once, so a large archive need not be held whole.
+        dtype: Type the samples are written as.
+    """
+    with archive_for(target, key, warn=False) as archive:
+        for batch in read_archive(sources, key, chunk, dtype):
+            archive.write(batch)
+    return Path(target)

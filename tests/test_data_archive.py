@@ -17,6 +17,7 @@ from chuchichaestli.data import (
     archive_for,
 )
 from chuchichaestli.data.archive import NpyArchive, SafetensorsArchive
+from chuchichaestli.data.archive import DATASETS, merge_archives, read_archive
 
 
 def test_hdf5_appends_as_it_goes(tmp_path):
@@ -136,6 +137,73 @@ def test_an_empty_archive_writes_nothing(tmp_path):
     path = tmp_path / "out.npy"
     BufferedArchive(path).close()
     assert not path.exists()
+
+
+DTYPES = [torch.float32, torch.float64, torch.uint8, torch.int64, torch.bool]
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("suffix", sorted(DATASETS))
+def test_every_format_round_trips_what_was_written(suffix, dtype, tmp_path):
+    """What comes back must equal what went in, to the bit and to the type.
+
+    Args:
+        suffix: Extension under test.
+        dtype: Type the samples are written as.
+        tmp_path: Directory pytest gives the test.
+    """
+    torch.manual_seed(0)
+    source = (torch.rand(10, 3, 4) * 10).to(dtype)
+    path = tmp_path / f"out{suffix}"
+    with archive_for(path, "data", warn=False) as archive:
+        for start in range(0, len(source), 4):
+            archive.write(source[start : start + 4])
+    stored = torch.cat(list(read_archive(path, "data", dtype=dtype)))
+    assert stored.dtype == source.dtype
+    assert torch.equal(stored, source)
+
+
+@pytest.mark.parametrize("suffix", sorted(DATASETS))
+def test_reading_gives_the_type_it_was_asked_for(suffix, tmp_path):
+    """A dataset names its own type rather than inheriting the file's.
+
+    Args:
+        suffix: Extension under test.
+        tmp_path: Directory pytest gives the test.
+    """
+    path = tmp_path / f"out{suffix}"
+    with archive_for(path, "data", warn=False) as archive:
+        archive.write(torch.arange(6, dtype=torch.uint8).reshape(3, 2))
+    assert next(read_archive(path, "data")).dtype == torch.float32
+    assert next(read_archive(path, "data", dtype=torch.uint8)).dtype == torch.uint8
+
+
+@pytest.mark.parametrize("suffix", sorted(DATASETS))
+def test_every_format_joins_into_one(suffix, tmp_path):
+    """Merging is what a sharded prediction relies on, for any format.
+
+    Args:
+        suffix: Extension under test.
+        tmp_path: Directory pytest gives the test.
+    """
+    shards = []
+    for shard in range(2):
+        path = tmp_path / f"part{shard}{suffix}"
+        with archive_for(path, "data", warn=False) as archive:
+            archive.write(torch.arange(6.0).reshape(3, 2) + shard * 100)
+        shards.append(path)
+    merged = merge_archives(shards, tmp_path / f"all{suffix}", "data")
+    stored = torch.cat(list(read_archive(merged, "data")))
+    expected = torch.cat(
+        [torch.arange(6.0).reshape(3, 2) + shard * 100 for shard in range(2)]
+    )
+    assert torch.equal(stored, expected)
+
+
+def test_an_unreadable_format_says_which_are_readable(tmp_path):
+    """The suffix is what picks the reader, so a bad one names the rest."""
+    with pytest.raises(ValueError, match="archive format"):
+        next(read_archive(tmp_path / "out.parquet", "data"))
 
 
 def test_npy_appends_as_it_goes(tmp_path):
