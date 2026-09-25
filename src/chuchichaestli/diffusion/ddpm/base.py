@@ -153,5 +153,5 @@ class DiffusionProcess(ABC):
             scale: Scale of the noise tensor.
         """
         if self.noise_distribution is not None:
-            return self.noise_distribution(shape)
+            return self.noise_distribution(shape, generator=self.generator)
         return torch.randn(shape, generator=self.generator, device=self.device)

@@ -75,7 +75,7 @@ class CFGDDPM(DiffusionProcess):
         Returns:
             Tuple of the sampled tensor, noise tensor and timesteps.
         """
-        u = torch.rand(x_t.shape, device=self.device)
+        u = torch.rand(x_t.shape, generator=self.generator, device=self.device)
         lam = -2 * torch.log(torch.tan(self.a * u + self.b))
         alpha_square = torch.sigmoid(lam)
         alpha = torch.sqrt(alpha_square)
@@ -84,7 +84,9 @@ class CFGDDPM(DiffusionProcess):
 
         zeros = torch.zeros_like(condition)
         condition = torch.where(
-            torch.bernoulli(self.p * torch.ones_like(x_t)).type(torch.bool),
+            torch.bernoulli(
+                self.p * torch.ones_like(x_t), generator=self.generator
+            ).type(torch.bool),
             zeros,
             condition,
         )
@@ -164,7 +166,7 @@ class CFGDDPM(DiffusionProcess):
                 std = (
                     sigma_tilde_squared ** (1 - self.v) * sigma_lambda_t_reverse**self.v
                 )
-                z_t = torch.normal(mu_tilde, std)
+                z_t = torch.normal(mu_tilde, std, generator=self.generator)
 
         yield x_tilde_t
 

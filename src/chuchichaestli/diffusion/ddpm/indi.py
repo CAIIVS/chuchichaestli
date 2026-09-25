@@ -56,7 +56,13 @@ class InDI(DiffusionProcess):
             Tensor of shape (batch_size,) with the sampled timesteps.
         """
         return (
-            torch.randint(0, self.num_time_steps, (batch_size,), device=self.device)
+            torch.randint(
+                0,
+                self.num_time_steps,
+                (batch_size,),
+                generator=self.generator,
+                device=self.device,
+            )
             * self.delta
         )
 
