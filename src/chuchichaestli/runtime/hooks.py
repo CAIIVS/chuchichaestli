@@ -54,7 +54,7 @@ __all__ = [
     "Jsonl",
     "Timer",
     "EarlyStop",
-    "Cancel",
+    "GracefulStop",
     "ModeTypes",
     "ThresholdModeTypes",
     "CheckpointUnitTypes",
@@ -383,7 +383,7 @@ class EarlyStop:
         return Signal.BREAK if self.waited > self.patience else Signal.GO
 
 
-class Cancel:
+class GracefulStop:
     """Turn a cancellation signal into a graceful stop.
 
     A `scancel`, a job time limit, or a Ctrl-C otherwise kills the process
@@ -413,7 +413,7 @@ class Cancel:
 
     def __repr__(self) -> str:
         """Return a short description of the hook."""
-        return f"Cancel({', '.join(self.signals)})"
+        return f"GracefulStop({', '.join(self.signals)})"
 
     def _install(self) -> None:
         """Take over the configured signals, remembering what was there."""

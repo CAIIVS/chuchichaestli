@@ -9,7 +9,7 @@ import signal
 import pytest
 
 from chuchichaestli.runtime.events import C3liRuntimeError, Event, EventType, Signal
-from chuchichaestli.runtime.hooks import Cancel
+from chuchichaestli.runtime.hooks import GracefulStop
 from chuchichaestli.runtime.runtime import Runtime
 from chuchichaestli.runtime.stages import Call, Program
 
@@ -55,7 +55,7 @@ def test_a_signal_stops_the_run_gracefully(name):
     watch = Watch()
     program = Program([Call("a", fn=raise_signal(name)), Call("b", fn=lambda c: None)])
     with pytest.raises(C3liRuntimeError, match=f"cancelled by {name}"):
-        Runtime(program, hooks=[Cancel(), watch]).run()
+        Runtime(program, hooks=[GracefulStop(), watch]).run()
 
     ended = [e for e in watch.events if e.type is EventType.RUN_ENDED]
     assert ended and ended[0].payload["aborted"] == f"cancelled by {name}"
@@ -66,7 +66,7 @@ def test_a_signal_stops_the_run_gracefully(name):
 def test_handlers_are_restored_after_the_run():
     """A library taking over SIGTERM must give it back."""
     before = signal.getsignal(signal.SIGTERM)
-    Runtime(Program([Call("a", fn=lambda c: None)]), hooks=[Cancel()]).run()
+    Runtime(Program([Call("a", fn=lambda c: None)]), hooks=[GracefulStop()]).run()
     assert signal.getsignal(signal.SIGTERM) is before
 
 
@@ -75,7 +75,7 @@ def test_handlers_are_restored_even_when_the_run_fails():
     before = signal.getsignal(signal.SIGTERM)
     with pytest.raises(C3liRuntimeError):
         Runtime(
-            Program([Call("a", fn=raise_signal("SIGTERM"))]), hooks=[Cancel()]
+            Program([Call("a", fn=raise_signal("SIGTERM"))]), hooks=[GracefulStop()]
         ).run()
     assert signal.getsignal(signal.SIGTERM) is before
 
@@ -85,10 +85,10 @@ def test_an_unknown_signal_name_warns_rather_than_raises():
     with pytest.warns(UserWarning, match="No signal named"):
         Runtime(
             Program([Call("a", fn=lambda c: None)]),
-            hooks=[Cancel(signals=("SIGNOTREAL",))],
+            hooks=[GracefulStop(signals=("SIGNOTREAL",))],
         ).run()
 
 
 def test_cancel_is_critical():
     """A muted canceller would silently stop responding to scancel."""
-    assert Cancel.critical is True
+    assert GracefulStop.critical is True
