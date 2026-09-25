@@ -339,7 +339,7 @@ def test_the_resumed_trace_matches_the_uninterrupted_one(tmp_path):
         store=store,
         hooks=[
             Checkpointer(every=1, unit="advance"),
-            Jsonl(tmp_path / "first.jsonl"),
+            Jsonl("first.jsonl"),
             StopAfter(2),
         ],
     ).run()
@@ -347,14 +347,12 @@ def test_the_resumed_trace_matches_the_uninterrupted_one(tmp_path):
         recorder([]),
         store=store,
         resume="last",
-        hooks=[Jsonl(tmp_path / "second.jsonl")],
+        hooks=[Jsonl("second.jsonl")],
     ).run()
-    Runtime(recorder([]), hooks=[Jsonl(tmp_path / "whole.jsonl")]).run()
+    Runtime(recorder([]), hooks=[Jsonl("whole.jsonl")], store=store).run()
 
-    resumed = stage_trace(tmp_path / "first.jsonl") + stage_trace(
-        tmp_path / "second.jsonl"
-    )
-    assert resumed == stage_trace(tmp_path / "whole.jsonl")
+    resumed = stage_trace(store / "first.jsonl") + stage_trace(store / "second.jsonl")
+    assert resumed == stage_trace(store / "whole.jsonl")
 
 
 def test_a_binding_is_restored_from_the_checkpoint(tmp_path):
@@ -1014,3 +1012,31 @@ def test_a_binding_name_cannot_escape_the_checkpoint(tmp_path):
     path = written.weights["../../etc/passwd"]
     assert path.parent == written.path
     assert path.is_file()
+
+
+def test_a_checkpointer_can_be_told_where_to_write(tmp_path):
+    """Its own store wins over the run's, which stays untouched.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    Runtime(
+        recorder([]),
+        store=tmp_path / "store",
+        hooks=[Checkpointer(every=1, unit="advance", store=elsewhere)],
+    ).run()
+    assert sorted(p.name for p in elsewhere.glob("ckpt_*"))
+    assert not sorted((tmp_path / "store").glob("ckpt_*"))
+
+
+def test_a_checkpointer_told_where_to_go_needs_no_run_store(tmp_path):
+    """Only a hook relying on the run's store forces one to be given.
+
+    Args:
+        tmp_path: Directory pytest gives the test.
+    """
+    Runtime(
+        recorder([]), hooks=[Checkpointer(every=1, unit="advance", store=tmp_path)]
+    ).run()
+    assert sorted(p.name for p in tmp_path.glob("ckpt_*"))

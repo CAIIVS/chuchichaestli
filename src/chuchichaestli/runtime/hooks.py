@@ -240,35 +240,74 @@ class Console:
 
 
 class Jsonl:
-    """Append every event to a JSON Lines file, recording the run's trace."""
+    """Append every event to a JSON Lines file, recording the run's trace.
+
+    The file goes beside the run's checkpoints by default, so a trace and the
+    state it describes are found together and a second run cannot overwrite
+    the first unless it was given the same store.
+
+    Attributes:
+        name: What the file is called within the store.
+        store: Directory it is written to.
+        needs_store: Whether the runtime must be given a store, which it need
+            not be when this hook was told where to write.
+    """
+
+    needs_store: bool = True
 
     def __init__(
         self,
-        path: str | Path,
+        name: str = "trace.jsonl",
+        store: str | Path | None = None,
         only: Sequence[EventType] | None = None,
         flush_every: int = 1,
     ):
         """Constructor.
 
         Args:
-            path: File to append to; parent directories are created.
+            name: File to append to within the store. A name, not a path:
+                where a run records itself is the store's to decide.
+            store: Directory to write into, overriding the run's own. Given
+                one, this hook needs nothing from the runtime.
             only: Record just these event types, or all of them when `None`.
             flush_every: Flush periodicity. Flushing costs almost nothing;
                 so raise this only for a trace busy enough for that to matter,
                 e.g. micro-batching.
 
         Raises:
-            ValueError: If `flush_every` is not positive.
+            ValueError: If `flush_every` is not positive, or `name` is a path.
         """
         if flush_every < 1:
             raise ValueError(
                 f"Jsonl needs a positive flush interval, got {flush_every!r}."
             )
-        self.path = Path(path)
+        if Path(name).name != str(name):
+            raise ValueError(
+                f"Jsonl takes a name within the run's store, got {name!r}. "
+                "Pass store= to the runtime to say where it goes."
+            )
+        self.name = str(name)
         self.only = frozenset(only) if only is not None else None
         self.flush_every = flush_every
+        self.store = Path(store) if store is not None else None
+        self.needs_store = self.store is None
         self._write_counter = 0
         self._handle: TextIO | None = None
+
+    @property
+    def path(self) -> Path:
+        """Return the file this hook appends to."""
+        return (self.store or Path()) / self.name
+
+    def attach(self, runtime: Runtime, ctx: Context) -> None:
+        """Receive the run whose trace this hook records.
+
+        Args:
+            runtime: The engine executing the program.
+            ctx: Root context of the run.
+        """
+        if self.store is None:
+            self.store = runtime.store
 
     def __repr__(self) -> str:
         """Return a short description of the hook."""
@@ -656,7 +695,9 @@ class Checkpointer:
 
     Attributes:
         critical: Whether a failed write stops the run.
-        needs_store: Whether the runtime must be given a store.
+        store: Directory they are written to.
+        needs_store: Whether the runtime must be given a store, which it need
+            not be when this hook was told where to write.
     """
 
     critical: bool = True
@@ -671,6 +712,7 @@ class Checkpointer:
         prefix: str = "ckpt_",
         rng: bool = True,
         at_end: bool = True,
+        store: str | Path | None = None,
     ):
         """Constructor.
 
@@ -680,6 +722,10 @@ class Checkpointer:
                 - `"epoch"` counts epochs, i.e. dataset passes
                 - `"step"` counts optimizer steps
                 - `"advance"` counts program steps, i.e. a stage's unit of work
+            store: Directory to write into, overriding the run's own. Given
+                one, this hook needs nothing from the runtime. A resume reads
+                the runtime's store rather than this one, so point `store=`
+                at the same directory to carry on from what this wrote.
             keep: How many checkpoints to retain, or `None` to keep all.
             format: `"safetensors"` or `"torch"`.
             prefix: What each checkpoint directory is named before its number.
@@ -698,6 +744,8 @@ class Checkpointer:
         self.keep = keep
         self.format = format
         self.prefix = prefix
+        self.store = Path(store) if store is not None else None
+        self.needs_store = self.store is None
         self.rng = rng
         self.at_end = at_end
         self._store: CheckpointStore | None = None
@@ -732,7 +780,10 @@ class Checkpointer:
         self._at = None
         self._at_path = None
         self._store = CheckpointStore(
-            runtime.store, keep=self.keep, format=self.format, prefix=self.prefix
+            self.store or runtime.store,
+            keep=self.keep,
+            format=self.format,
+            prefix=self.prefix,
         )
 
     def on(self, event: Event) -> Signal:

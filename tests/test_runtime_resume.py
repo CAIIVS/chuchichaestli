@@ -217,9 +217,10 @@ def uninterrupted(program: Program, trace=None) -> Program:
 
     Args:
         program: What to run.
-        trace: Where to write the event trace, if anywhere.
+        trace: Directory to record the trace into, if anywhere. This run
+            keeps no checkpoints, so the hook is told where to write.
     """
-    hooks = [Jsonl(trace)] if trace else []
+    hooks = [Jsonl("trace.jsonl", store=trace)] if trace else []
     Runtime(program, seed=42, hooks=hooks).run()
     return program
 
@@ -229,9 +230,9 @@ def interrupted(program: Program, store, at: int, trace=None) -> Program:
 
     Args:
         program: What to run.
-        store: Where checkpoints are written.
+        store: Where checkpoints and the trace are written.
         at: Optimizer step to cancel on.
-        trace: Where to write the event trace, if anywhere.
+        trace: Name to record the trace under, if anywhere.
     """
     hooks = [Checkpointer(every=1, unit="step")]
     if trace:
@@ -248,7 +249,7 @@ def resumed(program: Program, store, trace=None) -> Program:
     Args:
         program: A fresh copy of what was interrupted.
         store: Where checkpoints were written.
-        trace: Where to write the event trace, if anywhere.
+        trace: Name to record the trace under, if anywhere.
     """
     hooks = [Jsonl(trace)] if trace else []
     Runtime(program, seed=42, store=store, resume="last", hooks=hooks).run()
@@ -309,14 +310,12 @@ def test_a_run_resumes_inside_a_nested_repeat(tmp_path):
 def test_the_resumed_trace_matches_the_uninterrupted_one(tmp_path):
     """What the run reports must not say it was interrupted either."""
     store = tmp_path / "run"
-    uninterrupted(plain(), trace=tmp_path / "whole.jsonl")
-    interrupted(plain(), store, at=5, trace=tmp_path / "first.jsonl")
-    resumed(plain(), store, trace=tmp_path / "second.jsonl")
+    uninterrupted(plain(), trace=tmp_path / "alone")
+    interrupted(plain(), store, at=5, trace="first.jsonl")
+    resumed(plain(), store, trace="second.jsonl")
 
-    carried = work_trace(tmp_path / "first.jsonl") + work_trace(
-        tmp_path / "second.jsonl"
-    )
-    assert carried == work_trace(tmp_path / "whole.jsonl")
+    carried = work_trace(store / "first.jsonl") + work_trace(store / "second.jsonl")
+    assert carried == work_trace(tmp_path / "alone" / "trace.jsonl")
 
 
 def test_a_cancelled_run_keeps_the_stage_it_was_in(tmp_path):
@@ -387,8 +386,8 @@ def test_a_reopened_pass_reports_the_epoch_it_resumed_into(tmp_path):
     """The trace is the oracle here, so its counters have to be right."""
     store = tmp_path / "run"
     interrupted(plain(), store, at=6)
-    trace = tmp_path / "second.jsonl"
-    resumed(plain(), store, trace=trace)
+    resumed(plain(), store, trace="second.jsonl")
+    trace = store / "second.jsonl"
     opened = [
         event
         for event in map(json.loads, trace.read_text().splitlines())
@@ -430,3 +429,36 @@ def test_every_update_group_comes_back(tmp_path):
     assert identical(
         bindings(whole, "model", "disc"), bindings(carried, "model", "disc")
     )
+
+
+def test_a_run_resumes_from_where_the_hook_was_told_to_write(tmp_path):
+    """The store is a directory, so the two ways of naming it agree."""
+    elsewhere = tmp_path / "elsewhere"
+    whole = uninterrupted(plain())
+    with pytest.raises(C3liRuntimeError):
+        Runtime(
+            plain(),
+            seed=42,
+            hooks=[Checkpointer(every=1, unit="step", store=elsewhere), CancelAt(5)],
+        ).run()
+    carried = plain()
+    Runtime(carried, seed=42, store=elsewhere, resume="last", hooks=[]).run()
+    assert identical(weights(whole), weights(carried))
+
+
+def test_naming_the_same_store_twice_writes_it_once(tmp_path):
+    """A hook pointed at the run's own store is not a second writer."""
+    store = tmp_path / "run"
+    whole = uninterrupted(plain())
+    with pytest.raises(C3liRuntimeError):
+        Runtime(
+            plain(),
+            seed=42,
+            store=store,
+            hooks=[Checkpointer(every=1, unit="step", store=store), CancelAt(5)],
+        ).run()
+    written = sorted(p.name for p in store.glob("ckpt_*"))
+    assert written == sorted(set(written))
+    carried = plain()
+    Runtime(carried, seed=42, store=store, resume="last", hooks=[]).run()
+    assert identical(weights(whole), weights(carried))

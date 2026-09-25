@@ -249,7 +249,7 @@ def test_trace_is_written_as_json_lines(tmp_path):
 
     path = tmp_path / "trace.jsonl"
     program = Program([Call("a", fn=lambda c: None)])
-    Runtime(program, hooks=[Jsonl(path)]).run()
+    Runtime(program, hooks=[Jsonl(path.name)], store=path.parent).run()
     lines = [json.loads(line) for line in path.read_text().splitlines()]
     assert lines[0]["type"] == "run.began"
     assert lines[-1]["type"] == "run.ended"
@@ -268,8 +268,8 @@ def test_two_identical_runs_produce_identical_traces(tmp_path):
         )
 
     first, second = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
-    Runtime(build(), seed=5, hooks=[Jsonl(first)]).run()
-    Runtime(build(), seed=5, hooks=[Jsonl(second)]).run()
+    Runtime(build(), seed=5, hooks=[Jsonl(first.name)], store=first.parent).run()
+    Runtime(build(), seed=5, hooks=[Jsonl(second.name)], store=second.parent).run()
     assert first.read_text() == second.read_text()
 
 
