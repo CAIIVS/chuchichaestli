@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the objective terms shipped with the runtime."""
 
+import warnings
+
 import pytest
 import torch
 from torch import nn
@@ -483,6 +485,70 @@ def test_diffusion_shares_its_draw_within_a_step():
     first.noise(batch, ctx)
     second.noise(batch, ctx)
     assert process.calls == 1
+
+
+class Conditioned(Noising):
+    """A stand-in process that records the condition it was handed."""
+
+    def __init__(self):
+        """Constructor."""
+        super().__init__()
+        self.given = None
+
+    def noise_step(self, x, condition=None, *args, **kwargs):
+        """Return a noised sample, its noise and its timesteps.
+
+        Args:
+            x: Clean samples to noise.
+            condition: Recorded, then ignored.
+            args: Unused.
+            kwargs: Unused.
+        """
+        self.given = condition
+        return super().noise_step(x)
+
+
+def test_a_conditional_process_is_handed_its_condition():
+    """The condition rides beside the sample instead of being noised with it."""
+    process = Conditioned()
+    c = torch.full((4, 2), 7.0)
+    term = Diffusion(process, model=nn.Identity(), inputs="x", condition="c")
+    term.noise({"x": torch.ones(4, 3), "c": c}, a_context())
+    assert torch.equal(process.given, c)
+
+
+def test_the_condition_is_read_by_name_not_by_position():
+    """Naming the wrong column would noise the condition and condition on the sample."""
+    process = Conditioned()
+    c = torch.full((4, 2), 7.0)
+    term = Diffusion(process, model=nn.Identity(), inputs="x", condition="c")
+    term.noise({"c": c, "x": torch.ones(4, 3)}, a_context())
+    assert torch.equal(process.given, c)
+
+
+def test_a_process_left_unconditioned_is_handed_nothing():
+    """Omitting `condition` keeps a process that has one unconditional."""
+    process = Conditioned()
+    term = Diffusion(process, model=nn.Identity())
+    term.noise((torch.ones(4, 3),), a_context())
+    assert process.given is None
+
+
+def test_a_process_drawing_from_its_own_generator_says_so():
+    """A checkpoint does not carry it, so a resumed run would redraw."""
+    process = Noising()
+    process.generator = torch.Generator()
+    with pytest.warns(UserWarning, match="a checkpoint does not carry"):
+        Diffusion(process, model=nn.Identity())
+
+
+def test_a_process_left_to_the_runtime_draws_no_warning():
+    """The warning is about the generator, not about every process."""
+    process = Noising()
+    process.generator = None
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        Diffusion(process, model=nn.Identity())
 
 
 def test_diffusion_inherits_the_model_criterion_configuration():

@@ -4,6 +4,7 @@
 """Objectives that read the execution context to know what to compute."""
 
 from __future__ import annotations
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -487,18 +488,18 @@ class DiscriminatorAdv(Adversarial):
 class Diffusion(ModelCriterion):
     """Scores a model's noise prediction against the noise that was added.
 
-    Only the noise parameterisation is covered: the model is run on a noised
-    sample and its output compared to the noise that made it.
-
     Attributes:
         process: Supplies the forward noising step.
         loss: Compares the prediction to the noise.
+        condition: Key a condition is read from, or `None` when the process
+            is unconditional.
     """
 
     def __init__(
         self,
         process: DiffusionLike,
         loss: Callable[..., torch.Tensor] | None = None,
+        condition: str | None = None,
         **kwargs: Any,
     ):
         """Constructor.
@@ -506,11 +507,23 @@ class Diffusion(ModelCriterion):
         Args:
             process: Diffusion process supplying `noise_step`.
             loss: Compares the prediction to the noise; MSE by default.
+            condition: Key a condition is read from, for a process that has
+                one; `None` leaves it unconditional.
             kwargs: Passed to `ModelCriterion`.
         """
         super().__init__(**kwargs)
+        if getattr(process, "generator", None) is not None:
+            warnings.warn(
+                f"{type(process).__name__} draws from a generator of its own, "
+                "which a checkpoint does not carry. A resumed run rewinds it "
+                "and redraws what it already drew, so it will not reproduce "
+                "an uninterrupted one. Leave generator=None to draw from the "
+                "randomness the runtime does capture.",
+                stacklevel=2,
+            )
         self.process = process
         self.loss = nn.MSELoss() if loss is None else loss
+        self.condition = condition
 
     def noise(self, batch: BatchType, ctx: Context) -> tuple[Any, Any, Any]:
         """Return a noised sample, the noise that made it, and the timesteps.
@@ -519,9 +532,17 @@ class Diffusion(ModelCriterion):
             batch: One micro-batch of the stage's data.
             ctx: Execution context for the stage.
         """
-        x = input_in_batch(batch, self.inputs)
+        if self.condition is None:
+            x, condition = input_in_batch(batch, self.inputs), None
+        else:
+            x, condition = unpack_batch(
+                batch, self.inputs, self.condition, reader=type(self).__name__
+            )
         # cache so terms sharing a step see the same draw
-        return ctx.cache(f"{self.cache}/noise", lambda: self.process.noise_step(x))
+        return ctx.cache(
+            f"{self.cache}/noise",
+            lambda: self.process.noise_step(x, condition=condition),
+        )
 
     def compute(self, batch: BatchType, ctx: Context) -> Loss:
         """Compute the denoising loss for one batch.
