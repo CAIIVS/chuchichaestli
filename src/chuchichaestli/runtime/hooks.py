@@ -355,9 +355,6 @@ class EarlyStop:
     def _improved(self, value: float) -> bool:
         """Whether a value beats the best seen by enough to count.
 
-        The four cases are `ReduceLROnPlateau._is_better` verbatim, so a run
-        configured with both agrees with itself about what a plateau is.
-
         Args:
             value: The newly observed value.
         """
