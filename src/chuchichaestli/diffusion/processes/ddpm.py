@@ -8,7 +8,7 @@ from collections.abc import Callable, Generator
 import torch
 import torch.types
 
-from chuchichaestli.diffusion.ddpm.base import SCHEDULES, DiffusionProcess
+from chuchichaestli.diffusion.processes.base import SCHEDULES, DiffusionProcess
 
 
 class DDPM(DiffusionProcess):

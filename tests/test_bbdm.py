@@ -5,7 +5,7 @@
 
 import pytest
 import torch
-from chuchichaestli.diffusion.ddpm import BBDM
+from chuchichaestli.diffusion.processes import BBDM
 
 
 @pytest.mark.parametrize(

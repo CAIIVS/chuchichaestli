@@ -6,7 +6,7 @@
 import pytest
 import torch
 
-from chuchichaestli.diffusion.ddpm import BBDM, CFGDDPM, DDPM, InDI, PriorGrad
+from chuchichaestli.diffusion.processes import BBDM, CFGDDPM, DDPM, InDI, PriorGrad
 from chuchichaestli.diffusion.distributions import (
     HalfNormalDistribution,
     NormalDistribution,

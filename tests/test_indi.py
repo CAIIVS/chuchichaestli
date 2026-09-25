@@ -5,7 +5,7 @@
 
 import pytest
 import torch
-from chuchichaestli.diffusion.ddpm.indi import InDI
+from chuchichaestli.diffusion.processes.indi import InDI
 
 
 @pytest.mark.parametrize(

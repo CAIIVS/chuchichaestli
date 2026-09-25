@@ -7,7 +7,7 @@ from collections.abc import Callable, Generator
 
 import torch
 
-from chuchichaestli.diffusion.ddpm.base import DiffusionProcess
+from chuchichaestli.diffusion.processes.base import DiffusionProcess
 
 
 class InDI(DiffusionProcess):

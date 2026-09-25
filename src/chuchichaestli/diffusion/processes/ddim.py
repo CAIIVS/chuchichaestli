@@ -4,7 +4,7 @@
 """Implementation of the Denoising Diffusion Implicit Model."""
 
 from collections.abc import Callable, Generator
-from chuchichaestli.diffusion.ddpm import DDPM
+from chuchichaestli.diffusion.processes import DDPM
 
 import torch
 from torch import Tensor

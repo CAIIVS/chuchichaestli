@@ -291,7 +291,7 @@ class Denoiser(nn.Module):
 
 def test_sample_draws_from_a_process_and_pairs_the_truth():
     """A `Predict` reads the model once; a process walks a whole schedule."""
-    from chuchichaestli.diffusion.ddpm import DDPM
+    from chuchichaestli.diffusion.processes import DDPM
     from chuchichaestli.runtime import FromProcess, Predict
 
     torch.manual_seed(0)

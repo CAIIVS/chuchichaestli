@@ -10,7 +10,7 @@ import torch
 from torch.utils.data import TensorDataset
 
 from chuchichaestli.data import HalfMoonsDataset
-from chuchichaestli.diffusion.ddpm import DDPM
+from chuchichaestli.diffusion.processes import DDPM
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.runtime import (
     Checkpointer,

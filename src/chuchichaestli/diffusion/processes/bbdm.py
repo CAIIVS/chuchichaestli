@@ -8,7 +8,7 @@ from collections.abc import Callable, Generator
 import torch
 from torch import Tensor
 
-from chuchichaestli.diffusion.ddpm.base import DiffusionProcess
+from chuchichaestli.diffusion.processes.base import DiffusionProcess
 from chuchichaestli.diffusion.distributions import DistributionAdapter
 
 

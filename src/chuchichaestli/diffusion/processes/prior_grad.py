@@ -7,7 +7,7 @@ from collections.abc import Callable, Generator
 
 import torch
 
-from chuchichaestli.diffusion.ddpm.ddpm import DDPM
+from chuchichaestli.diffusion.processes.ddpm import DDPM
 from chuchichaestli.diffusion.distributions import NormalDistribution
 
 

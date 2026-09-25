@@ -8,7 +8,7 @@ import torch.types
 
 from collections.abc import Callable, Generator
 
-from chuchichaestli.diffusion.ddpm import DDPM
+from chuchichaestli.diffusion.processes import DDPM
 
 
 class ShiftDDPM(DDPM):

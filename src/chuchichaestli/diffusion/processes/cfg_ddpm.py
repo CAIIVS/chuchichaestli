@@ -6,7 +6,7 @@
 import torch
 import torch.types
 
-from chuchichaestli.diffusion.ddpm.base import DiffusionProcess
+from chuchichaestli.diffusion.processes.base import DiffusionProcess
 
 from collections.abc import Callable, Generator
 
