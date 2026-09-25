@@ -6,10 +6,13 @@
 import pytest
 import torch
 from torch import nn
+from torch.utils.data import TensorDataset
 
+from chuchichaestli.runtime.runtime import Runtime
 from chuchichaestli.runtime.context import Context
 from chuchichaestli.runtime.events import Progress, Signal
 from chuchichaestli.runtime.stages import (
+    Train,
     Barrier,
     Call,
     Every,
@@ -295,3 +298,35 @@ def test_an_unknown_suffix_names_what_is_accepted(tmp_path, stage, match):
         block = Export("out", path=path, source="model")
     with pytest.raises(ValueError, match=match):
         drive(Program([block], provide={"model": nn.Linear(2, 2)}))
+
+
+def test_each_pass_slots_a_stage_between_the_passes():
+    """The pass count is given once, to the phase, not twice."""
+    seen: list[str] = []
+    training = Train(
+        "fit",
+        model=nn.Linear(2, 1),
+        data=TensorDataset(torch.rand(4, 2), torch.rand(4, 1)),
+        batch_size=4,
+        epochs=7,
+        loss=nn.MSELoss(),
+    )
+    after = Call("after", fn=lambda ctx: seen.append("after"))
+    program = Program(stages=[Phase.each_pass(3, training, after)])
+    Runtime(program, hooks=(), device="cpu").run()
+    assert training.epochs == 1
+    assert seen == ["after"] * 3
+
+
+def test_each_pass_refuses_a_loop_counting_in_steps():
+    """A step budget cannot be divided a pass at a time."""
+    counting = Train(
+        "fit",
+        model=nn.Linear(2, 1),
+        data=TensorDataset(torch.rand(4, 2), torch.rand(4, 1)),
+        batch_size=4,
+        steps=10,
+        loss=nn.MSELoss(),
+    )
+    with pytest.raises(ValueError, match="counts in steps"):
+        Phase.each_pass(3, counting)

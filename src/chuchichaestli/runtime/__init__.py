@@ -63,6 +63,8 @@ from chuchichaestli.runtime.serialize import (
     writable_spec,
 )
 from chuchichaestli.runtime.stages import (
+    FromLatent,
+    FromProcess,
     Eval,
     Finetune,
     Inference,
@@ -166,6 +168,8 @@ __all__ = [
     "StageLoop",
     "Train",
     "Finetune",
+    "FromLatent",
+    "FromProcess",
     "Inference",
     "Eval",
     "Predict",

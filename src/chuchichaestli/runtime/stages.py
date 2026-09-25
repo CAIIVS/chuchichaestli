@@ -14,7 +14,7 @@ from torch import nn
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.optimizer import ParamsT
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, TensorDataset
 from chuchichaestli.data.archive import Archive, archive_for, merge_archives
 from chuchichaestli.data.batch import (
     BatchType,
@@ -34,7 +34,12 @@ from chuchichaestli.runtime.update import (
 )
 from chuchichaestli.runtime.events import EventType, Progress, Signal
 from chuchichaestli.runtime.topology import lockstep, reduce_metrics
-from chuchichaestli.runtime.traits import Objective, Stage, Stateful
+from chuchichaestli.runtime.traits import (
+    DiffusionLike,
+    Objective,
+    Stage,
+    Stateful,
+)
 from chuchichaestli.training.objective import Loss, Term
 from chuchichaestli.training.optim import OptimSpec, disjoint_params
 from chuchichaestli.training.update import (
@@ -66,6 +71,8 @@ __all__ = [
     "Inference",
     "Eval",
     "Predict",
+    "FromProcess",
+    "FromLatent",
 ]
 
 
@@ -333,6 +340,38 @@ class Phase:
         self._entered = False
         self._child_ctx: Context | None = None
         self._restored: dict[str, Any] | None = None
+
+    @classmethod
+    def each_pass(
+        cls,
+        passes: int,
+        loop: Stage,
+        *between: Stage,
+        name: str = "epoch",
+    ) -> Stage:
+        """Return a phase running a loop one pass at a time, others between.
+
+        Args:
+            passes: How many passes over the data to make in all. The loop
+                reports it as the total its passes count towards, which is
+                what lets a bar span the regimen rather than one visit.
+            loop: The stage whose passes the others are slotted between.
+            between: Stages to run after each of the loop's passes.
+            name: Identifies each visit within the repetition.
+
+        Raises:
+            ValueError: If the loop counts in steps, which a pass at a time
+                cannot divide.
+        """
+        if getattr(loop, "steps", None) is not None:
+            raise ValueError(
+                f"{type(loop).__name__}({loop.name!r}) counts in steps, which "
+                "cannot be split a pass at a time; give it epochs= instead, "
+                "or repeat it yourself."
+            )
+        loop.epochs = 1
+        loop.planned_passes = passes
+        return Repeat(passes, cls(name, [loop, *between]))
 
     def __repr__(self) -> str:
         """Return a short description of the phase."""
@@ -602,6 +641,9 @@ class StageLoop(ABC):
 
     Attributes:
         name: Identifies the stage within its parent.
+        total_steps: Units of work done in all, across however many times the
+            stage was entered. Its `progress` counts the entry in hand, as
+            `enter` resets that by contract.
         data: What the loop draws batches from, or the name of a binding.
         batch_size: Samples one forward sees, for a bare dataset.
         epochs: Passes over the data to make, or `None`.
@@ -628,8 +670,8 @@ class StageLoop(ABC):
         Args:
             name: Identifies the stage; defaults to the lowercased class name.
             data: A `DataManager`, a dataset, or the name of a binding.
-            batch_size: Samples one forward sees, for a bare dataset. With
-                `accumulate` it says what a step consumes; a built
+            batch_size: Samples one forward sees if a bare dataset is given.
+                With `accumulate` it says what a step consumes; a built
                 `DataManager` carries its own.
             epochs: Passes over the data to make; `None` leaves it to `steps`.
             steps: Units of work to perform; `None` leaves it to `epochs`.
@@ -648,6 +690,8 @@ class StageLoop(ABC):
         self.epochs = epochs
         self.steps = steps
         self.accumulate = accumulate
+        self.planned_passes: int | None = None
+        self.total_steps = 0
         self.requires = tuple(requires)
         self.provides = tuple(provides)
         self._progress = Progress()
@@ -697,10 +741,14 @@ class StageLoop(ABC):
         """
         self._progress = Progress()
         ctx.progress = self._progress
-        dm_kwargs = {} if self.batch_size is None else {"batch_size": self.batch_size}
-        self._manager = DataManager.from_source(ctx.resolve(self.data), **dm_kwargs)
+        manager_kwargs = {} if self.batch_size is None else {"batch_size": self.batch_size}
+        self._manager = DataManager.from_source(
+            ctx.resolve(self.data), **manager_kwargs
+        )
         self._world_size = ctx.topology.world_size
         self._iterator = None
+        self._steps_in_pass = 0
+        self._steps_in_entry = 0
         self.prepare(ctx)
         return ctx.emit(EventType.STAGE_BEGAN, stage=type(self).__name__)
 
@@ -717,14 +765,25 @@ class StageLoop(ABC):
             return self._next_sweep(ctx)
         loss = self.core(batches, ctx)
         samples = sum(samples_in_batch(batch) for batch in batches)
+        self.total_steps += 1
         self._progress = self._progress.next_step(samples)
         ctx.progress = self._progress
         reported = {} if loss is None else loss.as_floats()
+        if self._steps_in_entry:
+            reported["total"] = self._steps_in_entry
         signal = ctx.emit(EventType.STEP_ENDED, **reported)
         if self.steps is not None and self._progress.global_step >= self.steps:
             self._finish(ctx)
             return Signal.DONE
         return signal
+
+    def summary(self) -> dict[str, Any]:
+        """Return what the stage has to report as it ends.
+
+        It rides in the closing event, so whatever a stage measured reaches
+        the console and the trace without either needing to know about it.
+        """
+        return {}
 
     def leave(self, ctx: Context) -> Signal:
         """Announce that the stage is over.
@@ -734,7 +793,7 @@ class StageLoop(ABC):
         """
         self._iterator = None
         ctx.progress = self._progress
-        ctx.emit(EventType.STAGE_ENDED, stage=type(self).__name__)
+        ctx.emit(EventType.STAGE_ENDED, stage=type(self).__name__, **self.summary())
         return Signal.GO
 
     def progress(self) -> Progress:
@@ -778,6 +837,9 @@ class StageLoop(ABC):
         Args:
             ctx: Execution context for this entry.
         """
+        batches = self._manager.batches_in(ctx, self._progress.epoch)
+        self._steps_in_pass = -(-batches // self.accumulate)
+        self._steps_in_entry = self._expected_steps()
         self._iterator = self._manager.iter(
             ctx,
             epoch=self._progress.epoch,
@@ -785,6 +847,13 @@ class StageLoop(ABC):
         )
         ctx.progress = self._progress
         ctx.emit(EventType.EPOCH_BEGAN, epoch=self._progress.epoch)
+
+    def _expected_steps(self) -> int:
+        """Return how many steps this stage takes in all, or 0 if unknown."""
+        limits = [] if self.steps is None else [self.steps]
+        if self.epochs is not None:
+            limits.append(self.epochs * self._steps_in_pass)
+        return min(limits) if limits else 0
 
     def finalize_sweep(self, ctx: Context) -> None:
         """React to a pass over the data finishing.
@@ -800,7 +869,8 @@ class StageLoop(ABC):
             ctx: Execution context for this entry.
         """
         self.finalize_sweep(ctx)
-        ctx.emit(EventType.EPOCH_ENDED, epoch=self._progress.epoch)
+        reported = {} if self.planned_passes is None else {"total": self.planned_passes}
+        ctx.emit(EventType.EPOCH_ENDED, epoch=self._progress.epoch, **reported)
         self._progress = self._progress.next_epoch()
         ctx.progress = self._progress
         done = self.epochs is not None and self._progress.epoch >= self.epochs
@@ -956,6 +1026,7 @@ class Train(StageLoop):
         self._ema: dict[str, Ema] = {}
         self._sweepwise_schedulers: dict[str | None, LRScheduler] = {}
         self._specs: dict[str | None, OptimSpec] = {}
+        self._carried: dict[str, Any] | None = None
         self._objective: Objective | None = None
 
     def _build_objective(self, ctx: Context) -> Objective:
@@ -974,9 +1045,6 @@ class Train(StageLoop):
     def prepare(self, ctx: Context) -> None:
         """Build the objective and bind the optimizers to the update.
 
-        The objective is placed on the device here rather than by the
-        runtime, since it is built per entry and belongs to this stage alone.
-
         Args:
             ctx: Execution context for this entry.
         """
@@ -991,6 +1059,8 @@ class Train(StageLoop):
         self.update.bind(optimizers, stepwise_schedulers)
         self._ema = self._build_ema(ctx)
         self.swa_window.build(self.model_binding, optimizers, ctx)
+        if self._carried is not None:
+            self.load_training_state(self._carried)
 
     def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
         """Take one optimizer step over the micro-batches.
@@ -1128,6 +1198,7 @@ class Train(StageLoop):
         Args:
             ctx: Execution context for this entry.
         """
+        self._carried = self.training_state()
         self.swa_window.refresh_batch_stats(
             lambda: (
                 input_in_batch(batch, getattr(self._objective, "inputs", "x"))
@@ -1137,9 +1208,9 @@ class Train(StageLoop):
         )
         return super().leave(ctx)
 
-    def state_dict(self) -> dict[str, Any]:
-        """Return the stage's resumable state."""
-        state = {**super().state_dict(), **self.update.state_dict()}
+    def training_state(self) -> dict[str, Any]:
+        """Return what the stage learned, without the counters saying where."""
+        state = dict(self.update.state_dict())
         state.update({f"ema/{n}": a.state_dict() for n, a in self._ema.items()})
         state.update(self.swa_window.state_dict())
         state.update(
@@ -1150,13 +1221,12 @@ class Train(StageLoop):
         )
         return state
 
-    def load_state_dict(self, state: dict[str, Any]) -> None:
-        """Restore state previously returned by `state_dict`.
+    def load_training_state(self, state: dict[str, Any]) -> None:
+        """Restore what `training_state` captured, into what `prepare` built.
 
         Args:
-            state: Mapping as returned by `state_dict`.
+            state: Mapping as returned by `training_state`.
         """
-        super().load_state_dict(state)
         self.update.load_state_dict(state)
         for name, averaged in self._ema.items():
             saved = state.get(f"ema/{name}")
@@ -1167,6 +1237,19 @@ class Train(StageLoop):
             saved = state.get(f"sched/{group}")
             if saved is not None:
                 scheduler.load_state_dict(saved)
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return the stage's resumable state."""
+        return {**super().state_dict(), **self.training_state()}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore state previously returned by `state_dict`.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+        """
+        super().load_state_dict(state)
+        self.load_training_state(state)
 
 
 Finetune = partialclass(
@@ -1190,11 +1273,11 @@ class Inference(StageLoop):
         self,
         name: str | None = None,
         *,
-        model: nn.Module | str = "model",
+        model: nn.Module | str | None = "model",
         data: DataManager | Dataset | str | None = None,
         batch_size: int | None = None,
         weights: WeightsTypes = "model",
-        inputs: str = "x",
+        inputs: str | Sequence[str] | None = "x",
         epochs: int | None = None,
         steps: int | None = None,
         requires: Sequence[str] = (),
@@ -1204,12 +1287,16 @@ class Inference(StageLoop):
 
         Args:
             name: Identifies the stage; defaults to the lowercased class name.
-            model: Model, or the name of a binding holding one.
+            model: Model, or the name of a binding holding one. `None`
+                scores what the batch already holds, for data that was
+                produced by an earlier stage.
             data: A `DataManager`, a dataset, or the name of a binding.
             batch_size: Samples one forward sees, for a bare dataset.
             weights: Which parameters to read: the model's own, or an
                 average a `Train` published beside it.
-            inputs: Key the model's input is read from, for mapping batches.
+            inputs: Key the model's input is read from, several keys for a
+                model called with more than the samples, or `None` for one
+                that reads nothing from the batch.
             epochs: Passes over the data; one when absent.
             steps: Units of work; the whole pass when absent.
             requires: Binding names that must resolve before the run starts.
@@ -1232,12 +1319,38 @@ class Inference(StageLoop):
         self.weights = weights
         self.inputs = inputs
 
-    def resolved_model(self, ctx: Context) -> nn.Module:
-        """Return the module whose parameters this stage reads.
+    @property
+    def input_names(self) -> tuple[str, ...]:
+        """Return the batch keys the model is called with, in order."""
+        if self.inputs is None:
+            return ()
+        if isinstance(self.inputs, str):
+            return (self.inputs,)
+        return tuple(self.inputs)
+
+    def read_inputs(self, batch: BatchType) -> tuple[Any, ...]:
+        """Return what the model is called with, for one batch.
+
+        Naming several keys is how a model taking more than the samples
+        (a timestep, a condition, ...) is driven without wrapping it.
+
+        Args:
+            batch: One micro-batch of the stage's data.
+        """
+        if self.inputs is None:
+            return ()
+        if isinstance(self.inputs, str):
+            return (input_in_batch(batch, self.inputs),)
+        return unpack_batch(batch, *self.inputs, reader=type(self).__name__)
+
+    def resolved_model(self, ctx: Context) -> nn.Module | None:
+        """Return the module whose parameters this stage reads, if any.
 
         Args:
             ctx: Execution context for this entry.
         """
+        if self.model is None:
+            return None
         if self.weights == "model":
             return ctx.resolve(self.model)
         return ctx[f"{self.model_binding}/{self.weights}"]
@@ -1280,6 +1393,7 @@ class Eval(Inference):
         if not self.metrics:
             raise ValueError(f"Eval({self.name!r}) was given no metric to compute.")
         self.targets = targets
+        self._scored: dict[str, float] = {}
 
     def prepare(self, ctx: Context) -> None:
         """Move the metrics to the device and clear what they hold.
@@ -1301,10 +1415,14 @@ class Eval(Inference):
         model = self.resolved_model(ctx)
         with torch.inference_mode():
             for batch in batches:
-                inputs, targets = unpack_batch(
-                    batch, self.inputs, self.targets, reader=type(self).__name__
+                read = unpack_batch(
+                    batch,
+                    *self.input_names,
+                    self.targets,
+                    reader=type(self).__name__,
                 )
-                prediction = model(inputs)
+                targets = read[-1]
+                prediction = read[0] if model is None else model(*read[:-1])
                 for metric in self.metrics.values():
                     metric.update(prediction, targets)
         return None
@@ -1319,11 +1437,17 @@ class Eval(Inference):
             ctx: Execution context for this entry.
         """
         reduce_metrics(self.metrics.values(), ctx.topology)
+        self._scored = {}
         for key, metric in self.metrics.items():
             value = metric.compute()
             if value is not None:
-                ctx.publish(f"{self.name}/{key}", float(value))
+                self._scored[key] = float(value)
+                ctx.publish(f"{self.name}/{key}", self._scored[key])
         return super().leave(ctx)
+
+    def summary(self) -> dict[str, Any]:
+        """Return what each metric measured, for the closing event."""
+        return dict(self._scored)
 
     def state_dict(self) -> dict[str, Any]:
         """Return the stage's resumable state, metrics included."""
@@ -1349,7 +1473,7 @@ class Eval(Inference):
 
 
 class Predict(Inference):
-    """Runs a model over a pass and writes what it produced.
+    """Runs a model or sampler over an inference pass and publishes results.
 
     Given an `archive` the predictions stream to it and are not kept; without
     one they are kept in memory and published for later siblings.
@@ -1358,6 +1482,10 @@ class Predict(Inference):
         archive: File the predictions are written to, or `None` to keep them
             in memory only.
         key: Name the predictions are stored under.
+        draw: What produces a batch's output, or `None` for the model.
+        targets: Key the ground truth is read from, or `None`.
+        reference: What to compare the output with when no batch holds a
+            truth, or `None`.
     """
 
     def __init__(
@@ -1367,6 +1495,10 @@ class Predict(Inference):
         archive: str | Path | None = None,
         merge: bool = True,
         key: str = "data",
+        draw: Callable[[nn.Module, tuple[Any, ...], Context], torch.Tensor]
+        | None = None,
+        targets: str | None = None,
+        reference: Any = None,
         **kwargs: Any,
     ):
         """Constructor.
@@ -1378,16 +1510,40 @@ class Predict(Inference):
                 off a single process.
             archive: File the predictions are written to; its suffix picks the
                 format. Kept in memory when absent.
-            key: Name the predictions are stored under, for formats that name.
+            key: Name the predictions are stored under.
+            draw: Called per batch with the model, what the batch named and
+                the context, returning the output. `None` calls the model
+                with what the batch named.
+            targets: Key the ground truth is read from the batch.
+            reference: What to compare the output with, as a tensor, a
+                dataset or the name of a binding.
             kwargs: Passed to `Inference`.
+
+        Raises:
+            ValueError: If both a target key and a reference are given,
+                since then it is unclear which the output pairs with.
         """
+        if targets is not None and reference is not None:
+            raise ValueError(
+                "A prediction pairs with a target read per batch or with a "
+                "reference set, not both."
+            )
         super().__init__(name, **kwargs)
         self.archive = Path(archive) if archive is not None else None
         self.merge = merge
+        self.provides += (
+            f"{self.name}/archive" if self.archive else f"{self.name}/predictions",
+        )
         self.key = key
+        self.draw = draw
+        self.targets = targets
+        self.reference = reference
         self._writer: Archive | None = None
         self._written: Path | None = None
         self._predictions: list[torch.Tensor] = []
+        self._truths: list[torch.Tensor] = []
+        if targets is not None or reference is not None:
+            self.provides += (f"{self.name}/pairs",)
 
     def prepare(self, ctx: Context) -> None:
         """Open the archive, or clear what an earlier entry kept.
@@ -1396,6 +1552,7 @@ class Predict(Inference):
             ctx: Execution context for this entry.
         """
         self._predictions = []
+        self._truths = []
         self._writer = None
         if self.archive is None:
             return
@@ -1447,6 +1604,26 @@ class Predict(Inference):
             return None
         return torch.cat(self._predictions)
 
+    def predict(self, model: nn.Module, batch: BatchType, ctx: Context) -> torch.Tensor:
+        """Return what this stage makes of one batch.
+
+        Args:
+            model: The model this stage reads.
+            batch: One micro-batch of the stage's data.
+            ctx: Execution context for this entry.
+        """
+        if self.targets is None:
+            inputs = self.read_inputs(batch)
+        else:
+            read = unpack_batch(
+                batch, *self.input_names, self.targets, reader=type(self).__name__
+            )
+            inputs = read[:-1]
+            self._truths.append(read[-1])
+        if self.draw is None:
+            return model(*inputs)
+        return self.draw(model, inputs, ctx)
+
     def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
         """Run the model, writing or keeping what it produced.
 
@@ -1457,7 +1634,7 @@ class Predict(Inference):
         model = self.resolved_model(ctx)
         with torch.inference_mode():
             for batch in batches:
-                y = model(input_in_batch(batch, self.inputs))
+                y = self.predict(model, batch, ctx)
                 y = y.detach().cpu().clone()
                 if self._writer is not None:
                     self._writer.write(y)
@@ -1481,4 +1658,133 @@ class Predict(Inference):
             y = self.predictions
             if y is not None:
                 ctx.publish(f"{self.name}/predictions", y)
+        self._publish_pairs(ctx)
         return super().leave(ctx)
+
+    def _publish_pairs(self, ctx: Context) -> None:
+        """Publish what was produced beside what it should have been.
+
+        Args:
+            ctx: Execution context for this entry.
+
+        Raises:
+            ValueError: If there are not as many references as predictions.
+        """
+        generated = self.predictions
+        paired = self._paired(ctx)
+        if generated is None or paired is None:
+            return
+        if len(paired) != len(generated):
+            raise ValueError(
+                f"{type(self).__name__}({self.name!r}) generated "
+                f"{len(generated)} but has {len(paired)} to compare them with."
+            )
+        ctx.publish(f"{self.name}/pairs", TensorDataset(generated, paired))
+
+    def _paired(self, ctx: Context) -> torch.Tensor | None:
+        """Return what the predictions are published alongside, if anything.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        if self._truths:
+            return torch.cat([held.detach().cpu() for held in self._truths])
+        if self.reference is None:
+            return None
+        held = ctx.resolve(self.reference)
+        if isinstance(held, torch.Tensor):
+            return held.detach().cpu()
+        rows = [held[index] for index in range(len(held))]
+        return (
+            torch.stack(
+                [row[0] if isinstance(row, (tuple, list)) else row for row in rows]
+            )
+            .detach()
+            .cpu()
+        )
+
+
+class FromProcess:
+    """Draws by running a diffusion process backwards.
+
+    Attributes:
+        process: Runs the schedule backwards.
+        draws: Samples to draw per condition.
+        shape: Shape of one sample, when nothing conditions the draw.
+    """
+
+    def __init__(
+        self,
+        process: DiffusionLike,
+        draws: int = 1,
+        shape: tuple[int, ...] | None = None,
+    ):
+        """Constructor.
+
+        Args:
+            process: Diffusion process supplying `generate`.
+            draws: Samples to draw per condition.
+            shape: Shape of one sample, when nothing conditions the draw.
+        """
+        self.process = process
+        self.draws = draws
+        self.shape = shape
+
+    def __call__(
+        self, model: nn.Module, inputs: tuple[Any, ...], ctx: Context
+    ) -> torch.Tensor:
+        """Return what the process makes of one condition, or of nothing.
+
+        Args:
+            model: The model the process reads.
+            inputs: What the batch named; the first conditions the draw, and
+                nothing does when it is empty.
+            ctx: Execution context for the stage.
+        """
+        condition = inputs[0] if inputs else None
+        drawn = self.process.generate(
+            model, condition=condition, n=self.draws, shape=self.shape
+        )
+        return drawn if isinstance(drawn, torch.Tensor) else list(drawn)[-1]
+
+
+class FromLatent:
+    """Draws by handing a model noise, as a generator network reads it.
+
+    Attributes:
+        shape: Shape of one latent.
+        draws: Latents to draw per condition, or in all when unconditioned.
+    """
+
+    def __init__(self, shape: tuple[int, ...], draws: int = 1):
+        """Constructor.
+
+        Args:
+            shape: Shape of one latent.
+            draws: Latents to draw per condition, or in all when there is
+                nothing to condition on.
+        """
+        self.shape = tuple(shape)
+        self.draws = draws
+
+    def __call__(
+        self, model: nn.Module, inputs: tuple[Any, ...], ctx: Context
+    ) -> torch.Tensor:
+        """Return what the model makes of fresh noise.
+
+        The noise comes from the stage's own stream, so a run drawing again
+        from the same position draws the same latents. It is drawn where
+        that stream lives and moved afterwards, so the draw does not depend
+        on which device the run is using.
+
+        Args:
+            model: The model reading the latent.
+            inputs: What the batch named; the first conditions the draw, and
+                nothing does when it is empty.
+            ctx: Execution context for the stage.
+        """
+        condition = inputs[0] if inputs else None
+        many = self.draws if condition is None else len(condition) * self.draws
+        latent = torch.randn((many, *self.shape), generator=ctx.rng("latent"))
+        latent = latent.to(ctx.device)
+        return model(latent) if condition is None else model(latent, condition)

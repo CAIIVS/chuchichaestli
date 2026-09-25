@@ -10,6 +10,9 @@ from torch.utils.data import TensorDataset
 
 from chuchichaestli.runtime import (
     Alternating,
+    Phase,
+    Program,
+    Repeat,
     Context,
     DataManager,
     EventType,
@@ -689,3 +692,82 @@ def test_the_swa_schedule_rides_in_the_stage_state():
     )
     Runtime(stage, hooks=(), device="cpu").run()
     assert "swalr/None" in stage.state_dict()
+
+
+def adam_steps(stage) -> int:
+    """Return how many updates the optimizer has applied.
+
+    Args:
+        stage: The training stage to inspect.
+    """
+    optimizer = next(iter(stage.update.optimizers.values()))
+    state = next(iter(optimizer.state.values()), {})
+    return int(state.get("step", torch.tensor(0)))
+
+
+def repeated(stage, times: int = 3):
+    """Run a stage several times over, as a regimen interleaving others would.
+
+    Args:
+        stage: The stage to repeat.
+        times: How many visits to make.
+    """
+    program = Program(
+        provide={"model": linear()}, stages=[Repeat(times, Phase("cycle", [stage]))]
+    )
+    Runtime(program, hooks=(), device="cpu").run()
+    return stage
+
+
+def one_pass(name: str = "fit", **kwargs) -> Train:
+    """Build a stage that takes two steps per visit.
+
+    Args:
+        name: Identifies the stage.
+        kwargs: Passed on to `Train`.
+    """
+    return Train(
+        name,
+        data=ramp(8),
+        batch_size=4,
+        epochs=1,
+        loss=nn.MSELoss(),
+        optim=OptimSpec.adamw(lr=0.1),
+        **kwargs,
+    )
+
+
+def test_a_repeated_stage_keeps_the_optimizer_it_built():
+    """Interleaving an eval must not throw away the moments in between."""
+    stage = repeated(one_pass())
+    assert adam_steps(stage) == 6
+
+
+def test_a_later_stage_brings_no_history_along():
+    """Each stage builds its own, so finetuning starts from a fresh optimizer."""
+    program = Program(
+        provide={"model": linear()},
+        stages=[one_pass(name="pretrain"), one_pass(name="refine")],
+    )
+    Runtime(program, hooks=(), device="cpu").run()
+    assert [adam_steps(stage) for stage in program.stages] == [2, 2]
+
+
+def test_a_repeated_finetune_keeps_its_optimizer_too():
+    """The regimen the plan describes repeats one, so it must not reset."""
+    stage = Finetune(
+        "refine",
+        data=ramp(8),
+        batch_size=4,
+        epochs=1,
+        loss=nn.MSELoss(),
+        optim=OptimSpec.adamw(lr=0.1),
+    )
+    assert repeated(stage) and adam_steps(stage) == 6
+
+
+def test_a_stage_counts_the_work_of_every_entry():
+    """`progress` resets on entry, so a repeated stage needs a running count."""
+    stage = repeated(one_pass(), times=3)
+    assert stage.progress().global_step == 2
+    assert stage.total_steps == 6

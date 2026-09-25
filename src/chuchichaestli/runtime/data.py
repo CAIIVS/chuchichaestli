@@ -253,6 +253,15 @@ class DataManager:
         """
         return self.shard(self.plan(ctx, epoch), ctx.topology)
 
+    def batches_in(self, ctx: Context, epoch: int = 0) -> int:
+        """Return how many batches this process is dealt for one pass.
+
+        Args:
+            ctx: Context the order derives from.
+            epoch: Which pass over the dataset.
+        """
+        return len(self.sharded_plan(ctx, epoch))
+
     def iter(self, ctx: Context, epoch: int = 0, seek: int = 0) -> Iterator[BatchType]:
         """Iterate this process's batches for one epoch.
 

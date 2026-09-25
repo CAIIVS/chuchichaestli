@@ -114,13 +114,14 @@ class Console:
         return paint(f"> {event.path}", ANSIShade.CYAN, on=tint)
 
     def _stage_ended(self, event: Event, tint: bool) -> str | None:
-        """Render a stage closing.
+        """Render a stage closing, and whatever it reported as it did.
 
         Args:
             event: The event to render.
             tint: Whether to colour the line.
         """
-        return paint(f"< {event.path}", ANSIShade.GREEN, on=tint)
+        line = paint(f"< {event.path}", ANSIShade.GREEN, on=tint)
+        return f"{line} {self._numbers(event, tint)}".rstrip()
 
     def _checkpoint(self, event: Event, tint: bool) -> str | None:
         """Render a checkpoint having been written.
@@ -145,6 +146,21 @@ class Console:
             return None
         return paint(f"! {aborted}", ANSIShade.RED, on=tint)
 
+    def _numbers(self, event: Event, tint: bool) -> str:
+        """Render an event's numeric payload as `key=value` pairs.
+
+        Args:
+            event: The event to read.
+            tint: Whether to colour the values.
+        """
+        return " ".join(
+            f"{k}={paint(f'{v:.4g}', ANSIShade.BOLD, on=tint)}"
+            if isinstance(v, float)
+            else f"{k}={v}"
+            for k, v in event.payload.items()
+            if isinstance(v, (int, float)) and k != "total"
+        )
+
     def _step_line(self, event: Event, tint: bool) -> str | None:
         """Render a step, every nth one, with a bar when a total is known.
 
@@ -154,13 +170,7 @@ class Console:
         """
         if event.progress.global_step % self.every:
             return None
-        detail = " ".join(
-            f"{k}={paint(f'{v:.4g}', ANSIShade.BOLD, on=tint)}"
-            if isinstance(v, float)
-            else f"{k}={v}"
-            for k, v in event.payload.items()
-            if isinstance(v, (int, float))
-        )
+        detail = self._numbers(event, tint)
         prefix = paint(
             f"  {event.path} step {event.progress.global_step}", ANSIShade.DIM, on=tint
         )
