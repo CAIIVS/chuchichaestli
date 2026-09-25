@@ -76,3 +76,30 @@ def test_denoise_step(dimensions, batchsize, yield_intermediate):
 
     # Check the output shape
     assert output.shape == (2 * batchsize, 16) + (32,) * dimensions
+
+
+def test_noise_step_takes_the_condition_alias():
+    """`condition=` names what `generate` and the other processes call it."""
+    indi = InDI(num_timesteps=10)
+    x, y = torch.randn(4, 16, 32), torch.randn(4, 16, 32)
+    torch.manual_seed(0)
+    by_name = indi.noise_step(x, condition=y)
+    torch.manual_seed(0)
+    positionally = indi.noise_step(x, y)
+    for one, other in zip(by_name, positionally):
+        assert torch.equal(one, other)
+
+
+def test_noise_step_refuses_the_sample_under_both_names():
+    """Two low quality samples are a caller mistake, not a merge."""
+    indi = InDI(num_timesteps=10)
+    x, y = torch.randn(4, 16, 32), torch.randn(4, 16, 32)
+    with pytest.raises(ValueError, match="twice, as y= and as condition="):
+        indi.noise_step(x, y, condition=y)
+
+
+def test_noise_step_needs_the_sample_under_one_name():
+    """Interpolating towards nothing would silently return the input."""
+    indi = InDI(num_timesteps=10)
+    with pytest.raises(ValueError, match="needs the low quality sample"):
+        indi.noise_step(torch.randn(4, 16, 32))

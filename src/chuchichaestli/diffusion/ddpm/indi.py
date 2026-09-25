@@ -63,11 +63,12 @@ class InDI(DiffusionProcess):
     def noise_step(
         self,
         x: torch.Tensor,
-        y: torch.Tensor,
+        y: torch.Tensor | None = None,
         timesteps: torch.Tensor | None = None,
         *args,
+        condition: torch.Tensor | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Noise step for the diffusion process.
 
         Args:
@@ -75,11 +76,27 @@ class InDI(DiffusionProcess):
             y: Corresponding low quality sample, tensor of shape (batch_size, *).
             timesteps: Timesteps to sample noise from. If None, timesteps are sampled.
             *args: Additional arguments.
+            condition: Alias for `y`, under the name `generate` and the other
+                processes give it.
             **kwargs: Additional keyword arguments.
 
         Returns:
             Tuple of the sampled tensor, noise tensor and timesteps.
+
+        Raises:
+            ValueError: If `y` is given under both names, or under neither.
         """
+        if y is not None and condition is not None:
+            raise ValueError(
+                f"{type(self).__name__}.noise_step got the low quality sample "
+                "twice, as y= and as condition=. Pass it under one name."
+            )
+        y = y if y is not None else condition
+        if y is None:
+            raise ValueError(
+                f"{type(self).__name__}.noise_step needs the low quality sample "
+                "to interpolate towards, as y= or condition=."
+            )
         if timesteps is not None:
             x = (
                 x.unsqueeze(0)
