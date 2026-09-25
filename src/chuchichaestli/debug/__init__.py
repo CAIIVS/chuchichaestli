@@ -37,17 +37,18 @@ def cli_pbar(
     float_fmt: str = "{:.2f}",
     int_fmt: str = "{:4d}",
 ) -> str:
-    """Construct/print a progressbar of given relative length, optionally with labels.
+    """Return a progress bar of a given relative length, with its labels.
 
     Args:
-        r_fill (float): rate of progress, a number between 0 and 1
-        prefix (str | list): label before the progressbar
-        postfix (str | list): label after the progressbar
-        bar_length (int): maximum length of the progressbar; automatically determined if negative
-        fill_symbol (str): symbol indicating the progressbar's filled status
-        empty_symbol (str): symbol indicating the progressbar's empty status
-        float_fmt (str): string format for floats in prefix
-        int_fmt (str): string format for ints in prefix
+        r_fill: How far along the bar is, between 0 and 1.
+        prefix: Label written before the bar.
+        postfix: Label written after the bar.
+        bar_length: Width of the bar itself; the labels alone when it is not
+            positive.
+        fill_symbol: What the filled part is drawn with.
+        empty_symbol: What the rest is drawn with.
+        float_fmt: How floats in the labels are formatted.
+        int_fmt: How ints in the labels are formatted.
     """
     if isinstance(prefix, list | tuple):
         for i, p in enumerate(prefix):
@@ -67,9 +68,8 @@ def cli_pbar(
             if not isinstance(postfix[i], str):
                 postfix[i] = f"{postfix[i]}"
         postfix = " ".join(postfix)
-    bar = fill_symbol * int(r_fill * bar_length) + empty_symbol * int(
-        (1 - r_fill) * bar_length
-    )
+    filled = int(r_fill * bar_length)
+    bar = fill_symbol * filled + empty_symbol * (bar_length - filled)
     if bar_length > 0:
         line = f"{prefix} [{bar}] {postfix}"
     else:
