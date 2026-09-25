@@ -741,7 +741,9 @@ class StageLoop(ABC):
         """
         self._progress = Progress()
         ctx.progress = self._progress
-        manager_kwargs = {} if self.batch_size is None else {"batch_size": self.batch_size}
+        manager_kwargs = (
+            {} if self.batch_size is None else {"batch_size": self.batch_size}
+        )
         self._manager = DataManager.from_source(
             ctx.resolve(self.data), **manager_kwargs
         )
