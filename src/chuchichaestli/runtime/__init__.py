@@ -37,7 +37,6 @@ from chuchichaestli.runtime.events import (
     filter_priority,
 )
 from chuchichaestli.runtime.hooks import (
-    CHECKPOINT_UNIT_MAP,
     GracefulStop,
     ModeTypes,
     ThresholdModeTypes,
@@ -146,7 +145,6 @@ __all__ = [
     "ModeTypes",
     "ThresholdModeTypes",
     "WeightsTypes",
-    "CHECKPOINT_UNIT_MAP",
     "C3liCheckpointError",
     "unpack_tree",
     "merge_tree",

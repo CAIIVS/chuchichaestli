@@ -13,7 +13,7 @@ import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from types import FrameType
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO, get_args
 from chuchichaestli.utils.ansi import (
     ANSIShade,
     ansi_supported,
@@ -39,14 +39,28 @@ ModeTypes = Literal["min", "max"]
 ThresholdModeTypes = Literal["rel", "abs"]
 CheckpointUnitTypes = Literal["advance", "epoch", "step"]
 
-MODES: frozenset[str] = frozenset({"min", "max"})
-THRESHOLD_MODES: frozenset[str] = frozenset({"rel", "abs"})
-
-CHECKPOINT_UNIT_MAP: dict[str, EventType] = {
+UNIT_MAP: dict[str, EventType] = {
     "advance": EventType.STAGE_ADVANCED,
     "epoch": EventType.EPOCH_ENDED,
     "step": EventType.STEP_ENDED,
 }
+
+
+def _units(named: Any) -> dict[str, EventType]:
+    """Return the events a `Literal` of unit names stands for.
+
+    Deriving them is what keeps the names a type accepts and the names the
+    runtime accepts from drifting apart.
+
+    Args:
+        named: A `Literal` whose members are unit names.
+    """
+    return {name: UNIT_MAP[name] for name in get_args(named)}
+
+
+MODES: frozenset[str] = frozenset(get_args(ModeTypes))
+THRESHOLD_MODES: frozenset[str] = frozenset(get_args(ThresholdModeTypes))
+CHECKPOINT_UNIT_MAP: dict[str, EventType] = _units(CheckpointUnitTypes)
 
 __all__ = [
     "Console",
@@ -58,7 +72,6 @@ __all__ = [
     "ModeTypes",
     "ThresholdModeTypes",
     "CheckpointUnitTypes",
-    "CHECKPOINT_UNIT_MAP",
 ]
 
 
