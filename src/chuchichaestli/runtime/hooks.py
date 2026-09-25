@@ -86,7 +86,8 @@ class Console:
     RENDERERS: ClassVar[dict[EventType, str]] = {
         EventType.STAGE_BEGAN: "_stage_began",
         EventType.STAGE_ENDED: "_stage_ended",
-        EventType.STEP_ENDED: "_step_line",
+        EventType.STEP_ENDED: "_step_ended",
+        EventType.EPOCH_ENDED: "_epoch_ended",
         EventType.CHECKPOINT: "_checkpoint",
         EventType.RUN_ENDED: "_run_ended",
     }
@@ -97,6 +98,7 @@ class Console:
         stream: TextIO | None = None,
         bar_length: int = 24,
         color: bool | None = None,
+        timing: bool = False,
     ):
         """Constructor.
 
@@ -106,12 +108,14 @@ class Console:
             bar_length: Width of the progress bar when a total is known.
             color: Force colour on or off; detected from the stream when
                 `None`, so a redirected log never receives escape codes.
+            timing: Whether to report pass timings, measured by a `Timer`.
         """
         self.every = max(1, every)
         self.stream = stream if stream is not None else sys.stdout
         self.bar_length = bar_length
         self.color = color
         self.pinned: Pinned | None = None
+        self.timer = Timer(report=False) if timing else None
 
     def __repr__(self) -> str:
         """Return a short description of the hook."""
@@ -153,6 +157,25 @@ class Console:
             f"  saved {event.payload.get('path', '')}", ANSIShade.YELLOW, on=tint
         )
 
+    def _epoch_ended(self, event: Event, tint: bool) -> str | None:
+        """Render a pass over the data having finished, and what it took.
+
+        Args:
+            event: The event to render.
+            tint: Whether to colour the line.
+        """
+        if self.timer is None or event.progress.epoch % self.every:
+            return None
+        taken = self.timer.passes.get(event.path)
+        if not taken:
+            return None
+        pass_no = event.payload.get("epoch", len(taken) - 1)
+        return paint(
+            f"  {event.path} pass {pass_no} in {taken[-1]:.3f}s",
+            ANSIShade.DIM,
+            on=tint,
+        )
+
     def _run_ended(self, event: Event, tint: bool) -> str | None:
         """Render why a run stopped, or nothing when it simply finished.
 
@@ -180,7 +203,7 @@ class Console:
             if isinstance(v, (int, float)) and k != "total"
         )
 
-    def _step_line(self, event: Event, tint: bool) -> str | None:
+    def _step_ended(self, event: Event, tint: bool) -> str | None:
         """Render a step, every nth one, with a bar when a total is known.
 
         Args:
@@ -201,6 +224,8 @@ class Console:
         Args:
             event: What the runtime just did.
         """
+        if self.timer is not None:
+            self.timer.on(event)
         name = self.RENDERERS.get(event.type)
         if name is None:
             return Signal.GO
@@ -279,18 +304,35 @@ class Jsonl:
 class Timer:
     """Measure how long stages take, and report once at they end.
 
-    Reports separately rather than into event payloads.
+    Attributes:
+        elapsed: Seconds spent in each stage, summed over its entries.
+        passes: Seconds each pass over the data took, by stage.
+        depth: How far below the root to report, or `Nonfe` for every stage.
     """
 
-    def __init__(self, stream: TextIO | None = None):
+    def __init__(
+        self,
+        stream: TextIO | None = None,
+        report: bool = True,
+        depth: int | None = None,
+    ):
         """Constructor.
 
         Args:
             stream: Where to write the summary; defaults to stderr.
+            report: Whether to write it at all. `Console` measures through a
+                timer of its own and renders the result in its own style, so
+                it asks for one that stays quiet.
+            depth: How far below the root to report. `0` is the run as a whole,
+                `1` reports at the root's children stage granularity, etc.
         """
         self.stream = stream if stream is not None else sys.stderr
+        self.report = report
+        self.depth = depth
         self.elapsed: dict[str, float] = {}
+        self.passes: dict[str, list[float]] = {}
         self._started: dict[str, float] = {}
+        self._opened: dict[str, float] = {}
 
     def __repr__(self) -> str:
         """Return a short description of the hook."""
@@ -304,15 +346,45 @@ class Timer:
         """
         if event.type is EventType.STAGE_BEGAN:
             self._started[event.path] = time.perf_counter()
+        elif event.type is EventType.EPOCH_BEGAN:
+            self._opened[event.path] = time.perf_counter()
+        elif event.type is EventType.EPOCH_ENDED:
+            opened = self._opened.pop(event.path, None)
+            if opened is not None:
+                taken = time.perf_counter() - opened
+                self.passes.setdefault(event.path, []).append(taken)
         elif event.type is EventType.STAGE_ENDED:
             started = self._started.pop(event.path, None)
             if started is not None:
                 taken = time.perf_counter() - started
                 self.elapsed[event.path] = self.elapsed.get(event.path, 0.0) + taken
-        elif event.type is EventType.RUN_ENDED:
-            for path, taken in self.elapsed.items():
-                print(f"{taken:8.3f}s  {path}", file=self.stream)
+        elif event.type is EventType.RUN_ENDED and self.report:
+            for line in self.summary():
+                print(line, file=self.stream)
         return Signal.GO
+
+    def summary(self) -> list[str]:
+        """Return one line per stage, saying what it and its passes took."""
+        return [
+            f"{taken:8.3f}s  {path}{self._over(path)}"
+            for path, taken in self.elapsed.items()
+            if self.depth is None or path.count("/") <= self.depth
+        ]
+
+    def _over(self, path: str) -> str:
+        """Return what the passes over one stage's data cost.
+
+        Args:
+            path: Stage the passes belong to.
+        """
+        taken = self.passes.get(path)
+        if not taken:
+            return ""
+        mean = sum(taken) / len(taken)
+        return (
+            f"  ({len(taken)} passes, mean {mean:.3f}s, "
+            f"min {min(taken):.3f}s, max {max(taken):.3f}s)"
+        )
 
 
 class EarlyStop:
