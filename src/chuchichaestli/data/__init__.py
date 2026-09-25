@@ -33,6 +33,8 @@ from chuchichaestli.data.batch import (
 )
 from chuchichaestli.data.procedural import (
     ProceduralDataset,  # abstract
+    ConditionalDensityDataset,
+    DensityDataset,
     HalfMoonsDataset,
     SpiralsDataset,
     CheckerboardDataset,
@@ -114,6 +116,8 @@ __all__ = [
     "samples_in_batch",
     "unpack_batch",
     "ProceduralDataset",
+    "ConditionalDensityDataset",
+    "DensityDataset",
     "HalfMoonsDataset",
     "SpiralsDataset",
     "CheckerboardDataset",
