@@ -31,6 +31,7 @@ __all__ = [
     "SharedDict",
     "SharedDictList",
     "serial_byte_size",
+    "shm_descr",
 ]
 
 
@@ -46,6 +47,19 @@ C_DTYPES = {
 }
 
 _SENTINEL = object()
+
+# macOS accepts at most 30 characters for a POSIX shared-memory name
+SHM_NAME_MAX = 30 - len("_states")
+
+
+def shm_descr(kind: str) -> str:
+    """Return a unique shared-memory name that fits every platform's limit.
+
+    Args:
+        kind: What the segment holds, e.g. `"arr"` or `"list"`.
+    """
+    stem = f"shm_{kind}_"
+    return stem + uuid.uuid4().hex[: SHM_NAME_MAX - len(stem)]
 
 
 class DictSerializer(Protocol):
@@ -155,7 +169,7 @@ class SharedArray:
             )
 
         self.dtype = dtype
-        self.descr = descr if descr is not None else f"shm_arr_{uuid.uuid4().hex}"
+        self.descr = descr if descr is not None else shm_descr("arr")
         self._lock = threading.Lock() if use_lock else DummyLock()
         if not shape:
             shape = (0,)
@@ -435,7 +449,7 @@ class SharedDict:
           use instead '__{key}'.
         """
         super().__init__()
-        self.descr = descr if descr is not None else f"shm_dict_{uuid.uuid4().hex}"
+        self.descr = descr if descr is not None else shm_descr("dict")
         self.allow_overwrite = True
         if isinstance(size, nbytes):
             self.cache_size = size
@@ -672,7 +686,7 @@ class SharedDictList:
         """
         super().__init__()
 
-        self.descr = descr if descr is not None else f"shm_list_{uuid.uuid4().hex}"
+        self.descr = descr if descr is not None else shm_descr("list")
         self.serializer = serializer
         self._lock = threading.Lock() if use_lock else DummyLock()
         self.allow_overwrite = True
