@@ -87,3 +87,28 @@ def test_generation(dimensions, batchsize, yield_intermediate):
 
     # Check the output shape
     assert output.shape == (2 * batchsize, 16) + (32,) * dimensions
+
+
+def _rows_marked(batchsize, shape):
+    """Return a batch whose every row is the constant of its index.
+
+    Args:
+        batchsize: Number of rows.
+        shape: Shape of one row.
+    """
+    index = torch.arange(float(batchsize)).view(batchsize, *([1] * len(shape)))
+    return index.expand(batchsize, *shape).contiguous()
+
+
+def test_a_condition_is_expanded_with_the_sample_over_timesteps():
+    """It inherits DDPM's expansion and cats the condition the same way."""
+    c = _rows_marked(4, (3, 32, 32))
+    prior_grad = PriorGrad(
+        torch.zeros(3, 32, 32), torch.ones(3, 32, 32), num_timesteps=10
+    )
+    out, _, timesteps = prior_grad.noise_step(
+        torch.randn(4, 3, 32, 32), condition=c, timesteps=torch.tensor([0, 1, 2, 3])
+    )
+    assert out.shape[0] == 4 * 4
+    assert torch.equal(out[:, :3], torch.cat([c] * 4, dim=0))
+    assert timesteps.tolist() == [0] * 4 + [1] * 4 + [2] * 4 + [3] * 4

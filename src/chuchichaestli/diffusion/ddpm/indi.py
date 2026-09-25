@@ -103,6 +103,11 @@ class InDI(DiffusionProcess):
                 .expand(len(timesteps), *x.shape)
                 .reshape(-1, *x.shape[1:])
             )
+            y = (
+                y.unsqueeze(0)
+                .expand(len(timesteps), *y.shape)
+                .reshape(-1, *y.shape[1:])
+            )
             timesteps = (
                 timesteps.repeat_interleave(x.shape[0] // len(timesteps)) * self.delta
             )

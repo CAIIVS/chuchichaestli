@@ -74,6 +74,12 @@ class DDPM(DiffusionProcess):
                 .expand(len(timesteps), *x_t.shape)
                 .reshape(-1, *x_t.shape[1:])
             )
+            if condition is not None:
+                condition = (
+                    condition.unsqueeze(0)
+                    .expand(len(timesteps), *condition.shape)
+                    .reshape(-1, *condition.shape[1:])
+                )
             timesteps = timesteps.repeat_interleave(x_t.shape[0] // len(timesteps))
         else:
             timesteps = self.sample_timesteps(x_t.shape[0])

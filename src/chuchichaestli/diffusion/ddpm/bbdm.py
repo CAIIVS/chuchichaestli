@@ -65,6 +65,11 @@ class BBDM(DiffusionProcess):
                 .expand(len(timesteps), *x_0.shape)
                 .reshape(-1, *x_0.shape[1:])
             )
+            condition = (
+                condition.unsqueeze(0)
+                .expand(len(timesteps), *condition.shape)
+                .reshape(-1, *condition.shape[1:])
+            )
             timesteps = timesteps.repeat_interleave(x_0.shape[0] // len(timesteps))
         else:
             timesteps = self.sample_timesteps(x_0.shape[0])
