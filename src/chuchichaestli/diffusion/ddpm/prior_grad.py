@@ -43,8 +43,8 @@ class PriorGrad(DDPM):
             schedule: Schedule for beta.
             kwargs: Additional keyword arguments.
         """
-        scale = scale.to(device)
-        mean = mean.to(device)
+        scale = torch.as_tensor(scale, device=device)
+        mean = torch.as_tensor(mean, device=device)
         distr = NormalDistribution(0, scale, device=device)
         super().__init__(
             noise_distribution=distr,
@@ -101,7 +101,10 @@ class PriorGrad(DDPM):
 
         x_t = s1 * (x_t - self.mean) + s2 * noise
 
-        return torch.cat([condition, x_t], dim=1), noise, timesteps
+        if condition is not None:
+            x_t = torch.cat([condition, x_t], dim=1)
+
+        return x_t, noise, timesteps
 
     def generate(
         self,
