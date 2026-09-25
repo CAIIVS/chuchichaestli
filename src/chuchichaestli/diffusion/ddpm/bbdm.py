@@ -78,7 +78,6 @@ class BBDM(DiffusionProcess):
         m_t = (timesteps / self.num_time_steps).reshape(s_shape)
         delta_t = 2 * self.s * (m_t - m_t**2).reshape(s_shape)
 
-        print(m_t.shape, x_0.shape, condition.shape, delta_t.shape, noise.shape)
         return (
             (1 - m_t) * x_0 + m_t * condition + torch.sqrt(delta_t) * noise,
             noise,
