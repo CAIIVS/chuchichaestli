@@ -37,6 +37,8 @@ from chuchichaestli.runtime.events import (
     filter_priority,
 )
 from chuchichaestli.runtime.hooks import (
+    ProgressBar,
+    BarUnitTypes,
     GracefulStop,
     ModeTypes,
     ThresholdModeTypes,
@@ -133,6 +135,7 @@ __all__ = [
     "C3liRuntimeError",
     "filter_priority",
     "Console",
+    "ProgressBar",
     "Checkpointer",
     "Jsonl",
     "Timer",
@@ -145,6 +148,7 @@ __all__ = [
     "ModeTypes",
     "ThresholdModeTypes",
     "WeightsTypes",
+    "BarUnitTypes",
     "C3liCheckpointError",
     "unpack_tree",
     "merge_tree",

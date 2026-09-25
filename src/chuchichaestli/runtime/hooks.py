@@ -16,6 +16,7 @@ from types import FrameType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO, get_args
 from chuchichaestli.utils.ansi import (
     ANSIShade,
+    Pinned,
     ansi_supported,
     cli_pbar,
     paint,
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
 ModeTypes = Literal["min", "max"]
 ThresholdModeTypes = Literal["rel", "abs"]
 CheckpointUnitTypes = Literal["advance", "epoch", "step"]
+BarUnitTypes = Literal["step", "epoch"]
 
 UNIT_MAP: dict[str, EventType] = {
     "advance": EventType.STAGE_ADVANCED,
@@ -61,8 +63,10 @@ def _units(named: Any) -> dict[str, EventType]:
 MODES: frozenset[str] = frozenset(get_args(ModeTypes))
 THRESHOLD_MODES: frozenset[str] = frozenset(get_args(ThresholdModeTypes))
 CHECKPOINT_UNIT_MAP: dict[str, EventType] = _units(CheckpointUnitTypes)
+BAR_UNIT_MAP: dict[str, EventType] = _units(BarUnitTypes)
 
 __all__ = [
+    "ProgressBar",
     "Console",
     "Checkpointer",
     "Jsonl",
@@ -72,6 +76,7 @@ __all__ = [
     "ModeTypes",
     "ThresholdModeTypes",
     "CheckpointUnitTypes",
+    "BarUnitTypes",
 ]
 
 
@@ -106,6 +111,7 @@ class Console:
         self.stream = stream if stream is not None else sys.stdout
         self.bar_length = bar_length
         self.color = color
+        self.pinned: Pinned | None = None
 
     def __repr__(self) -> str:
         """Return a short description of the hook."""
@@ -187,14 +193,6 @@ class Console:
         prefix = paint(
             f"  {event.path} step {event.progress.global_step}", ANSIShade.DIM, on=tint
         )
-        total = event.payload.get("total")
-        if isinstance(total, int) and total > 0:
-            return cli_pbar(
-                min(1.0, event.progress.step / total),
-                prefix=prefix,
-                postfix=detail,
-                bar_length=self.bar_length,
-            )
         return f"{prefix} {detail}".rstrip()
 
     def on(self, event: Event) -> Signal:
@@ -207,7 +205,11 @@ class Console:
         if name is None:
             return Signal.GO
         line = getattr(self, name)(event, self.colored)
-        if line is not None:
+        if line is None:
+            return Signal.GO
+        if self.pinned is not None:
+            self.pinned.scroll(line)
+        else:
             print(line, file=self.stream, flush=True)
         return Signal.GO
 
@@ -484,6 +486,94 @@ class GracefulStop:
         if self.caught is not None and not self._raised:
             self._raised = True
             raise C3liRuntimeError(f"cancelled by {self.caught}")
+        return Signal.GO
+
+
+class ProgressBar:
+    """Hold a bar at the foot of the stream, redrawn as the run proceeds.
+
+    A `Console` writing to the same stream is routed through the same pinned
+    writer, so its lines scroll above the bar rather than through it.
+
+    Attributes:
+        every: Redraw on every nth unit.
+        unit: What the bar measures, `"step"` or `"epoch"`, named as a
+            `Checkpointer` names the same thing.
+        bar_length: Width of the bar itself.
+    """
+
+    def __init__(
+        self,
+        every: int = 1,
+        unit: BarUnitTypes = "step",
+        stream: TextIO | None = None,
+        bar_length: int = 24,
+        live: bool | None = None,
+    ):
+        """Constructor.
+
+        Args:
+            every: Redraw on every nth unit.
+            unit: What the bar measures. Steps are finer, but a regimen
+                that re-enters a stage for each pass gives each visit only a
+                few of them; `"epoch"` spans the whole regimen instead.
+            stream: Where to draw; defaults to stdout.
+            bar_length: Width of the bar itself.
+            live: Whether the stream redraws, detected from it when `None`,
+                so a redirected log is not filled with half-drawn bars.
+        """
+        self.every = max(1, every)
+        self.unit = require(unit, BAR_UNIT_MAP, "bar unit")
+        self.stream = stream if stream is not None else sys.stdout
+        self.bar_length = bar_length
+        self.seen = 0
+        self.pinned = Pinned(
+            self.stream, ansi_supported(self.stream) if live is None else live
+        )
+
+    def __repr__(self) -> str:
+        """Return a short description of the hook."""
+        every, live = self.every, self.pinned.live
+        unit = self.unit.value
+        return f"ProgressBar({every=}, {unit=}, {live=})"
+
+    def attach(self, runtime: Runtime, ctx: Context) -> None:
+        """Route any reporter sharing this stream through the same writer.
+
+        Args:
+            runtime: The engine executing the program.
+            ctx: Root context of the run.
+        """
+        for hook in runtime.hooks:
+            if isinstance(hook, Console) and hook.stream is self.stream:
+                hook.pinned = self.pinned
+
+    def on(self, event: Event) -> Signal:
+        """Redraw the bar, holding it until the run is over.
+
+        Args:
+            event: What the runtime just did.
+        """
+        if event.type is self.unit:
+            total = event.payload.get("total")
+            if not isinstance(total, int) or total <= 0:
+                return Signal.GO
+            self.seen = (
+                event.progress.global_step
+                if self.unit is EventType.STEP_ENDED
+                else self.seen + 1
+            )
+            if not self.seen % self.every:
+                self.pinned.pin(
+                    cli_pbar(
+                        min(1.0, self.seen / total),
+                        prefix=f"  {event.path}",
+                        postfix=f"{self.seen}/{total}",
+                        bar_length=self.bar_length,
+                    )
+                )
+        elif event.type is EventType.RUN_ENDED:
+            self.pinned.drop()
         return Signal.GO
 
 

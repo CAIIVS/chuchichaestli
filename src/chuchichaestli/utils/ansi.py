@@ -6,10 +6,10 @@
 from __future__ import annotations
 import os
 from enum import Enum
-from typing import IO
+from typing import IO, TextIO
 
 
-__all__ = ["ANSIShade", "ansi_supported", "cli_pbar", "paint"]
+__all__ = ["ANSIShade", "Pinned", "ansi_supported", "cli_pbar", "paint"]
 
 
 class ANSIShade(str, Enum):
@@ -50,6 +50,60 @@ def paint(text: str, *shades: ANSIShade, on: bool = True) -> str:
     if not on or not shades or not text:
         return text
     return "".join(s.value for s in shades) + text + ANSIShade.RESET.value
+
+
+class Pinned:
+    """Keeps one line at the foot of a stream while the rest scroll above it.
+
+    Attributes:
+        line: What is currently pinned, or `""` when nothing is.
+    """
+
+    ERASE = "\r\x1b[2K"
+
+    def __init__(self, stream: TextIO, live: bool = True):
+        """Constructor.
+
+        Args:
+            stream: Where both the pinned line and the rest are written.
+            live: Whether the stream redraws. A file keeps every line it is
+                given, so nothing is pinned to it.
+        """
+        self.stream = stream
+        self.live = live
+        self.line = ""
+
+    def scroll(self, text: str) -> None:
+        """Write a line above whatever is pinned.
+
+        Args:
+            text: The line to write.
+        """
+        if not self.live:
+            print(text, file=self.stream, flush=True)
+            return
+        self.stream.write(f"{self.ERASE}{text}\n{self.line}")
+        self.stream.flush()
+
+    def pin(self, text: str) -> None:
+        """Hold a line at the foot of the stream, replacing any before it.
+
+        Args:
+            text: The line to hold.
+        """
+        if not self.live:
+            return
+        self.line = text
+        self.stream.write(f"{self.ERASE}{text}")
+        self.stream.flush()
+
+    def drop(self) -> None:
+        """Let go of the pinned line, leaving the cursor on a fresh one."""
+        if not self.live or not self.line:
+            return
+        self.stream.write(f"{self.ERASE}")
+        self.stream.flush()
+        self.line = ""
 
 
 def cli_pbar(

@@ -7,7 +7,7 @@ import io
 
 import pytest
 
-from chuchichaestli.utils.ansi import cli_pbar, ANSIShade, paint, ansi_supported
+from chuchichaestli.utils.ansi import Pinned, cli_pbar, ANSIShade, paint, ansi_supported
 
 
 class Tty(io.StringIO):
@@ -69,6 +69,34 @@ def test_a_stream_without_isatty_is_not_coloured():
             """
 
     assert ansi_supported(Bare()) is False
+
+
+def test_a_pinned_line_is_erased_before_anything_scrolls_past():
+    """A bar that stays put and a log that grows are the same cursor."""
+    stream = io.StringIO()
+    pinned = Pinned(stream, live=True)
+    pinned.pin("[##--]")
+    pinned.scroll("a line")
+    assert stream.getvalue() == f"{Pinned.ERASE}[##--]{Pinned.ERASE}a line\n[##--]"
+
+
+def test_dropping_leaves_the_cursor_on_a_clean_line():
+    """Whatever comes next must not land on the bar's remains."""
+    stream = io.StringIO()
+    pinned = Pinned(stream, live=True)
+    pinned.pin("[####]")
+    pinned.drop()
+    assert stream.getvalue().endswith(Pinned.ERASE)
+    assert pinned.line == ""
+
+
+def test_a_stream_that_does_not_redraw_keeps_every_line():
+    """A file would otherwise fill with half-drawn bars."""
+    stream = io.StringIO()
+    pinned = Pinned(stream, live=False)
+    pinned.pin("[##--]")
+    pinned.scroll("a line")
+    assert stream.getvalue() == "a line\n"
 
 
 def drawn(line: str) -> str:
