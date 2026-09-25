@@ -14,8 +14,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO
-from chuchichaestli.debug import cli_pbar
-from chuchichaestli.utils.ansi import ANSIShade, ansi_supported, paint
+from chuchichaestli.utils.ansi import (
+    ANSIShade,
+    ansi_supported,
+    cli_pbar,
+    paint,
+)
 from chuchichaestli.runtime.ckpt import CheckpointFormats, CheckpointStore
 from chuchichaestli.runtime.events import (
     C3liRuntimeError,
