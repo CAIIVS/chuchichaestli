@@ -13,6 +13,7 @@ from typing import Any, Literal, get_args
 from chuchichaestli.utils.units import metric_suffix
 from chuchichaestli.utils.visualization.base import (
     Renderer,
+    require_mpl,
     ZoomSpec,
     LabelField,
     LABEL_FIELDS,
@@ -72,36 +73,6 @@ _LABEL_FIELDS = frozenset(LABEL_FIELDS)
 _COLOR_MODES = frozenset(get_args(ColorMode))
 # Comma-separated fields shown on zoom-inset layers (wide-but-short boxes).
 _ZOOM_FIELDS = LABEL_FIELDS
-
-
-def _require_mpl() -> SimpleNamespace:
-    """Import matplotlib lazily with a helpful error if it is missing."""
-    try:
-        import matplotlib
-        from matplotlib.figure import Figure
-        from matplotlib.patches import (
-            Polygon,
-            FancyBboxPatch,
-            FancyArrowPatch,
-            ConnectionPatch,
-            Patch,
-            Rectangle,
-        )
-    except ModuleNotFoundError as exc:
-        raise ImportError(
-            "Matplotlib is required for this backend. "
-            "Install it with: pip install 'chuchichaestli[viz]'"
-        ) from exc
-    return SimpleNamespace(
-        matplotlib=matplotlib,
-        Figure=Figure,
-        Polygon=Polygon,
-        FancyBboxPatch=FancyBboxPatch,
-        FancyArrowPatch=FancyArrowPatch,
-        ConnectionPatch=ConnectionPatch,
-        Patch=Patch,
-        Rectangle=Rectangle,
-    )
 
 
 def _side(node_id: str) -> str:
@@ -225,7 +196,7 @@ class MatplotlibRenderer(Renderer):
 
     def render(self) -> Any:
         """Build and return the matplotlib `Figure`."""
-        mpl = _require_mpl()
+        mpl = require_mpl()
         # Plain view (not zoom) so skip/residual edges stay on drawn boxes.
         view = self.graph.view(self.depth)
         # Draw the collapsed view's frontier (nodes with no children in view).
