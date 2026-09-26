@@ -7,6 +7,7 @@ import pytest
 import torch
 
 from chuchichaestli.data import (
+    as_image_batch,
     batch_to_device,
     input_in_batch,
     samples_in_batch,
@@ -102,3 +103,30 @@ def test_the_leading_value_is_stricter_than_nothing():
         input_in_batch({"a": torch.ones(2)})
     with pytest.raises(ValueError, match="leads with nothing"):
         input_in_batch(())
+
+
+@pytest.mark.parametrize(
+    ("shape", "expected"),
+    [
+        ((16, 16), (1, 1, 16, 16)),
+        ((3, 16, 16), (1, 3, 16, 16)),
+        ((16, 16, 4), (1, 4, 16, 16)),
+        ((8, 1, 12, 12), (8, 1, 12, 12)),
+        ((8, 12, 12, 3), (8, 3, 12, 12)),
+        ((8, 12, 12), (8, 1, 12, 12)),
+    ],
+)
+def test_every_image_layout_becomes_a_channels_first_batch(shape, expected):
+    """Channels first or last, one image or many, all end up the same."""
+    assert tuple(as_image_batch(torch.rand(*shape)).shape) == expected
+
+
+def test_an_image_batch_promotes_integers():
+    """Pixels read off disk as `uint8` still have to scale and plot."""
+    assert as_image_batch(torch.randint(0, 255, (4, 8, 8))).is_floating_point()
+
+
+def test_a_shape_that_is_no_image_says_so():
+    """Five channels is not a picture, and the error has to say why."""
+    with pytest.raises(ValueError, match="1, 3 or 4 channels"):
+        as_image_batch(torch.rand(2, 5, 8, 8))

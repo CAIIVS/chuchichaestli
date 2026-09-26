@@ -26,6 +26,7 @@ from chuchichaestli.data.archive import (
 )
 from chuchichaestli.data.batch import (
     BatchType,
+    as_image_batch,
     batch_to_device,
     input_in_batch,
     samples_in_batch,
@@ -111,6 +112,7 @@ __all__ = [
     "Hdf5Archive",
     "archive_for",
     "BatchType",
+    "as_image_batch",
     "batch_to_device",
     "input_in_batch",
     "samples_in_batch",

@@ -9,10 +9,13 @@ from typing import Any
 import torch
 
 from chuchichaestli.utils.functools import map_nested
+from chuchichaestli.utils.tensors import as_inexact, sanitize_ndim
 
 
 __all__ = [
     "BatchType",
+    "IMAGE_CHANNELS",
+    "as_image_batch",
     "batch_to_device",
     "input_in_batch",
     "samples_in_batch",
@@ -21,6 +24,32 @@ __all__ = [
 
 
 BatchType = torch.Tensor | Mapping[str, Any] | Sequence[Any]
+
+IMAGE_CHANNELS = frozenset({1, 3, 4})
+
+
+def as_image_batch(images: Any) -> torch.Tensor:
+    """Return images as an `(N, C, H, W)` float tensor on the host.
+
+    Args:
+        images: A tensor, or anything `torch.as_tensor` accepts,
+            laid out channels-first or channels-last.
+
+    Raises:
+        ValueError: If the shape is neither an image's nor a batch of them.
+    """
+    x = as_inexact(torch.as_tensor(images).detach().cpu())
+    if x.ndim == 3 and not IMAGE_CHANNELS & {x.shape[0], x.shape[-1]}:
+        x = x[:, None]
+    x = sanitize_ndim(x)
+    if x.shape[1] in IMAGE_CHANNELS:
+        return x
+    if x.shape[-1] in IMAGE_CHANNELS:
+        return x.permute(0, 3, 1, 2)
+    raise ValueError(
+        f"A batch of images needs 1, 3 or 4 channels first or last, "
+        f"got shape {tuple(x.shape)}."
+    )
 
 
 def unpack_batch(
