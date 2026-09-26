@@ -651,7 +651,11 @@ class StageLoop(ABC):
         accumulate: Micro-batches consumed per unit.
         requires: Binding names that must resolve before the run starts.
         provides: Binding names this stage publishes.
+        trains: Whether a pass of this loop updates the model, which is what
+            makes it count towards the run's epochs and steps.
     """
+
+    trains: bool = False
 
     def __init__(
         self,
@@ -773,7 +777,7 @@ class StageLoop(ABC):
         reported = {} if loss is None else loss.as_floats()
         if self._steps_in_entry:
             reported["total"] = self._steps_in_entry
-        signal = ctx.emit(EventType.STEP_ENDED, **reported)
+        signal = ctx.emit(EventType.STEP_ENDED, trains=self.trains, **reported)
         if self.steps is not None and self._progress.global_step >= self.steps:
             self._finish(ctx)
             return Signal.DONE
@@ -872,7 +876,12 @@ class StageLoop(ABC):
         """
         self.finalize_sweep(ctx)
         reported = {} if self.planned_passes is None else {"total": self.planned_passes}
-        ctx.emit(EventType.EPOCH_ENDED, epoch=self._progress.epoch, **reported)
+        ctx.emit(
+            EventType.EPOCH_ENDED,
+            epoch=self._progress.epoch,
+            trains=self.trains,
+            **reported,
+        )
         self._progress = self._progress.next_epoch()
         ctx.progress = self._progress
         done = self.epochs is not None and self._progress.epoch >= self.epochs
@@ -902,6 +911,8 @@ class Train(StageLoop):
         update: How the optimizers are stepped.
         swa_window: The tail of the run over which weights are averaged.
     """
+
+    trains: bool = True
 
     def __init__(
         self,

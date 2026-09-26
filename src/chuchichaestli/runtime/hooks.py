@@ -28,6 +28,8 @@ from chuchichaestli.runtime.events import (
     EventType,
     Progress,
     Signal,
+    counts_toward,
+    units,
 )
 from chuchichaestli.utils.registry import require
 
@@ -41,29 +43,10 @@ ThresholdModeTypes = Literal["rel", "abs"]
 CheckpointUnitTypes = Literal["advance", "epoch", "step"]
 BarUnitTypes = Literal["step", "epoch"]
 
-UNIT_MAP: dict[str, EventType] = {
-    "advance": EventType.STAGE_ADVANCED,
-    "epoch": EventType.EPOCH_ENDED,
-    "step": EventType.STEP_ENDED,
-}
-
-
-def _units(named: Any) -> dict[str, EventType]:
-    """Return the events a `Literal` of unit names stands for.
-
-    Deriving them is what keeps the names a type accepts and the names the
-    runtime accepts from drifting apart.
-
-    Args:
-        named: A `Literal` whose members are unit names.
-    """
-    return {name: UNIT_MAP[name] for name in get_args(named)}
-
-
 MODES: frozenset[str] = frozenset(get_args(ModeTypes))
 THRESHOLD_MODES: frozenset[str] = frozenset(get_args(ThresholdModeTypes))
-CHECKPOINT_UNIT_MAP: dict[str, EventType] = _units(CheckpointUnitTypes)
-BAR_UNIT_MAP: dict[str, EventType] = _units(BarUnitTypes)
+CHECKPOINT_UNIT_MAP: dict[str, EventType] = units(CheckpointUnitTypes)
+BAR_UNIT_MAP: dict[str, EventType] = units(BarUnitTypes)
 
 __all__ = [
     "ProgressBar",
@@ -796,7 +779,7 @@ class Checkpointer:
         Args:
             event: What the runtime just did.
         """
-        if event.type is self.trigger:
+        if counts_toward(event, self.unit):
             self._counted += 1
             self._due = self._due or self._counted % self.every == 0
             self._at = event.progress

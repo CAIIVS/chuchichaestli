@@ -7,7 +7,14 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from typing import Any
 import torch
-from chuchichaestli.runtime.events import Event, EventType, Progress, Signal
+from chuchichaestli.runtime.events import (
+    UNIT_MAP,
+    Event,
+    EventType,
+    Progress,
+    Signal,
+    counts_toward,
+)
 from chuchichaestli.utils.rng import WorkerSeeder, derive_seed, rng_generator
 from chuchichaestli.runtime.topology import Local
 from chuchichaestli.runtime.traits import Stateful, Topology
@@ -48,6 +55,7 @@ class Context:
         dispatch: Callable[[Event], Signal] | None = None,
         bindings: dict[str, Any] | None = None,
         group: str | None = None,
+        totals: dict[str, int] | None = None,
     ):
         """Constructor.
 
@@ -61,6 +69,7 @@ class Context:
             dispatch: Receives emitted events and returns the hooks' verdict.
             bindings: Artifacts bound at this level.
             group: Update group currently being applied.
+            totals: Units completed so far, shared with every child.
         """
         self.path = path
         self.seed = seed
@@ -74,6 +83,7 @@ class Context:
         self.progress = Progress()
         self._bindings: dict[str, Any] = dict(bindings or {})
         self._cache: dict[tuple[str | None, str], Any] = {}
+        self._totals = {} if totals is None else totals
         self._dispatch = dispatch
 
     def __repr__(self) -> str:
@@ -230,7 +240,18 @@ class Context:
             payload: Extra JSON-serializable detail.
         """
         event = Event(event_type, self.path, self.progress, payload)
+        for unit in UNIT_MAP:
+            if counts_toward(event, unit):
+                self._totals[unit] = self._totals.get(unit, 0) + 1
         return self._dispatch(event) if self._dispatch is not None else Signal.GO
+
+    def total(self, unit: str) -> int:
+        """Return how many of a unit the run has completed.
+
+        Args:
+            unit: `"advance"`, `"epoch"` or `"step"`.
+        """
+        return self._totals.get(unit, 0)
 
     def child(self, index: int, name: str) -> Context:
         """Build the context for a child stage.
@@ -251,6 +272,7 @@ class Context:
             dtype=self.dtype,
             dispatch=self._dispatch,
             group=self.group,
+            totals=self._totals,
         )
 
     def at_group(self, group: str | None) -> Context:

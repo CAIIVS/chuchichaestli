@@ -1040,3 +1040,43 @@ def test_a_checkpointer_told_where_to_go_needs_no_run_store(tmp_path):
         recorder([]), hooks=[Checkpointer(every=1, unit="advance", store=tmp_path)]
     ).run()
     assert sorted(p.name for p in tmp_path.glob("ckpt_*"))
+
+
+def test_an_epoch_interval_counts_only_training_passes(tmp_path):
+    """An inference pass is not an epoch, or the interval silently shortens."""
+    import torch.nn as nn
+    from torch.utils.data import TensorDataset
+    from chuchichaestli.runtime.stages import Phase, Predict, Train
+
+    seen = []
+
+    class Watch:
+        """Note every checkpoint event."""
+
+        def on(self, event):
+            """Record checkpoint events.
+
+            Args:
+                event: What the runtime just did.
+            """
+            if event.type is EventType.CHECKPOINT:
+                seen.append(event.payload["path"])
+            return Signal.GO
+
+    rows = TensorDataset(torch.rand(4, 2), torch.rand(4, 1))
+    fit = Train("fit", data=rows, batch_size=4, loss=nn.MSELoss())
+    Runtime(
+        Program(
+            provide={"model": nn.Linear(2, 1)},
+            stages=[
+                Phase.each_pass(
+                    4,
+                    fit,
+                    Predict("sample", data=rows, batch_size=4, inputs="x", targets="y"),
+                )
+            ],
+        ),
+        store=tmp_path / "run",
+        hooks=[Checkpointer(every=2, unit="epoch", at_end=False), Watch()],
+    ).run()
+    assert len(seen) == 2

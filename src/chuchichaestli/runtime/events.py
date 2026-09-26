@@ -11,11 +11,15 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any
+from typing import Any, Literal, get_args
 
 
 __all__ = [
     "Signal",
+    "UnitTypes",
+    "UNIT_MAP",
+    "units",
+    "counts_toward",
     "C3liRuntimeError",
     "Progress",
     "EventType",
@@ -171,3 +175,36 @@ class Event:
             progress=Progress.from_dict(state.get("progress", {})),
             payload=dict(state.get("payload", {})),
         )
+
+
+UnitTypes = Literal["advance", "epoch", "step"]
+
+UNIT_MAP: dict[str, EventType] = {
+    "advance": EventType.STAGE_ADVANCED,
+    "epoch": EventType.EPOCH_ENDED,
+    "step": EventType.STEP_ENDED,
+}
+
+
+def units(named: Any) -> dict[str, EventType]:
+    """Return the events a `Literal` of unit names stands for.
+
+    Args:
+        named: A `Literal` whose members are unit names.
+    """
+    return {name: UNIT_MAP[name] for name in get_args(named)}
+
+
+def counts_toward(event: Event, unit: str) -> bool:
+    """Whether an event advances a unit's total.
+
+    A pass that trains is an epoch; one that only reads the model is not,
+    so inference does not count towards the epochs or steps of a run.
+
+    Args:
+        event: What the runtime just did.
+        unit: `"advance"`, `"epoch"` or `"step"`.
+    """
+    if event.type is not UNIT_MAP[unit]:
+        return False
+    return unit == "advance" or bool(event.payload.get("trains", True))
