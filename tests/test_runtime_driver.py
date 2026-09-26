@@ -9,7 +9,13 @@ import pytest
 import torch
 from torch import nn
 
-from chuchichaestli.runtime.events import C3liRuntimeError, Event, EventType, Signal
+from chuchichaestli.runtime.events import (
+    C3liRuntimeError,
+    Event,
+    EventType,
+    Progress,
+    Signal,
+)
 from chuchichaestli.runtime.hooks import Console, Jsonl
 from chuchichaestli.runtime.runtime import (
     C3liProgramError,
@@ -421,6 +427,24 @@ def test_console_is_plain_for_a_non_terminal():
     Runtime(Program([Call("a", fn=lambda c: None)]), hooks=[Console(stream=out)]).run()
     assert "\033" not in out.getvalue()
     assert "> program/0:a" in out.getvalue()
+
+
+def test_console_leaves_flags_out_of_the_numbers():
+    """`bool` is an `int`, so a flag would otherwise read as a measurement."""
+    import io
+
+    out = io.StringIO()
+    console = Console(stream=out)
+    console.on(
+        Event(
+            EventType.STEP_ENDED,
+            "program/0:fit",
+            Progress(global_step=1),
+            {"loss": 0.5, "trains": True},
+        )
+    )
+    assert "loss=0.5" in out.getvalue()
+    assert "trains" not in out.getvalue()
 
 
 def test_console_colours_when_forced():

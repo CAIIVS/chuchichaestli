@@ -183,7 +183,7 @@ class Console:
             if isinstance(v, float)
             else f"{k}={v}"
             for k, v in event.payload.items()
-            if isinstance(v, (int, float)) and k != "total"
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and k != "total"
         )
 
     def _step_ended(self, event: Event, tint: bool) -> str | None:
