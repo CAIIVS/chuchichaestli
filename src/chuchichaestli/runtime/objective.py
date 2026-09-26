@@ -409,6 +409,10 @@ class Adversarial(ModelCriterion):
 
     Attributes:
         discriminator: Discriminator, or the name of a binding holding one.
+        targets: Key the real sample is read from, or `None` to score the
+            model's own input as real.
+        condition: Key a condition is read from and joined to every sample,
+            or `None` for a discriminator that scores samples alone.
         variant: Which pair of adversarial losses to use.
         generator_loss: What the generator minimises, looked up from `variant`.
         discriminator_loss: What the discriminator minimises.
@@ -418,6 +422,8 @@ class Adversarial(ModelCriterion):
         self,
         discriminator: nn.Module | str = "disc",
         variant: AdversarialTypes = "bce",
+        targets: str | None = None,
+        condition: str | None = None,
         **kwargs: Any,
     ):
         """Constructor.
@@ -427,6 +433,12 @@ class Adversarial(ModelCriterion):
             variant: Which pair of adversarial losses to use. `"wasserstein"`
                 only estimates a distance while its critic stays Lipschitz,
                 which nothing here enforces.
+            targets: Key the real sample is read from, for a paired task where
+                the model's input is not what it should have produced; `None`
+                scores the input as real.
+            condition: Key a condition is read from and joined channel-wise to
+                every sample, as a conditional discriminator takes it; `None`
+                scores samples alone.
             kwargs: Passed to `ModelCriterion`.
 
         Raises:
@@ -434,20 +446,42 @@ class Adversarial(ModelCriterion):
         """
         super().__init__(**kwargs)
         self.discriminator = discriminator
+        self.targets = targets
+        self.condition = condition
         self.variant = variant
         self.generator_loss = require(variant, ADV_GEN_LOSSES, "adversarial variant")
         self.discriminator_loss = require(
             variant, ADV_DISC_LOSSES, "adversarial variant"
         )
 
-    def run_discriminator(self, sample: torch.Tensor, ctx: Context) -> torch.Tensor:
+    def run_discriminator(
+        self, sample: torch.Tensor, batch: BatchType, ctx: Context
+    ) -> torch.Tensor:
         """Return the scores the discriminator gives a sample, as logits.
 
         Args:
             sample: What to score.
+            batch: One micro-batch of the stage's data, read for a condition.
             ctx: Execution context for the stage.
         """
+        if self.condition is not None:
+            condition = input_in_batch(batch, self.condition)
+            sample = torch.cat([condition, sample], dim=1)
         return ctx.resolve(self.discriminator)(sample)
+
+    def real_sample(self, batch: BatchType, x: torch.Tensor) -> torch.Tensor:
+        """Return the sample the discriminator scores as real.
+
+        Args:
+            batch: One micro-batch of the stage's data.
+            x: The model's input, scored as real when no target is named.
+        """
+        if self.targets is None:
+            return x
+        _, targets = unpack_batch(
+            batch, self.inputs, self.targets, reader=type(self).__name__
+        )
+        return targets
 
 
 class GeneratorAdv(Adversarial):
@@ -461,7 +495,7 @@ class GeneratorAdv(Adversarial):
             ctx: Execution context for the stage.
         """
         y, _ = self.run_model(batch, ctx)
-        fake = self.run_discriminator(y.tensor, ctx)
+        fake = self.run_discriminator(y.tensor, batch, ctx)
         return Loss(self.generator_loss(fake))
 
 
@@ -479,8 +513,8 @@ class DiscriminatorAdv(Adversarial):
             ctx: Execution context for the stage.
         """
         y, x = self.run_model(batch, ctx)
-        real = self.run_discriminator(x, ctx)
-        fake = self.run_discriminator(y.tensor.detach(), ctx)
+        real = self.run_discriminator(self.real_sample(batch, x), batch, ctx)
+        fake = self.run_discriminator(y.tensor.detach(), batch, ctx)
         total = self.discriminator_loss(real, fake)
         return Loss(total, {"real": real.mean().detach(), "fake": fake.mean().detach()})
 

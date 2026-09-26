@@ -651,3 +651,63 @@ def test_every_scheduler_rides_in_the_stage_state():
         "sched/disc",
         "sched/gen",
     ]
+
+
+def test_the_real_sample_defaults_to_what_the_model_was_given():
+    """A reconstruction GAN scores the input as real, as it always has."""
+    term = DiscriminatorAdv()
+    x = torch.ones(4, 3)
+    assert term.real_sample((x,), x) is x
+
+
+def test_a_target_says_what_counts_as_real():
+    """A paired task compares against the truth, not the input it was given."""
+    term = DiscriminatorAdv(inputs="c", targets="x")
+    batch = {"c": torch.zeros(4, 3), "x": torch.ones(4, 3)}
+    assert torch.equal(term.real_sample(batch, batch["c"]), batch["x"])
+
+
+def test_a_condition_is_joined_to_every_sample():
+    """A conditional discriminator scores the pair, not the sample alone."""
+    widths = []
+
+    class Width(nn.Module):
+        """Record how many channels it was handed."""
+
+        def forward(self, x):
+            """Note the channel count and score the sample.
+
+            Args:
+                x: What the discriminator was given.
+            """
+            widths.append(x.shape[1])
+            return x.mean(dim=1, keepdim=True)
+
+    term = DiscriminatorAdv(inputs="c", targets="x", condition="c")
+    ctx = a_context(model=nn.Identity(), disc=Width())
+    batch = {"c": torch.zeros(4, 1, 8, 8), "x": torch.ones(4, 1, 8, 8)}
+    term.compute(batch, ctx.at_group("disc"))
+    assert widths == [2, 2]
+
+
+def test_an_unconditional_discriminator_sees_the_sample_alone():
+    """Without a condition the channels reaching it are the sample's own."""
+    widths = []
+
+    class Width(nn.Module):
+        """Record how many channels it was handed."""
+
+        def forward(self, x):
+            """Note the channel count and score the sample.
+
+            Args:
+                x: What the discriminator was given.
+            """
+            widths.append(x.shape[1])
+            return x.mean(dim=1, keepdim=True)
+
+    term = DiscriminatorAdv(inputs="c", targets="x")
+    ctx = a_context(model=nn.Identity(), disc=Width())
+    batch = {"c": torch.zeros(4, 1, 8, 8), "x": torch.ones(4, 1, 8, 8)}
+    term.compute(batch, ctx.at_group("disc"))
+    assert widths == [1, 1]
