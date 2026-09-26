@@ -1080,3 +1080,33 @@ def test_an_epoch_interval_counts_only_training_passes(tmp_path):
         hooks=[Checkpointer(every=2, unit="epoch", at_end=False), Watch()],
     ).run()
     assert len(seen) == 2
+
+
+def test_a_loop_keeps_its_step_count_across_a_resume(tmp_path):
+    """The one counter that says how much work a stage did, in all."""
+    import torch.nn as nn
+    from torch.utils.data import TensorDataset
+    from chuchichaestli.runtime.stages import Phase, Train
+
+    rows = TensorDataset(torch.rand(4, 2), torch.rand(4, 1))
+
+    def program(fit):
+        return Program(
+            provide={"model": nn.Linear(2, 1)},
+            stages=[Phase.each_pass(4, fit, name="pass")],
+        )
+
+    store = tmp_path / "run"
+    stopped = Train("fit", data=rows, batch_size=2, loss=nn.MSELoss())
+    Runtime(
+        program(stopped),
+        store=store,
+        hooks=[Checkpointer(every=1, unit="advance"), StopAfter(5)],
+    ).run()
+
+    carried = Train("fit", data=rows, batch_size=2, loss=nn.MSELoss())
+    Runtime(program(carried), store=store, resume="last", hooks=[]).run()
+
+    whole = Train("fit", data=rows, batch_size=2, loss=nn.MSELoss())
+    Runtime(program(whole), hooks=[]).run()
+    assert carried.total_steps == whole.total_steps

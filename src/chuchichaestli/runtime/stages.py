@@ -939,7 +939,10 @@ class StageLoop(ABC):
 
     def state_dict(self) -> dict[str, Any]:
         """Return the stage's resumable state."""
-        return {"progress": self._progress.to_dict()}
+        return {
+            "progress": self._progress.to_dict(),
+            "total_steps": self.total_steps,
+        }
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         """Restore state previously returned by `state_dict`.
@@ -948,6 +951,7 @@ class StageLoop(ABC):
             state: Mapping as returned by `state_dict`.
         """
         self._progress = Progress.from_dict(state.get("progress", {}))
+        self.total_steps = int(state.get("total_steps", 0))
 
     def _take(self) -> list[BatchType]:
         """Return the next unit's micro-batches, short at an epoch's end."""
