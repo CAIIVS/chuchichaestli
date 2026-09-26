@@ -322,6 +322,30 @@ class Jsonl:
             self._handle.close()
             self._handle = None
 
+    @staticmethod
+    def read(path: str | Path, only: Sequence[EventType] | None = None) -> list[Event]:
+        """Return the events a trace recorded.
+
+        Args:
+            path: Trace file to read, as this hook wrote it.
+            only: Read just these event types, or all of them when `None`.
+
+        Raises:
+            FileNotFoundError: If there is no trace at the path.
+        """
+        path = Path(path)
+        if not path.is_file():
+            raise FileNotFoundError(f"No trace to read at {str(path)!r}.")
+        kinds = frozenset(only) if only is not None else None
+        events = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            event = Event.from_dict(json.loads(line))
+            if kinds is None or event.type in kinds:
+                events.append(event)
+        return events
+
 
 class Timer:
     """Measure how long stages take, and report once at they end.

@@ -101,3 +101,40 @@ def test_a_trace_told_where_to_go_needs_no_run_store(tmp_path):
         hooks=[Jsonl("trace.jsonl", store=tmp_path)],
     ).run()
     assert (tmp_path / "trace.jsonl").exists()
+
+
+def test_a_trace_reads_back_as_the_events_it_recorded(tmp_path):
+    """A trace is only useful as an oracle if it round-trips."""
+    hook = Jsonl("trace.jsonl", store=tmp_path)
+    written = [step(1), step(2)]
+    for event in written:
+        hook.on(event)
+    hook.close()
+    assert Jsonl.read(tmp_path / "trace.jsonl") == written
+
+
+def test_reading_a_trace_can_pick_one_kind_of_event(tmp_path):
+    """The whole point at a call site: the steps, not the stage chatter."""
+    hook = Jsonl("trace.jsonl", store=tmp_path)
+    for event in (Event(EventType.STAGE_BEGAN, "program"), step(1)):
+        hook.on(event)
+    hook.close()
+    read = Jsonl.read(tmp_path / "trace.jsonl", only=[EventType.STEP_ENDED])
+    assert read == [step(1)]
+
+
+def test_reading_a_trace_that_is_not_there_says_so(tmp_path):
+    """The error has to name the file, as `Load` does."""
+    with pytest.raises(FileNotFoundError, match="absent.jsonl"):
+        Jsonl.read(tmp_path / "absent.jsonl")
+
+
+def test_a_trace_written_by_a_run_reads_back(tmp_path):
+    """The round trip that matters: what a real run left behind."""
+    Runtime(
+        Program([Call("a", fn=lambda c: None)]),
+        hooks=[Jsonl("trace.jsonl", store=tmp_path)],
+    ).run()
+    events = Jsonl.read(tmp_path / "trace.jsonl")
+    assert events[0].type is EventType.RUN_BEGAN
+    assert events[-1].type is EventType.RUN_ENDED
