@@ -32,7 +32,7 @@ from chuchichaestli.runtime.update import (
     Updater,
     WeightsTypes,
 )
-from chuchichaestli.runtime.events import EventType, Progress, Signal
+from chuchichaestli.runtime.events import UNIT_MAP, EventType, Progress, Signal
 from chuchichaestli.runtime.topology import lockstep, reduce_metrics
 from chuchichaestli.runtime.traits import (
     DiffusionLike,
@@ -58,7 +58,9 @@ __all__ = [
     "StageBlock",
     "Call",
     "Load",
-    "Export",
+    "Exporter",
+    "WeightsExport",
+    "ImageExport",
     "Barrier",
     "Phase",
     "Program",
@@ -245,11 +247,19 @@ class Load(StageBlock):
         ctx[self.target].load_state_dict(read_state(self.path), strict=self.strict)
 
 
-class Export(StageBlock):
-    """Write a binding's weights out, from rank 0 only.
+class Exporter(StageBlock, ABC):
+    """Write a binding out to a file, from rank 0 only.
 
-    The suffix picks the format (.safetensors or .pt/.pth).
+    Subclasses implement `write`.
+
+    Attributes:
+        path: File each export lands on, possibly a template.
+        source: Binding name of what is exported.
+        single_file: Whether the export lands on a single file, written under
+            a scratch name and moved into place.
     """
+
+    single_file: bool = True
 
     def __init__(
         self,
@@ -262,15 +272,46 @@ class Export(StageBlock):
 
         Args:
             name: Identifies the stage within its parent.
-            path: File to write; the suffix picks the writer.
-            source: Binding name of the module to export.
+            path: File to write; the suffix picks the format. An
+                `{epoch}`, `{step}`, `{advance}` or `{name}` field numbers
+                the exports by where the run had got to.
+            source: Binding name of what to export.
         """
         super().__init__(name, requires=(source,))
         self.path = Path(path)
         self.source = source
 
+    def target(self, ctx: Context) -> Path:
+        """Return the file the next export lands on.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        template = str(self.path)
+        if "{" not in template:
+            return self.path
+        totals = {unit: ctx.total(unit) for unit in UNIT_MAP}
+        return Path(template.format(name=self.name, **totals))
+
+    def check(self, target: Path) -> None:
+        """Reject a file this exporter cannot write, on every rank.
+
+        Args:
+            target: File the export lands on.
+        """
+
+    @abstractmethod
+    def write(self, target: Path, artifact: Any, ctx: Context) -> None:
+        """Write the artifact out.
+
+        Args:
+            target: Scratch file to write, moved into place afterwards.
+            artifact: What the source binding resolved to.
+            ctx: Execution context for this entry.
+        """
+
     def core(self, ctx: Context) -> None:
-        """Write the source binding's state to disk.
+        """Write the source binding to its file.
 
         Args:
             ctx: Execution context for this entry.
@@ -278,12 +319,102 @@ class Export(StageBlock):
         Raises:
             ValueError: If the suffix names no known format.
         """
-        writer = writer_for(self.path)
+        target = self.target(ctx)
+        self.check(target)
         if not ctx.topology.is_main:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with staged(self.path) as (scratch,):
-            writer(scratch, ctx[self.source].state_dict())
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not self.single_file:
+            self.write(target, ctx[self.source], ctx)
+            return
+        with staged(target) as (scratch,):
+            self.write(scratch, ctx[self.source], ctx)
+
+
+class WeightsExport(Exporter):
+    """Write a binding's weights out, from rank 0 only.
+
+    The suffix picks the format (.safetensors or .pt/.pth).
+    """
+
+    def check(self, target: Path) -> None:
+        """Reject a suffix no state writer handles.
+
+        Args:
+            target: File the export lands on.
+
+        Raises:
+            ValueError: If the suffix names no known format.
+        """
+        writer_for(target)
+
+    def write(self, target: Path, artifact: Any, ctx: Context) -> None:
+        """Write the source binding's state to disk.
+
+        Args:
+            target: Scratch file to write.
+            artifact: The module being exported.
+            ctx: Execution context for this entry.
+        """
+        writer_for(target)(target, artifact.state_dict())
+
+
+class ImageExport(Exporter):
+    """Plot a binding's images, one file each, from rank 0 only.
+
+    Reads what `save_images` accepts, a `Predict` stage's pairs included.
+
+    Attributes:
+        kwargs: Arguments `save_images` is called with.
+    """
+
+    single_file: bool = False
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        path: str | Path,
+        source: str = "predict/pairs",
+        **kwargs: Any,
+    ):
+        """Constructor.
+
+        Args:
+            name: Identifies the stage within its parent.
+            path: File whose stem names every image; the suffix picks the
+                format. An `{epoch}` field numbers the exports.
+            source: Binding name of the images to plot.
+            kwargs: Further arguments, e.g. `labels`, `limit`, `cmap`,
+                `draw`, `normalize`, `title`.
+        """
+        super().__init__(name, path=path, source=source)
+        self.kwargs = dict(kwargs)
+
+    def check(self, target: Path) -> None:
+        """Reject a suffix no image backend writes.
+
+        Args:
+            target: File the export lands on.
+
+        Raises:
+            ValueError: If the suffix names no image format.
+        """
+        from chuchichaestli.utils.visualization.images import IMAGE_FORMATS
+
+        require(target.suffix.lower(), IMAGE_FORMATS, "image format")
+
+    def write(self, target: Path, artifact: Any, ctx: Context) -> None:
+        """Draw the source binding as one file per image.
+
+        Args:
+            target: Scratch file to write.
+            artifact: The images being plotted.
+            ctx: Execution context for this entry.
+        """
+        from chuchichaestli.utils.visualization.images import save_images
+
+        save_images(artifact, target, **self.kwargs)
 
 
 class Barrier(StageBlock):

@@ -16,9 +16,12 @@ from chuchichaestli.runtime.stages import (
     Barrier,
     Call,
     Every,
-    Export,
+    Exporter,
+    WeightsExport,
+    ImageExport,
     Load,
     Phase,
+    Predict,
     Program,
     Repeat,
     StageBlock,
@@ -217,7 +220,9 @@ def test_load_and_export_round_trip(tmp_path):
     path = tmp_path / "weights.safetensors"
     source = nn.Linear(3, 2)
     drive(
-        Program([Export("out", path=path, source="model")], provide={"model": source})
+        Program(
+            [WeightsExport("out", path=path, source="model")], provide={"model": source}
+        )
     )
     assert path.is_file()
 
@@ -253,7 +258,9 @@ def test_load_and_export_round_trip_every_format(tmp_path, suffix):
     path = tmp_path / f"weights{suffix}"
     source = nn.Linear(3, 2)
     drive(
-        Program([Export("out", path=path, source="model")], provide={"model": source})
+        Program(
+            [WeightsExport("out", path=path, source="model")], provide={"model": source}
+        )
     )
     target = nn.Linear(3, 2)
     with torch.no_grad():
@@ -267,7 +274,7 @@ def test_export_writes_the_format_its_suffix_names(tmp_path):
     path = tmp_path / "weights.pt"
     drive(
         Program(
-            [Export("out", path=path, source="model")],
+            [WeightsExport("out", path=path, source="model")],
             provide={"model": nn.Linear(2, 2)},
         )
     )
@@ -284,9 +291,107 @@ def test_a_torch_file_loads_without_conversion(tmp_path):
     assert torch.equal(target.weight, source.weight)
 
 
+def test_an_exporter_numbers_its_files_rather_than_overwriting(tmp_path):
+    """A stage entered several times leaves its own files behind."""
+    Runtime(
+        Program(
+            [
+                Repeat(
+                    3,
+                    ImageExport(
+                        "preview",
+                        path=tmp_path / "samples_{advance:02d}.png",
+                        source="images",
+                    ),
+                )
+            ],
+            provide={"images": torch.rand(1, 1, 8, 8)},
+        ),
+        hooks=[],
+    ).run()
+    files = sorted(p.name for p in tmp_path.glob("samples_*.png"))
+    assert files == ["samples_00_0.png", "samples_01_0.png", "samples_02_0.png"]
+
+
+def test_an_exporter_without_a_template_reuses_its_paths(tmp_path):
+    """Numbering is opt-in; a plain path stays the path it was given."""
+    path = tmp_path / "samples.png"
+    drive(
+        Program(
+            [Repeat(2, ImageExport("preview", path=path, source="images"))],
+            provide={"images": torch.rand(2, 1, 8, 8)},
+        )
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "samples_0.png",
+        "samples_1.png",
+    ]
+
+
+def test_an_export_is_numbered_by_training_epochs_alone(tmp_path):
+    """An inference pass is not an epoch, so it must not shift the numbering."""
+    pytest.importorskip("matplotlib")
+    val = TensorDataset(torch.rand(2, 1, 4, 4), torch.rand(2, 1, 4, 4))
+    fit = Train(
+        "fit",
+        data=TensorDataset(torch.rand(4, 1, 4, 4), torch.rand(4, 1, 4, 4)),
+        batch_size=4,
+        loss=nn.MSELoss(),
+    )
+    drive(
+        Program(
+            provide={"model": nn.Conv2d(1, 1, 1)},
+            stages=[
+                Phase.each_pass(
+                    2,
+                    fit,
+                    Predict("sample", data=val, batch_size=2, inputs="x", targets="y"),
+                    ImageExport(
+                        "preview",
+                        path=tmp_path / "s_{epoch}.png",
+                        source="sample/pairs",
+                    ),
+                )
+            ],
+        )
+    )
+    assert sorted({p.name.split("_")[1] for p in tmp_path.glob("*.png")}) == ["1", "2"]
+
+
+def test_image_export_plots_what_predict_published(tmp_path):
+    """The pairs a `Predict` publishes are what the exporter is pointed at."""
+    pytest.importorskip("matplotlib")
+    pairs = TensorDataset(torch.rand(2, 1, 8, 8), torch.rand(2, 1, 8, 8))
+    drive(
+        Program(
+            [
+                ImageExport(
+                    "preview",
+                    path=tmp_path / "pairs.png",
+                    source="sample/pairs",
+                    labels=("sampled", "truth"),
+                )
+            ],
+            provide={"sample/pairs": pairs},
+        )
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "pairs_sampled_0.png",
+        "pairs_sampled_1.png",
+        "pairs_truth_0.png",
+        "pairs_truth_1.png",
+    ]
+
+
+def test_an_exporter_has_to_say_how_it_writes():
+    """`Exporter` is the shared machinery, not a stage in its own right."""
+    with pytest.raises(TypeError):
+        Exporter("out", path="x.png")
+
+
 @pytest.mark.parametrize(
     ("stage", "match"),
-    [(Load, "Cannot read '.ckpt'"), (Export, "Cannot write '.ckpt'")],
+    [(Load, "Cannot read '.ckpt'"), (WeightsExport, "Cannot write '.ckpt'")],
 )
 def test_an_unknown_suffix_names_what_is_accepted(tmp_path, stage, match):
     """As elsewhere in the package, the error lists the alternatives."""
@@ -295,9 +400,35 @@ def test_an_unknown_suffix_names_what_is_accepted(tmp_path, stage, match):
         path.write_bytes(b"not a checkpoint")
         block = Load("in", path=path, target="model")
     else:
-        block = Export("out", path=path, source="model")
+        block = WeightsExport("out", path=path, source="model")
     with pytest.raises(ValueError, match=match):
         drive(Program([block], provide={"model": nn.Linear(2, 2)}))
+
+
+def test_image_export_writes_a_file_per_image(tmp_path):
+    """A multi-file export cannot go through a single scratch name."""
+    drive(
+        Program(
+            [
+                ImageExport(
+                    "preview", path=tmp_path / "s_{advance:02d}.png", source="images"
+                )
+            ],
+            provide={"images": torch.rand(3, 1, 8, 8)},
+        )
+    )
+    files = sorted(p.name for p in tmp_path.glob("*.png"))
+    assert files == ["s_00_0.png", "s_00_1.png", "s_00_2.png"]
+
+
+def test_image_export_rejects_a_suffix_it_cannot_write(tmp_path):
+    """The image formats are listed, as the weight formats are."""
+    program = Program(
+        [ImageExport("preview", path=tmp_path / "s.gif", source="images")],
+        provide={"images": torch.rand(4, 1, 8, 8)},
+    )
+    with pytest.raises(ValueError, match="Unsupported image format"):
+        drive(program)
 
 
 def test_each_pass_slots_a_stage_between_the_passes():
