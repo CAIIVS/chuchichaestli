@@ -544,3 +544,21 @@ def test_a_metric_is_given_the_target_before_the_prediction():
         device="cpu",
     ).run()
     assert seen == [(2.0, 1.0)]
+
+
+def test_an_archive_creates_the_directories_it_needs(tmp_path):
+    """An appendable format opens its file at once, before any batch arrives."""
+    program = Program(
+        provide={"model": linear()},
+        stages=[
+            Predict(
+                "p",
+                model="model",
+                data=ramp(),
+                batch_size=4,
+                archive=tmp_path / "nested" / "under" / "out.h5",
+            )
+        ],
+    )
+    Runtime(program, hooks=(), device="cpu").run()
+    assert (tmp_path / "nested" / "under" / "out.h5").is_file()

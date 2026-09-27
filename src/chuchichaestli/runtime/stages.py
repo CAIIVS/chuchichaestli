@@ -1707,6 +1707,7 @@ class Predict(Inference):
         self._written = self.shard_path(
             None if ctx.topology.world_size == 1 else ctx.topology.rank
         )
+        self._written.parent.mkdir(parents=True, exist_ok=True)
         self._writer = archive_for(self._written, self.key)
 
     def shard_path(self, rank: int | None = None) -> Path | None:
