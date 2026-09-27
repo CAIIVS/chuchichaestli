@@ -180,6 +180,14 @@ class Local:
         """
         return module
 
+    def unwrap(self, module: nn.Module) -> nn.Module:
+        """Return the module unchanged, nothing having wrapped it.
+
+        Args:
+            module: Module to unwrap.
+        """
+        return module
+
     def broadcast(self, value: Any) -> Any:
         """Return rank 0's value on every process.
 
@@ -321,6 +329,17 @@ class Ddp:
             device_ids=None if self.device.type == "cpu" else [self.device.index],
             find_unused_parameters=self.find_unused_parameters,
         )
+
+    def unwrap(self, module: nn.Module) -> nn.Module:
+        """Return the module a replica holds, for its parameters and spec.
+
+        Args:
+            module: Module to unwrap; returned unchanged when it carries no
+                parameters, which `wrap` leaves alone.
+        """
+        while isinstance(module, DistributedDataParallel):
+            module = module.module
+        return module
 
     def broadcast(self, value: Any) -> Any:
         """Return rank 0's value on every process.

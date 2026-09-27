@@ -199,7 +199,7 @@ class CompositeObjective(Computes, Objective):
             weights[term.name] = adaptive(
                 values[adaptive.ref],
                 values[term.name],
-                model.get_parameter(adaptive.layer),
+                ctx.topology.unwrap(model).get_parameter(adaptive.layer),
             )
         return weights
 

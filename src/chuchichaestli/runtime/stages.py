@@ -357,7 +357,7 @@ class WeightsExport(Exporter):
             artifact: The module being exported.
             ctx: Execution context for this entry.
         """
-        writer_for(target)(target, artifact.state_dict())
+        writer_for(target)(target, ctx.topology.state_of(artifact))
 
 
 class ImageExport(Exporter):

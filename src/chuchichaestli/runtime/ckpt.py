@@ -354,7 +354,7 @@ class CheckpointStore:
             return None
 
         # write model states
-        specs = {n: writable_spec(v) for n, v in models.items()}
+        specs = {n: writable_spec(topology.unwrap(v)) for n, v in models.items()}
         files: dict[str, Path] = {}
         for name, tensors in weights.items():
             path = directory / self._weight_name(name, set(files.values()))

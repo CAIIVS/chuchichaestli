@@ -264,6 +264,15 @@ class Topology(Protocol):
         """
         ...
 
+    def unwrap(self, module: nn.Module) -> nn.Module:
+        """Return the module `wrap` was given, for its parameters and spec.
+
+        Args:
+            module: Module to unwrap; returned unchanged when it was never
+                wrapped.
+        """
+        ...
+
     def broadcast(self, value: Any) -> Any:
         """Return rank 0's value on every process.
 

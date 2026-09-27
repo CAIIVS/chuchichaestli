@@ -502,3 +502,50 @@ def test_every_rank_is_dealt_the_same_number_of_batches(samples):
     """An uneven share is a deadlock, not a rounding error."""
     reported = under_ddp(_shards, free_port(), samples)
     assert reported[0] == reported[1]
+
+
+def test_a_topology_unwraps_what_it_wrapped():
+    """`unwrap` is `wrap`'s inverse, so each layout undoes its own."""
+    from torch.nn.parallel import DistributedDataParallel
+    from chuchichaestli.runtime.topology import Local
+
+    plain = nn.Linear(2, 1)
+    local = Local()
+    assert local.unwrap(local.wrap(plain)) is plain
+
+    replica = DistributedDataParallel.__new__(DistributedDataParallel)
+    object.__setattr__(replica, "_modules", {"module": plain})
+    assert local.unwrap(replica) is replica
+
+
+def _export(rank, world, results, port, directory):
+    """Export a wrapped model's weights from a distributed run.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+        directory: Where the weights are written.
+    """
+    from pathlib import Path
+    from chuchichaestli.runtime import Program, Runtime, WeightsExport
+    from chuchichaestli.utils.io import read_state
+
+    topology = join_group(rank, world, port)
+    try:
+        program = Program(
+            provide={"model": nn.Linear(3, 2)},
+            stages=[WeightsExport("out", path=Path(directory) / "w.safetensors")],
+        )
+        Runtime(program, hooks=[], topology=topology).run()
+        if rank == 0:
+            results["keys"] = sorted(read_state(Path(directory) / "w.safetensors"))
+    finally:
+        topology.close()
+
+
+def test_an_export_from_a_replica_loads_into_a_plain_module(tmp_path):
+    """A `module.` prefix makes the weights unloadable outside a DDP run."""
+    reported = under_ddp(_export, free_port(), str(tmp_path))
+    assert reported["keys"] == ["bias", "weight"]
