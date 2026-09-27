@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit test configurations."""
 
-import os
 from pathlib import Path
 import h5py
 import numpy as np
@@ -117,6 +116,6 @@ def pytest_sessionfinish(session):
     """Actions after the tests."""
     for dimensions in [1, 2, 3]:
         f = Path(f"test_{dimensions}D.hdf5")
-        os.remove(f)
+        f.unlink(missing_ok=True)
         # f = Path(f"rand_test_{dimensions}D.hdf5")
         # os.remove(f)
