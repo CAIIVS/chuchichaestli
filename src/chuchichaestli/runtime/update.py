@@ -469,6 +469,12 @@ class Updater(ABC):
                 for g, s in self.schedulers.items()
             }
         )
+        state.update(
+            {
+                self.state_key("scaler", g): s.state_dict()
+                for g, s in self._scalers.items()
+            }
+        )
         return state
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:

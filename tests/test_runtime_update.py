@@ -437,3 +437,19 @@ def test_the_start_of_the_window_is_a_fraction():
     """An epoch number would not port between runs of different lengths."""
     with pytest.raises(ValueError, match="fraction of the run"):
         SwaWindow(True, start=3)
+
+
+def test_the_scaler_state_is_saved_beside_the_optimizer():
+    """`load_state_dict` reads it back, so leaving it out breaks a resume."""
+    import torch.nn as nn
+    from chuchichaestli.runtime.context import Context
+    from chuchichaestli.runtime.update import Step
+
+    model = nn.Linear(2, 1)
+    update = Step(precision=torch.float16)
+    update.bind({None: torch.optim.SGD(model.parameters(), lr=0.1)})
+    update._scaler(None, Context("program"))
+
+    state = update.state_dict()
+    assert any(key.startswith("scaler") for key in state)
+    update.load_state_dict(state)
