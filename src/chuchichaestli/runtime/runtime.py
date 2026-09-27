@@ -310,6 +310,9 @@ class Runtime:
         except C3liRuntimeError as exc:
             failure = str(exc)
             raise
+        except BaseException as exc:
+            failure = f"{type(exc).__name__}: {exc}"
+            raise
         finally:
             self.program.leave(ctx)
             ctx.progress = self.program.progress()

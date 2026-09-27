@@ -110,6 +110,33 @@ def test_abort_propagates_and_still_closes_the_trace():
     assert hook.events[-1].payload["aborted"] == "stage said stop"
 
 
+def test_an_ordinary_error_is_named_in_the_closing_event():
+    """A trace reporting a dead run as a clean one is worse than no trace."""
+    hook = Record()
+
+    def explode(_ctx):
+        """Fail the way a stage fails when its own code is wrong."""
+        raise ValueError("bad shape")
+
+    with pytest.raises(ValueError, match="bad shape"):
+        Runtime(Program([Call("bad", fn=explode)]), hooks=[hook]).run()
+    assert hook.events[-1].type is EventType.RUN_ENDED
+    assert hook.events[-1].payload["aborted"] == "ValueError: bad shape"
+
+
+def test_an_interrupt_is_named_in_the_closing_event():
+    """A run someone stopped by hand did not finish either."""
+    hook = Record()
+
+    def interrupt(_ctx):
+        """Fail the way a run does when the terminal is interrupted."""
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        Runtime(Program([Call("bad", fn=interrupt)]), hooks=[hook]).run()
+    assert hook.events[-1].payload["aborted"] == "KeyboardInterrupt: "
+
+
 def test_check_rejects_an_unsatisfiable_requirement_before_any_compute():
     """A plan error must surface before the first stage runs."""
     log: list[str] = []
