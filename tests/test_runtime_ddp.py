@@ -549,3 +549,69 @@ def test_an_export_from_a_replica_loads_into_a_plain_module(tmp_path):
     """A `module.` prefix makes the weights unloadable outside a DDP run."""
     reported = under_ddp(_export, free_port(), str(tmp_path))
     assert reported["keys"] == ["bias", "weight"]
+
+
+def _unbound_ddp(device: torch.device) -> Ddp:
+    """Return a `Ddp` pinned to a device without joining a process group.
+
+    Args:
+        device: Device the rank computes on.
+    """
+    topology = Ddp.__new__(Ddp)
+    topology.device = device
+    return topology
+
+
+def test_a_rank_makes_its_own_device_the_process_default(monkeypatch):
+    """A collective given no device uses the current one, so it must be ours."""
+    from types import SimpleNamespace
+
+    pinned: list[int] = []
+    monkeypatch.setattr(
+        torch,
+        "accelerator",
+        SimpleNamespace(set_device_index=pinned.append),
+        raising=False,
+    )
+    _unbound_ddp(torch.device("cuda", 3))._pin_process()
+    assert pinned == [3]
+
+
+def test_a_rank_pins_through_the_backend_without_an_accelerator(monkeypatch):
+    """Torch below 2.6 has no accelerator module, but every backend pins."""
+    monkeypatch.delattr(torch, "accelerator", raising=False)
+    pinned: list[int] = []
+    monkeypatch.setattr(torch.cuda, "set_device", pinned.append)
+    _unbound_ddp(torch.device("cuda", 2))._pin_process()
+    assert pinned == [2]
+
+
+def test_a_cpu_rank_pins_no_device(monkeypatch):
+    """There is no cpu index to meet on, so pinning would fail rather than help."""
+    from types import SimpleNamespace
+
+    pinned: list[int] = []
+    monkeypatch.setattr(
+        torch,
+        "accelerator",
+        SimpleNamespace(set_device_index=pinned.append),
+        raising=False,
+    )
+    _unbound_ddp(torch.device("cpu"))._pin_process()
+    assert pinned == []
+
+
+def test_a_rank_pins_its_device_before_joining_the_group(monkeypatch):
+    """`nccl` binds to the current device as it initializes, so pinning precedes it."""
+    import torch.distributed as dist
+
+    order: list[str] = []
+    monkeypatch.setattr(Ddp, "_pin_process", lambda self: order.append("pin"))
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        dist, "init_process_group", lambda **kwargs: order.append("init")
+    )
+    monkeypatch.setattr(dist, "get_rank", lambda: 0)
+    monkeypatch.setattr(dist, "get_world_size", lambda: 1)
+    Ddp(device="cpu")
+    assert order == ["pin", "init"]

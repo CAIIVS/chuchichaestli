@@ -272,6 +272,7 @@ class Ddp:
         self.world_size = int(os.environ.get("WORLD_SIZE", 1))
         self.find_unused_parameters = find_unused_parameters
         self.device = self._pin_to_rank(device)
+        self._pin_process()
         if not dist.is_initialized():
             dist.init_process_group(
                 backend=backend or self._backend(),
@@ -281,6 +282,22 @@ class Ddp:
             )
         self.rank = dist.get_rank()
         self.world_size = dist.get_world_size()
+
+    def _pin_process(self) -> None:
+        """Make this rank's device the current one for the whole process.
+
+        A collective that is handed no device of its own uses the process's
+        current one.
+        """
+        if self.device.type == "cpu" or self.device.index is None:
+            return
+        accelerator = getattr(torch, "accelerator", None)
+        if accelerator is not None and hasattr(accelerator, "set_device_index"):
+            accelerator.set_device_index(self.device.index)
+            return
+        backend = getattr(torch, self.device.type, None)
+        if backend is not None and hasattr(backend, "set_device"):
+            backend.set_device(self.device.index)
 
     def _pin_to_rank(self, device: torch.device | str | None) -> torch.device:
         """Return the device this rank computes on.
