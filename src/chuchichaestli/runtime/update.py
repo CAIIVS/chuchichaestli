@@ -356,6 +356,20 @@ class Updater(ABC):
             ctx: Execution context for the stage.
         """
 
+    def _contributes(self, objective: Objective, group: str | None, step: int) -> bool:
+        """Whether an objective has anything to minimise for a group at a step.
+
+        An objective that schedules its terms can have none of them on yet, in
+        which case there is no graph to backpropagate and nothing to step.
+
+        Args:
+            objective: Produces the loss.
+            group: Update group being applied, or `None`.
+            step: Optimizer steps taken so far.
+        """
+        scheduled = getattr(objective, "terms", None)
+        return True if scheduled is None else bool(scheduled(group, step))
+
     def _accumulate(
         self,
         objective: Objective,
@@ -554,6 +568,8 @@ class Step(Updater):
         optimizer = self.optimizers[None]
         if OptimSpec.needs_closure(optimizer):
             return self._closure_step(objective, batches, ctx)
+        if not self._contributes(objective, None, ctx.progress.global_step):
+            return Loss(total=torch.zeros(()), parts={})
         self.policy.zero_grad(optimizer)
         loss = self._accumulate(objective, batches, ctx, None)
         self._step_group(None, ctx)
@@ -610,8 +626,11 @@ class Alternating(Updater):
             batches: The micro-batches making up this step.
             ctx: Execution context for the stage.
         """
+        step = ctx.progress.global_step
         results: dict[str | None, Loss] = {}
-        for group in self.groups(ctx.progress.global_step):
+        for group in self.groups(step):
+            if not self._contributes(objective, group, step):
+                continue
             self.policy.zero_grad(self.optimizers[group])
             results[group] = self._accumulate(objective, batches, ctx, group)
             self._step_group(group, ctx)
@@ -631,7 +650,12 @@ class Simultaneous(Updater):
             batches: The micro-batches making up this step.
             ctx: Execution context for the stage.
         """
-        groups = self.groups(ctx.progress.global_step)
+        step = ctx.progress.global_step
+        groups = tuple(
+            group
+            for group in self.groups(step)
+            if self._contributes(objective, group, step)
+        )
         for group in groups:
             self.policy.zero_grad(self.optimizers[group])
         results = {g: self._accumulate(objective, batches, ctx, g) for g in groups}

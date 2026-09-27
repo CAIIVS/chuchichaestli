@@ -483,3 +483,51 @@ def test_a_sat_out_group_stays_sat_out_after_a_pass():
     before = gen.weight.detach().clone()
     update.apply(Adversarial(), [torch.ones(4, 1)], ctx)
     assert torch.equal(gen.weight, before)
+
+
+def warmup_objective() -> CompositeObjective:
+    """Build a GAN objective whose generator term waits two steps."""
+    return CompositeObjective(
+        [
+            Term("gadv", Adversarial(), groups=("gen",), after=2),
+            Term("dadv", Adversarial(), groups=("disc",)),
+        ]
+    )
+
+
+@pytest.mark.parametrize("kind", [Alternating, Simultaneous])
+def test_an_adversarial_warmup_runs_from_the_first_step(kind):
+    """A group with no term on yet has no graph, so it must sit the step out."""
+    gen, disc = linear(), linear()
+    update = gan_update(kind, gen, disc)
+    objective = warmup_objective()
+    ctx = a_context(gen=gen, disc=disc)
+    moved: list[bool] = []
+    for _ in range(4):
+        before = gen.weight.detach().clone()
+        update.apply(objective, [torch.ones(4, 1)], ctx)
+        moved.append(not torch.equal(gen.weight, before))
+        ctx.progress = ctx.progress.next_step()
+    assert moved == [False, False, True, True]
+
+
+@pytest.mark.parametrize("kind", [Alternating, Simultaneous])
+def test_a_sitting_group_reports_no_part_of_its_own(kind):
+    """A group that did not run must not report a zero as if it had."""
+    gen, disc = linear(), linear()
+    loss = gan_update(kind, gen, disc).apply(
+        warmup_objective(), [torch.ones(4, 1)], a_context(gen=gen, disc=disc)
+    )
+    assert sorted(loss.parts) == ["disc/dadv"]
+
+
+def test_a_single_group_waits_for_its_only_term():
+    """The default update has one group, which can be scheduled off too."""
+    model = linear()
+    update = Step()
+    update.bind({None: SGD(model.parameters(), lr=0.1)})
+    objective = CompositeObjective([Term("rec", Adversarial(), after=2)])
+    ctx = a_context(gen=model, disc=model)
+    before = model.weight.detach().clone()
+    assert update.apply(objective, [torch.ones(4, 1)], ctx).parts == {}
+    assert torch.equal(model.weight, before)
