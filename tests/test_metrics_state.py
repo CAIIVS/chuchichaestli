@@ -80,3 +80,17 @@ def test_a_reset_metric_forgets_what_it_accumulated():
         torch.equal(value, fresh.state_dict()[name])
         for name, value in metric.state_dict().items()
     )
+
+
+def test_every_accumulator_follows_the_metric_to_a_device():
+    """A state tensor left behind fails the first update on the new device."""
+    from chuchichaestli.metrics import FID
+
+    metric = FID()
+    metric.to(torch.device("meta"))
+    left = [
+        name
+        for name, value in vars(metric).items()
+        if isinstance(value, torch.Tensor) and value.device.type != "meta"
+    ]
+    assert left == []

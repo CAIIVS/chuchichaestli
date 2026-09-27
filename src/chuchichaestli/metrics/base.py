@@ -69,12 +69,9 @@ class EvalMetric:
             device: Tensor allocation/computation device.
         """
         self.device = device
-        self.is_nan = self.is_nan.to(device=self.device)
-        self.nan_count = self.nan_count.to(device=self.device)
-        self.min_value = self.min_value.to(device=self.device)
-        self.max_value = self.max_value.to(device=self.device)
-        self.n_observations = self.n_observations.to(device=self.device)
-        self.n_images = self.n_images.to(device=self.device)
+        for name, value in vars(self).items():
+            if isinstance(value, torch.Tensor):
+                setattr(self, name, value.to(device=device))
         self.value = self.value.to(device=self.device)
         self.aggregate = self.aggregate.to(device=self.device)
 

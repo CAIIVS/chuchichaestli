@@ -222,10 +222,6 @@ class FID(EvalMetric):
         """
         super().to(device)
         self.model = self.model.to(device)
-        self.n_images_fake = self.n_images_fake.to(device=device)
-        self.n_images_real = self.n_images_real.to(device=device)
-        self.aggregate_fake = self.aggregate_fake.to(device=device)
-        self.aggregate_real = self.aggregate_real.to(device=device)
 
 
 if __name__ == "__main__":
