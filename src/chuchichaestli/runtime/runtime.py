@@ -155,6 +155,7 @@ class Runtime:
         self._topology = topology
         self._muted: set[int] = set()
         self._checkpoints: CheckpointStore | None = None
+        self._unplaced: dict[str, Any] = {}
 
     @property
     def device(self) -> torch.device:
@@ -282,6 +283,7 @@ class Runtime:
         """
         apply_backends_settings(self.backends)
         self._muted.clear()
+        self._unplaced.clear()
         seed_ambient(self.seed)
         self.check()
         self._provision()
@@ -316,6 +318,7 @@ class Runtime:
         finally:
             self.program.leave(ctx)
             ctx.progress = self.program.progress()
+            self._report_unplaced()
             ctx.emit(EventType.RUN_ENDED, aborted=failure)
         return self.program.progress()
 
@@ -353,16 +356,37 @@ class Runtime:
                 "is derived from the seed, so resuming would diverge from the "
                 "run being continued; seed this run the same."
             )
-        store.restore(
+        self._unplaced = store.restore(
             checkpoint,
             program=self.program,
-            bindings=ctx.stateful(),
+            bindings=ctx.run_stateful(),
             topology=self.topology,
             allow_signature_change=self.allow_signature_change,
         )
+        ctx.watch_bindings(self._place)
         if checkpoint.rng is not None:
             restore_rng_state(dict(checkpoint.rng))
         ctx.progress = self.program.progress()
+
+    def _place(self, name: str, value: Any) -> None:
+        """Restore a checkpoint's state into a binding that has just appeared.
+
+        Args:
+            name: Qualified name the binding was registered under.
+            value: Artifact that was bound.
+        """
+        state = self._unplaced.pop(name, None)
+        if state is not None:
+            self.topology.load_state(value, state)
+
+    def _report_unplaced(self) -> None:
+        """Warn about checkpoint state that nothing in the run was bound for."""
+        if self._unplaced:
+            warnings.warn(
+                f"Nothing in this run was bound for {sorted(self._unplaced)}, "
+                f"so that part of {self.resume!r} was not restored.",
+                stacklevel=2,
+            )
 
     def _dispatch(self, event: Event) -> Signal:
         """Deliver an event to every hook and combine their verdicts.

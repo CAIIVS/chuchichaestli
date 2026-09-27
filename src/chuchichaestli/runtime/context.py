@@ -56,6 +56,8 @@ class Context:
         bindings: dict[str, Any] | None = None,
         group: str | None = None,
         totals: dict[str, int] | None = None,
+        registry: dict[str, Any] | None = None,
+        watcher: Callable[[str, Any], None] | None = None,
     ):
         """Constructor.
 
@@ -70,6 +72,9 @@ class Context:
             bindings: Artifacts bound at this level.
             group: Update group currently being applied.
             totals: Units completed so far, shared with every child.
+            registry: Every binding of the run, shared with every child and
+                keyed by the path it was bound at.
+            watcher: Receives each binding as it is registered.
         """
         self.path = path
         self.seed = seed
@@ -84,6 +89,8 @@ class Context:
         self._bindings: dict[str, Any] = dict(bindings or {})
         self._cache: dict[tuple[str | None, str], Any] = {}
         self._totals = {} if totals is None else totals
+        self._registry = {} if registry is None else registry
+        self._watcher = watcher
         self._dispatch = dispatch
 
     def __repr__(self) -> str:
@@ -159,6 +166,7 @@ class Context:
             value: Artifact to bind.
         """
         self._bindings[key] = value
+        self._register(self.path, key, value)
 
     def publish(self, key: str, value: Any) -> None:
         """Bind an artifact into the enclosing phase, so later siblings see it.
@@ -167,7 +175,38 @@ class Context:
             key: Name to bind under.
             value: Artifact to bind.
         """
-        (self.parent or self)._bindings[key] = value
+        target = self.parent or self
+        target._bindings[key] = value
+        self._register(target.path, key, value)
+
+    def _register(self, path: str, key: str, value: Any) -> None:
+        """Record a binding run-wide under the path it was bound at.
+
+        Args:
+            path: Path of the context the binding landed in.
+            key: Name it was bound under.
+            value: Artifact that was bound.
+        """
+        name = f"{path}/{key}"
+        self._registry[name] = value
+        if self._watcher is not None:
+            self._watcher(name, value)
+
+    def run_stateful(self) -> dict[str, Any]:
+        """Return every stateful binding of the run, keyed by qualified name."""
+        return {
+            name: value
+            for name, value in self._registry.items()
+            if isinstance(value, Stateful)
+        }
+
+    def watch_bindings(self, watcher: Callable[[str, Any], None] | None) -> None:
+        """Call `watcher` with the name and value of every binding from now on.
+
+        Args:
+            watcher: Receives each binding as it is registered, or `None`.
+        """
+        self._watcher = watcher
 
     def resolve(self, value: Any) -> Any:
         """Resolve a string to its binding, passing anything else through.
@@ -273,6 +312,8 @@ class Context:
             dispatch=self._dispatch,
             group=self.group,
             totals=self._totals,
+            registry=self._registry,
+            watcher=self._watcher,
         )
 
     def at_group(self, group: str | None) -> Context:

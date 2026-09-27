@@ -1170,3 +1170,89 @@ def test_a_model_given_to_a_stage_is_checkpointed(tmp_path):
     expected = whole.model.state_dict()
     actual = carried.model.state_dict()
     assert all(torch.equal(v, actual[k]) for k, v in expected.items())
+
+
+def nested_program(tmp_path):
+    """Build a program whose trained model a nested phase provides.
+
+    Args:
+        tmp_path: Directory the run writes under.
+    """
+    from torch.utils.data import TensorDataset
+    from chuchichaestli.runtime import DataManager, Phase, Train
+
+    x = torch.arange(24, dtype=torch.float32).reshape(8, 3)
+    inner, outer = nn.Linear(3, 1, bias=False), nn.Linear(3, 1, bias=False)
+    stage = Train(
+        "fit",
+        model="inner",
+        data=DataManager(TensorDataset(x, torch.zeros(8, 1)), batch_size=4),
+        loss=nn.MSELoss(),
+        epochs=4,
+        lr=0.5,
+    )
+    program = Program(
+        provide={"outer": outer},
+        stages=[Phase("nested", [stage], provide={"inner": inner})],
+    )
+    return program, inner
+
+
+def test_a_nested_phase_provides_state_that_is_checkpointed(tmp_path):
+    """Bindings are recorded run-wide, not only those the root can see."""
+    store = tmp_path / "run"
+    program, _ = nested_program(tmp_path)
+    Runtime(program, store=store, hooks=[Checkpointer(every=1)], device="cpu").run()
+    recorded = sorted(CheckpointStore(store).load("last").bindings)
+    assert recorded == ["program/0:nested/inner", "program/outer"]
+
+
+def test_a_nested_phase_provides_state_that_is_restored(tmp_path):
+    """Weights the root cannot see would otherwise resume untrained."""
+    store = tmp_path / "run"
+    torch.manual_seed(0)
+    whole, trained = nested_program(tmp_path)
+    Runtime(whole, store=store, hooks=[Checkpointer(every=1)], device="cpu").run()
+
+    torch.manual_seed(0)
+    again, resumed = nested_program(tmp_path)
+    Runtime(again, store=store, resume="last~2", hooks=[], device="cpu").run()
+    assert torch.allclose(trained.weight, resumed.weight, atol=1e-6)
+
+
+def test_a_binding_is_found_by_its_unqualified_name(tmp_path):
+    """A caller asking for a model should not have to spell out its path."""
+    store = tmp_path / "run"
+    program, _ = nested_program(tmp_path)
+    Runtime(program, store=store, hooks=[Checkpointer(every=1)], device="cpu").run()
+    checkpoint = CheckpointStore(store).load("last")
+    assert checkpoint.qualified("inner") == "program/0:nested/inner"
+    assert checkpoint.qualified("program/outer") == "program/outer"
+
+
+def test_an_ambiguous_binding_name_is_refused(tmp_path):
+    """Two phases may each provide a `model`, so the short name cannot win."""
+    store = tmp_path / "run"
+    written = CheckpointStore(store).save(
+        index=1,
+        program=Program([Call("a", fn=lambda ctx: None)]),
+        bindings={
+            "program/0:a/model": nn.Linear(2, 1),
+            "program/1:b/model": nn.Linear(2, 1),
+        },
+        topology=Local(device="cpu"),
+    )
+    with pytest.raises(C3liCheckpointError, match="ambiguous"):
+        written.qualified("model")
+
+
+def test_state_nothing_is_bound_for_is_reported(tmp_path):
+    """A renamed binding would otherwise resume untrained in silence."""
+    store = tmp_path / "run"
+    program, _ = nested_program(tmp_path)
+    Runtime(program, store=store, hooks=[Checkpointer(every=1)], device="cpu").run()
+
+    renamed, _ = nested_program(tmp_path)
+    renamed.provide = {"elsewhere": renamed.provide["outer"]}
+    with pytest.warns(UserWarning, match="Nothing in this run was bound for"):
+        Runtime(renamed, store=store, resume="last", hooks=[], device="cpu").run()

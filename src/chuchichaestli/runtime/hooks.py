@@ -838,7 +838,7 @@ class Checkpointer:
         checkpoint = self._store.save(
             index=event.progress.global_step,
             program=self._runtime.program,
-            bindings=self._ctx.stateful(),
+            bindings=self._ctx.run_stateful(),
             topology=self._ctx.topology,
             seed=self._runtime.seed,
             progress=self._at if self._at is not None else event.progress,
