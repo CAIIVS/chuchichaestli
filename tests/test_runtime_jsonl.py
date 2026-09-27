@@ -138,3 +138,14 @@ def test_a_trace_written_by_a_run_reads_back(tmp_path):
     events = Jsonl.read(tmp_path / "trace.jsonl")
     assert events[0].type is EventType.RUN_BEGAN
     assert events[-1].type is EventType.RUN_ENDED
+
+
+def test_a_filtered_trace_still_closes_when_the_run_ends(tmp_path):
+    """A buffered record is lost if the filter skips the close path."""
+    hook = Jsonl(
+        "trace.jsonl", store=tmp_path, only=[EventType.STEP_ENDED], flush_every=100
+    )
+    hook.on(step(1))
+    hook.on(Event(EventType.RUN_ENDED, "program"))
+    assert hook._handle is None
+    assert Jsonl.read(tmp_path / "trace.jsonl") == [step(1)]

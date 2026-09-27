@@ -303,15 +303,14 @@ class Jsonl:
         Args:
             event: What the runtime just did.
         """
-        if self.only is not None and event.type not in self.only:
-            return Signal.GO
-        if self._handle is None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._handle = self.path.open("a", encoding="utf-8")
-        self._handle.write(json.dumps(event.to_dict(), sort_keys=True) + "\n")
-        self._write_counter += 1
-        if self._write_counter % self.flush_every == 0:
-            self._handle.flush()
+        if self.only is None or event.type in self.only:
+            if self._handle is None:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self._handle = self.path.open("a", encoding="utf-8")
+            self._handle.write(json.dumps(event.to_dict(), sort_keys=True) + "\n")
+            self._write_counter += 1
+            if self._write_counter % self.flush_every == 0:
+                self._handle.flush()
         if event.type is EventType.RUN_ENDED:
             self.close()
         return Signal.GO
