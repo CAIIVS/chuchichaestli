@@ -215,9 +215,11 @@ class Context:
         return WorkerSeeder(self.seed, self._keyed_path(key))
 
     def cache(self, key: str, fn: Callable[[], Any]) -> Any:
-        """Compute a value once per step, reusing it across objective terms.
+        """Compute a value once per micro-batch, reusing it across terms.
 
-        Keyed by update group as well as name, since the graphs differ.
+        Keyed by update group as well as name, since the graphs differ. The
+        unit is the micro-batch rather than the step: a backward frees the
+        graph a cached value was built on, so the next one must build afresh.
 
         Args:
             key: Name for the cached value.
@@ -229,7 +231,7 @@ class Context:
         return self._cache[slot]
 
     def clear_cache(self) -> None:
-        """Drop cached intermediates, at the end of a step."""
+        """Drop cached intermediates, before each micro-batch is run."""
         self._cache.clear()
 
     def emit(self, event_type: EventType, **payload: Any) -> Signal:

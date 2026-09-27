@@ -531,3 +531,15 @@ def test_a_single_group_waits_for_its_only_term():
     before = model.weight.detach().clone()
     assert update.apply(objective, [torch.ones(4, 1)], ctx).parts == {}
     assert torch.equal(model.weight, before)
+
+
+def test_a_closure_rebuilds_what_it_cached_on_each_evaluation():
+    """L-BFGS re-evaluates the loss, and the first backward freed the graph."""
+    from chuchichaestli.runtime import Reconstruction
+
+    model = nn.Linear(3, 3, bias=False)
+    update = Step()
+    update.bind({None: LBFGS(model.parameters())})
+    objective = CompositeObjective([Term("rec", Reconstruction("l1"))])
+    loss = update.apply(objective, [{"x": torch.ones(2, 3)}], a_context(model=model))
+    assert sorted(loss.parts) == ["rec"]

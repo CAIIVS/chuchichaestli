@@ -22,7 +22,7 @@ from chuchichaestli.runtime import (
     Train,
 )
 from chuchichaestli.runtime.runtime import C3liProgramError
-from chuchichaestli.training import OptimSpec
+from chuchichaestli.training import OptimSpec, Term
 from chuchichaestli.training.update import Ema
 
 
@@ -51,16 +51,17 @@ def ramp(n: int = 5) -> TensorDataset:
 
 
 def gradients_after_one_step(
-    batch_size: int, accumulate: int, **kwargs
+    batch_size: int, accumulate: int, out: int = 1, **kwargs
 ) -> torch.Tensor:
     """Run one step at zero learning rate and return the gradient it left.
 
     Args:
         batch_size: Samples per micro-batch.
         accumulate: Micro-batches per step.
+        out: Output features of the model.
         kwargs: Passed to `Train`.
     """
-    model = linear(fill=0.5)
+    model = linear(out, fill=0.5)
     data = DataManager(ramp(), batch_size=batch_size, shuffle=False)
     stage = Train(
         "t", model=model, data=data, steps=1, accumulate=accumulate, lr=0.0, **kwargs
@@ -884,3 +885,48 @@ def test_each_group_gets_its_own_parameters():
     }
     assert owned["disc"].isdisjoint(owned["gen"])
     assert owned["gen"] == {id(p) for p in gen.parameters()}
+
+
+def test_accumulation_matches_one_larger_batch_for_a_caching_objective():
+    """A term reusing a cached forward must still see each micro-batch."""
+    from chuchichaestli.runtime import Reconstruction
+
+    terms = [Term("rec", Reconstruction("l1"))]
+    whole = gradients_after_one_step(6, 1, out=3, objective=terms)
+    split = gradients_after_one_step(2, 3, out=3, objective=terms)
+    assert torch.allclose(whole, split, atol=1e-5)
+
+
+def test_a_cached_forward_is_rebuilt_for_each_micro_batch():
+    """Reusing one across micro-batches would backward a graph already freed."""
+    from chuchichaestli.runtime import Reconstruction
+
+    forwards: list[int] = []
+
+    class Counted(nn.Linear):
+        """A model recording every forward it runs."""
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            """Run the model and count the call.
+
+            Args:
+                x: Input batch.
+            """
+            forwards.append(1)
+            return super().forward(x)
+
+    model = Counted(3, 3, bias=False)
+    data = DataManager(ramp(6), batch_size=2, shuffle=False)
+    stage = Train(
+        "t",
+        model=model,
+        data=data,
+        steps=1,
+        accumulate=3,
+        lr=0.0,
+        objective=[Term("a", Reconstruction("l1")), Term("b", Reconstruction("l2"))],
+    )
+    ctx = Context("t")
+    stage.enter(ctx)
+    stage.execute(ctx)
+    assert len(forwards) == 3

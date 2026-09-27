@@ -380,7 +380,9 @@ class Updater(ABC):
         """Run the objective over the micro-batches and backpropagate.
 
         Each micro-batch contributes its own share of the step's samples, so
-        a shorter final batch is weighted appropriately.
+        a shorter final batch is weighted appropriately. What the terms share
+        is dropped between micro-batches, each backward freeing the graph it
+        was built on.
 
         Args:
             objective: Produces the loss for each micro-batch.
@@ -395,6 +397,7 @@ class Updater(ABC):
         parts: dict[str, torch.Tensor] = {}
         scaler = self._scaler(group, ctx)
         for batch, count in zip(batches, counts):
+            view.clear_cache()
             with self._autocast(ctx):
                 loss = objective.compute(batch, view)
             share = self.policy.share(loss.total, count / rank_samples)
@@ -580,6 +583,9 @@ class Step(Updater):
     ) -> Loss:
         """Step an optimizer that re-evaluates the loss itself.
 
+        Each evaluation starts from a cleared cache, the previous one having
+        freed the graph its shared values were built on.
+
         Args:
             objective: Produces the loss for each micro-batch.
             batches: The single micro-batch making up this step.
@@ -598,6 +604,7 @@ class Step(Updater):
         parts: dict[str, torch.Tensor] = {}
 
         def compute() -> torch.Tensor:
+            view.clear_cache()
             loss = objective.compute(batches[0], view)
             parts.clear()
             parts.update({name: v.detach() for name, v in loss.parts.items()})
