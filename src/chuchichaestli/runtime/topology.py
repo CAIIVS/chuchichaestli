@@ -90,18 +90,27 @@ def lockstep(topology: Topology, call: Any) -> Any:
 
     Raises:
         C3liRuntimeError: On every rank, if any of them aborted.
+        Exception: On the rank that raised one, after every rank has agreed
+            that the run is over, so none is left waiting in a collective.
     """
+    raised: Exception | None = None
     try:
         signal, reason = call(), None
-    except C3liRuntimeError as failure:
-        signal, reason = Signal.BREAK, str(failure) or "aborted"
+    except C3liRuntimeError as aborted:
+        signal, reason = Signal.BREAK, str(aborted) or "aborted"
+    except Exception as error:
+        signal, reason, raised = Signal.BREAK, f"{type(error).__name__}: {error}", error
     if topology.world_size > 1:
         failures = topology.reduce(
             torch.tensor([0.0 if reason is None else 1.0]), op="sum"
         )
         if float(failures) > 0.0:
+            if raised is not None:
+                raise raised
             raise C3liRuntimeError(reason or "another process aborted the run")
     elif reason is not None:
+        if raised is not None:
+            raise raised
         raise C3liRuntimeError(reason)
     return topology.broadcast(signal)
 
