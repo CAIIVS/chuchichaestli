@@ -359,9 +359,6 @@ class Updater(ABC):
     def _contributes(self, objective: Objective, group: str | None, step: int) -> bool:
         """Whether an objective has anything to minimise for a group at a step.
 
-        An objective that schedules its terms can have none of them on yet, in
-        which case there is no graph to backpropagate and nothing to step.
-
         Args:
             objective: Produces the loss.
             group: Update group being applied, or `None`.
@@ -380,9 +377,7 @@ class Updater(ABC):
         """Run the objective over the micro-batches and backpropagate.
 
         Each micro-batch contributes its own share of the step's samples, so
-        a shorter final batch is weighted appropriately. What the terms share
-        is dropped between micro-batches, each backward freeing the graph it
-        was built on.
+        a shorter final batch is weighted appropriately.
 
         Args:
             objective: Produces the loss for each micro-batch.
@@ -582,9 +577,6 @@ class Step(Updater):
         self, objective: Objective, batches: Sequence[BatchType], ctx: Context
     ) -> Loss:
         """Step an optimizer that re-evaluates the loss itself.
-
-        Each evaluation starts from a cleared cache, the previous one having
-        freed the graph its shared values were built on.
 
         Args:
             objective: Produces the loss for each micro-batch.

@@ -1931,9 +1931,6 @@ class FromProcess:
 class FromLatent:
     """Draws by handing a model noise, as a generator network reads it.
 
-    Draws one fixed set for a whole pass, which is what a sample grid wants;
-    a pass of several batches would repeat that set rather than extend it.
-
     Attributes:
         shape: Shape of one latent.
         draws: Latents to draw per condition, or in all when unconditioned.
@@ -1963,10 +1960,7 @@ class FromLatent:
     ) -> torch.Tensor:
         """Return what the model makes of fresh noise.
 
-        Every batch of a pass is handed the same latents, so a grid drawn
-        once can be compared from one visit to the next. It is drawn where
-        the stage's stream lives and moved afterwards, so the draw does not
-        depend on which device the run is using.
+        Every batch of a pass is handed the same latents.
 
         Args:
             model: The model reading the latent.

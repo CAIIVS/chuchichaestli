@@ -217,9 +217,7 @@ class Context:
     def cache(self, key: str, fn: Callable[[], Any]) -> Any:
         """Compute a value once per micro-batch, reusing it across terms.
 
-        Keyed by update group as well as name, since the graphs differ. The
-        unit is the micro-batch rather than the step: a backward frees the
-        graph a cached value was built on, so the next one must build afresh.
+        Keyed by update group as well as name, since the graphs differ.
 
         Args:
             key: Name for the cached value.
