@@ -442,13 +442,11 @@ def test_the_start_of_the_window_is_a_fraction():
 def test_the_scaler_state_is_saved_beside_the_optimizer():
     """`load_state_dict` reads it back, so leaving it out breaks a resume."""
     import torch.nn as nn
-    from chuchichaestli.runtime.context import Context
     from chuchichaestli.runtime.update import Step
 
     model = nn.Linear(2, 1)
     update = Step(precision=torch.float16)
     update.bind({None: torch.optim.SGD(model.parameters(), lr=0.1)})
-    update._scaler(None, Context("program"))
 
     state = update.state_dict()
     assert any(key.startswith("scaler") for key in state)
@@ -543,3 +541,41 @@ def test_a_closure_rebuilds_what_it_cached_on_each_evaluation():
     objective = CompositeObjective([Term("rec", Reconstruction("l1"))])
     loss = update.apply(objective, [{"x": torch.ones(2, 3)}], a_context(model=model))
     assert sorted(loss.parts) == ["rec"]
+
+
+def scaled_update(scale: float | None = None) -> Step:
+    """Build a bound half-precision update, optionally at a given scale.
+
+    Args:
+        scale: Scale to leave its scaler holding, or `None` for the default.
+    """
+    update = Step(precision=torch.float16)
+    update.bind({None: SGD(nn.Linear(2, 1).parameters(), lr=0.1)})
+    if scale is not None:
+        scaler = update._scalers[None]
+        scaler.scale(torch.zeros(1))
+        scaler.update(new_scale=scale)
+    return update
+
+
+def test_binding_builds_a_scaler_for_every_group():
+    """A scaler built on first use would still be missing when a resume loads."""
+    gen, disc = linear(), linear()
+    update = gan_update(Alternating, gen, disc)
+    assert sorted(map(str, update._scalers)) == ["disc", "gen"]
+
+
+def test_a_resumed_scaler_keeps_the_scale_it_was_saved_at():
+    """Resuming with the scale reset re-runs the overflow backoff."""
+    saved = scaled_update(scale=1024.0).state_dict()
+    resumed = scaled_update()
+    resumed.load_state_dict(saved)
+    assert resumed._scalers[None].get_scale() == 1024.0
+
+
+def test_a_full_precision_resume_restores_nothing():
+    """A disabled scaler saves nothing, which must not be restored as empty."""
+    update = Step()
+    update.bind({None: SGD(nn.Linear(2, 1).parameters(), lr=0.1)})
+    assert not update._scalers[None].is_enabled()
+    update.load_state_dict(update.state_dict())

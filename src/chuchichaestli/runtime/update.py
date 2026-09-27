@@ -343,6 +343,11 @@ class Updater(ABC):
             group: [p for pg in optimizer.param_groups for p in pg["params"]]
             for group, optimizer in self.optimizers.items()
         }
+        scaling = self.precision is torch.float16
+        self._scalers = {
+            group: GradScaler(params[0].device.type, enabled=scaling)
+            for group, params in self._params.items()
+        }
 
     @abstractmethod
     def apply(
@@ -390,7 +395,7 @@ class Updater(ABC):
         rank_samples = self._rank_samples(sum(counts) or 1, ctx)
         total: torch.Tensor | None = None
         parts: dict[str, torch.Tensor] = {}
-        scaler = self._scaler(group, ctx)
+        scaler = self._scalers[group]
         for batch, count in zip(batches, counts):
             view.clear_cache()
             with self._autocast(ctx):
@@ -428,22 +433,6 @@ class Updater(ABC):
             return nullcontext()
         return torch.autocast(device_type=ctx.device.type, dtype=self.precision)
 
-    def _scaler(self, group: str | None, ctx: Context) -> GradScaler:
-        """Return a group's gradient scaler, building it on first use.
-
-        Scaling is needed only for float16, whose gradients underflow; every
-        other precision gets a scaler that passes values through.
-
-        Args:
-            group: Update group being applied, or `None`.
-            ctx: Execution context, naming the device to scale for.
-        """
-        if group not in self._scalers:
-            self._scalers[group] = GradScaler(
-                ctx.device.type, enabled=self.precision is torch.float16
-            )
-        return self._scalers[group]
-
     def _step_group(self, group: str | None, ctx: Context) -> None:
         """Clip, step the optimizer and advance its per-step scheduler.
 
@@ -452,8 +441,8 @@ class Updater(ABC):
             ctx: Execution context a monitored binding is resolved against.
         """
         optimizer = self.optimizers[group]
-        scaler = self._scalers.get(group)
-        if scaler is not None and scaler.is_enabled():
+        scaler = self._scalers[group]
+        if scaler.is_enabled():
             if self.policy.clip is not None:
                 scaler.unscale_(optimizer)
                 self.policy.clip_grads(self._params[group])
@@ -491,6 +480,7 @@ class Updater(ABC):
             {
                 self.state_key("scaler", g): s.state_dict()
                 for g, s in self._scalers.items()
+                if s.is_enabled()
             }
         )
         return state
@@ -507,7 +497,7 @@ class Updater(ABC):
             scheduler.load_state_dict(state[self.state_key("sched", group)])
         for group, scaler in self._scalers.items():
             saved = state.get(self.state_key("scaler", group))
-            if saved is not None:
+            if saved:
                 scaler.load_state_dict(saved)
 
 
