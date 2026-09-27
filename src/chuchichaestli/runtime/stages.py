@@ -28,6 +28,7 @@ from chuchichaestli.runtime.data import DataManager
 from chuchichaestli.runtime.objective import CompositeObjective, Criterion
 from chuchichaestli.runtime.update import (
     Step,
+    step_schedule,
     SwaWindow,
     Updater,
     WeightsTypes,
@@ -1176,6 +1177,7 @@ class Train(StageLoop):
         self._specs: dict[str | None, OptimSpec] = {}
         self._carried: dict[str, Any] | None = None
         self._objective: Objective | None = None
+        self._monitors: dict[str | None, str | None] = {}
 
     def _build_objective(self, ctx: Context) -> Objective:
         """Return what this stage optimizes.
@@ -1204,7 +1206,7 @@ class Train(StageLoop):
         self.update.balance_ranks = bool(getattr(self._manager, "balance_ranks", False))
         optimizers = self._optimizers(ctx)
         stepwise_schedulers, self._sweepwise_schedulers = self._schedulers(optimizers)
-        self.update.bind(optimizers, stepwise_schedulers)
+        self.update.bind(optimizers, stepwise_schedulers, self._monitors)
         self._ema = self._build_ema(ctx)
         self.swa_window.build(self.model_binding, optimizers, ctx)
         if self._carried is not None:
@@ -1234,8 +1236,8 @@ class Train(StageLoop):
                 self._sweepwise_schedulers, self.update.schedulers
             )
             self.swa_window.take(ctx)
-        for scheduler in self._sweepwise_schedulers.values():
-            scheduler.step()
+        for group, scheduler in self._sweepwise_schedulers.items():
+            step_schedule(scheduler, self._monitors.get(group), ctx)
 
     def _build_ema(self, ctx: Context) -> dict[str, Ema]:
         """Build every moving average this stage keeps, and publish them.
@@ -1330,6 +1332,7 @@ class Train(StageLoop):
         """
         stepwise_schedulers: dict[str | None, LRScheduler] = {}
         sweepwise_schedulers: dict[str | None, LRScheduler] = {}
+        self._monitors = {}
         for group, optimizer in optimizers.items():
             spec = self._specs[group].scheduler
             if spec is None:
@@ -1338,6 +1341,7 @@ class Train(StageLoop):
                 stepwise_schedulers if spec.interval == "step" else sweepwise_schedulers
             )
             landing[group] = spec.build(optimizer)
+            self._monitors[group] = spec.monitor
         return stepwise_schedulers, sweepwise_schedulers
 
     def leave(self, ctx: Context) -> Signal:

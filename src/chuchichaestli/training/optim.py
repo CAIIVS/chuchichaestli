@@ -101,6 +101,18 @@ class SchedulerSpec:
     interval: IntervalTypes = "epoch"
     monitor: str | None = None
 
+    def __post_init__(self) -> None:
+        """Reject a plateau schedule with nothing to read.
+
+        Raises:
+            ValueError: If a plateau schedule names no monitored binding.
+        """
+        if self.cls == "plateau" and not self.monitor:
+            raise ValueError(
+                "A plateau schedule steps on a monitored value; give it "
+                "monitor=, e.g. monitor='probe/psnr'."
+            )
+
     def build(self, optimizer: Optimizer, **overrides: Any) -> LRScheduler:
         """Build the scheduler.
 

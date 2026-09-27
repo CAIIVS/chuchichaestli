@@ -12,10 +12,11 @@ import torch
 from torch import nn
 from torch.optim import Optimizer
 from torch.amp import GradScaler
-from torch.optim.lr_scheduler import LRScheduler
+from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 from torch.optim.swa_utils import SWALR
 from chuchichaestli.data.batch import BatchType, samples_in_batch
 from chuchichaestli.runtime.context import Context
+from chuchichaestli.runtime.events import C3liRuntimeError
 from chuchichaestli.runtime.traits import Objective
 from chuchichaestli.training.objective import Loss
 from chuchichaestli.training.optim import OptimSpec
@@ -284,6 +285,7 @@ class Updater(ABC):
         self._scalers: dict[str | None, GradScaler] = {}
         self.optimizers: dict[str | None, Optimizer] = {}
         self.schedulers: dict[str | None, LRScheduler] = {}
+        self.monitors: dict[str | None, str | None] = {}
         self._params: dict[str | None, list[nn.Parameter]] = {}
 
     def __repr__(self) -> str:
@@ -305,6 +307,7 @@ class Updater(ABC):
         self,
         optimizers: Mapping[str | None, Optimizer],
         schedulers: Mapping[str | None, LRScheduler] | None = None,
+        monitors: Mapping[str | None, str | None] | None = None,
     ) -> None:
         """Attach the optimizers this update drives.
 
@@ -312,6 +315,7 @@ class Updater(ABC):
             optimizers: The optimizer of each group.
             schedulers: Schedulers advanced after every optimizer step; those
                 advanced per epoch stay with the stage.
+            monitors: Binding each group's schedule reads, for a plateau one.
 
         Raises:
             ValueError: If the optimizers do not match the groups, or a
@@ -334,6 +338,7 @@ class Updater(ABC):
             )
         self.optimizers = dict(optimizers)
         self.schedulers = dict(schedulers or {})
+        self.monitors = dict(monitors or {})
         self._params = {
             group: [p for pg in optimizer.param_groups for p in pg["params"]]
             for group, optimizer in self.optimizers.items()
@@ -427,11 +432,12 @@ class Updater(ABC):
             )
         return self._scalers[group]
 
-    def _step_group(self, group: str | None) -> None:
+    def _step_group(self, group: str | None, ctx: Context) -> None:
         """Clip, step the optimizer and advance its per-step scheduler.
 
         Args:
             group: Update group being applied, or `None`.
+            ctx: Execution context a monitored binding is resolved against.
         """
         optimizer = self.optimizers[group]
         scaler = self._scalers.get(group)
@@ -445,7 +451,7 @@ class Updater(ABC):
             self.policy.step(optimizer, self._params[group])
         scheduler = self.schedulers.get(group)
         if scheduler is not None:
-            scheduler.step()
+            step_schedule(scheduler, self.monitors.get(group), ctx)
 
     @staticmethod
     def state_key(prefix: str, group: str | None) -> str:
@@ -493,6 +499,32 @@ class Updater(ABC):
                 scaler.load_state_dict(saved)
 
 
+def step_schedule(scheduler: LRScheduler, monitor: str | None, ctx: Context) -> None:
+    """Advance a schedule, handing a plateau one the value it reads.
+
+    Args:
+        scheduler: The schedule to advance.
+        monitor: Binding the schedule reads, or `None` for one that advances
+            on its own.
+        ctx: Execution context the binding is resolved against.
+
+    Raises:
+        C3liRuntimeError: If a plateau schedule's monitored binding does not
+            resolve, which would otherwise hold its rate for the whole run.
+    """
+    if not isinstance(scheduler, ReduceLROnPlateau):
+        scheduler.step()
+        return
+    value = ctx.get(monitor) if monitor else None
+    if value is None:
+        raise C3liRuntimeError(
+            f"A plateau schedule reads {monitor!r}, which does not resolve at "
+            f"{ctx.path!r}; bound here or above: {sorted(ctx.names())}. A stage "
+            "publishing it must run before this one, within the same phase."
+        )
+    scheduler.step(value)
+
+
 class Step(Updater):
     """One optimizer step over a single group of parameters."""
 
@@ -524,7 +556,7 @@ class Step(Updater):
             return self._closure_step(objective, batches, ctx)
         self.policy.zero_grad(optimizer)
         loss = self._accumulate(objective, batches, ctx, None)
-        self._step_group(None)
+        self._step_group(None, ctx)
         return loss
 
     def _closure_step(
@@ -582,7 +614,7 @@ class Alternating(Updater):
         for group in self.groups(ctx.progress.step):
             self.policy.zero_grad(self.optimizers[group])
             results[group] = self._accumulate(objective, batches, ctx, group)
-            self._step_group(group)
+            self._step_group(group, ctx)
         return Loss.merge(results)
 
 
@@ -604,5 +636,5 @@ class Simultaneous(Updater):
             self.policy.zero_grad(self.optimizers[group])
         results = {g: self._accumulate(objective, batches, ctx, g) for g in groups}
         for group in groups:
-            self._step_group(group)
+            self._step_group(group, ctx)
         return Loss.merge(results)

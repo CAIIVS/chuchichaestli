@@ -145,3 +145,9 @@ def test_a_named_constructor_takes_the_parameters_it_owns():
     assert spec.params == "disc"
     assert "params" not in spec.kwargs
     assert spec.build(model().parameters()).param_groups[0]["lr"] == 2e-4
+
+
+def test_a_plateau_schedule_must_name_what_it_reads():
+    """Without a monitor it can never step, which is worse than refusing it."""
+    with pytest.raises(ValueError, match="monitor="):
+        OptimSpec.adamw().with_schedule("plateau")
