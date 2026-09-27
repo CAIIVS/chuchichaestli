@@ -5,7 +5,7 @@
 
 import pytest
 import torch
-from chuchichaestli.diffusion.ddpm import BBDM
+from chuchichaestli.diffusion.processes import BBDM
 
 
 @pytest.mark.parametrize(
@@ -77,3 +77,26 @@ def test_generation(dimensions, batchsize, yield_intermediate):
 
     # Check the output shape
     assert output.shape == (2 * batchsize, 16) + (32,) * dimensions
+
+
+def _rows_marked(batchsize, shape):
+    """Return a batch whose every row is the constant of its index.
+
+    Args:
+        batchsize: Number of rows.
+        shape: Shape of one row.
+    """
+    index = torch.arange(float(batchsize)).view(batchsize, *([1] * len(shape)))
+    return index.expand(batchsize, *shape).contiguous()
+
+
+def test_a_condition_is_expanded_with_the_sample_over_timesteps():
+    """Its condition is required, so a batch mismatch is an outright error."""
+    c = _rows_marked(4, (16, 32))
+    x_0 = torch.randn(4, 16, 32)
+    x_t, noise, timesteps = BBDM(num_timesteps=10).noise_step(
+        x_0, c, timesteps=torch.tensor([0, 1, 2, 3])
+    )
+    assert x_t.shape == (4 * 4, 16, 32)
+    assert noise.shape == (4 * 4, 16, 32)
+    assert timesteps.tolist() == [0] * 4 + [1] * 4 + [2] * 4 + [3] * 4

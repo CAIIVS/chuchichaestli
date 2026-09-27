@@ -15,14 +15,15 @@ from chuchichaestli.models.blocks import (
     AutoencoderMidBlockTypes,
     DecoderInBlockTypes,
 )
-from chuchichaestli.models.maps import require_cls
+from chuchichaestli.utils.registry import require
 from chuchichaestli.models.norm import NormTypes
+from chuchichaestli.models.spec import InitArgMixin
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS, UpsampleTypes
 from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
 from collections.abc import Sequence
 
 
-class Decoder(nn.Module):
+class Decoder(InitArgMixin, nn.Module):
     """Flexible decoder implementation for autoencoders."""
 
     def __init__(
@@ -108,7 +109,7 @@ class Decoder(nn.Module):
             upsample_type, n_mults, "upsample_type", None, f"[{n_mults} level(s)]"
         )
         upsample_clss = [
-            require_cls(name, UPSAMPLE_FUNCTIONS, "upsampling type")
+            require(name, UPSAMPLE_FUNCTIONS, "upsampling type")
             for name in upsample_types
         ]
 

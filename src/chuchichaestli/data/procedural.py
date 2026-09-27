@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Procedurally generated datasets.
+"""Procedurally generated datasets as toy examples.
 
 Each dataset is a `GenerativeDataset` subclass. Subclasses implement
 `GenerativeDataset.generate` which returns `(X, y)` tensors; the base
@@ -20,12 +20,14 @@ Generators provided:
 
 from pathlib import Path
 import torch
-from torch.distributions import Normal
 from abc import ABC, abstractmethod
 import warnings
 from collections.abc import Callable
+from typing import Any
+from torch.utils.data import Dataset
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
 from chuchichaestli.utils import nbytes
+from chuchichaestli.utils.rng import rng_generator
 
 
 __all__ = [
@@ -37,6 +39,8 @@ __all__ = [
     "ConcentricSpheresDataset",
     "GaussiansDataset",
     "SwissRollDataset",
+    "DensityDataset",
+    "ConditionalDensityDataset",
     "generate_procedural_dataset",
 ]
 
@@ -221,7 +225,7 @@ class ProceduralDataset(CachingDataset, ABC):
     def __getitem__(self, index: int | slice) -> tuple[torch.Tensor, torch.Tensor]:
         """Return item as `(features, label)` for index."""
         if isinstance(index, slice):
-            X_slice = self._mmap[0][index, :self.dim]
+            X_slice = self._mmap[0][index, : self.dim]
             y_slice = self._mmap[0][index, self.dim]
             return X_slice, y_slice
         row = super().__getitem__(index)
@@ -268,7 +272,7 @@ class HalfMoonsDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate half-moon samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         n_out, n_in = self._partition(self.n_samples, 2)
         # Outer moon: upper half-circle.
         t_out = torch.linspace(0, torch.pi, n_out)
@@ -281,10 +285,12 @@ class HalfMoonsDataset(ProceduralDataset):
         y = torch.cat([torch.zeros(n_out), torch.ones(n_in)])
         # Add random jitter on 2D plane
         if self.noise > 0:
-            X = X + torch.randn_like(X) * self.noise
+            X = X + torch.randn(X.shape, generator=gen, dtype=X.dtype) * self.noise
         # Embed into higher-diemnsional ambient space
         if self.dim > 2:
-            extra = torch.randn(self.n_samples, self.dim - 2) * self.noise
+            extra = (
+                torch.randn(self.n_samples, self.dim - 2, generator=gen) * self.noise
+            )
             X = torch.cat([X, extra], dim=1)
         return X, y
 
@@ -325,23 +331,26 @@ class SpiralsDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate two-spiral samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         n0, n1 = self._partition(self.n_samples, 2)
         # Angular parameter (sqrt-sampling gives uniform density along the arc)
-        t0 = torch.sqrt(torch.rand(n0)) * 780.0 * (2.0 * torch.pi / 360.0)
-        t1 = torch.sqrt(torch.rand(n1)) * 780.0 * (2.0 * torch.pi / 360.0)
+        arc = 780.0 * (2.0 * torch.pi / 360.0)
+        t0 = torch.sqrt(torch.rand(n0, generator=gen)) * arc
+        t1 = torch.sqrt(torch.rand(n1, generator=gen)) * arc
         # First arm.
-        jitter0 = torch.randn(n0, 2) * self.noise
+        jitter0 = torch.randn(n0, 2, generator=gen) * self.noise
         arm0 = torch.stack([-torch.cos(t0) * t0, torch.sin(t0) * t0], dim=1) + jitter0
         # Second arm, 180 degrees rotation with independent noise.
-        jitter1 = torch.randn(n1, 2) * self.noise
+        jitter1 = torch.randn(n1, 2, generator=gen) * self.noise
         arm1 = -torch.stack([-torch.cos(t1) * t1, torch.sin(t1) * t1], dim=1) + jitter1
         # Build data tensors
         X = torch.cat([arm0, arm1])
         y = torch.cat([torch.zeros(n0), torch.ones(n1)])
         # Embed into higher-dimensional ambient space if needed
         if self.dim > 2:
-            extra = torch.randn(self.n_samples, self.dim - 2) * self.noise
+            extra = (
+                torch.randn(self.n_samples, self.dim - 2, generator=gen) * self.noise
+            )
             X = torch.cat([X, extra], dim=1)
         return X, y
 
@@ -388,15 +397,15 @@ class CheckerboardDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate checkerboard samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         e = self.extent
-        X = torch.empty(self.n_samples, self.dim).uniform_(-e, e)
+        X = torch.empty(self.n_samples, self.dim).uniform_(-e, e, generator=gen)
         cell_size = 2.0 * e / self.n_tiles
         # Sum tile-index parities across all dimensions
         indices = torch.floor((X + e) / cell_size).long()
         y = (indices.sum(dim=1) % 2).float()
         if self.noise > 0:
-            X = X + torch.randn_like(X) * self.noise
+            X = X + torch.randn(X.shape, generator=gen, dtype=X.dtype) * self.noise
         return X, y
 
 
@@ -448,7 +457,7 @@ class RingsDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate concentric-ring samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         n = self.n_samples // self.n_rings
         counts = self._partition(self.n_samples, self.n_rings)
         X_parts: list[torch.Tensor] = []
@@ -456,13 +465,17 @@ class RingsDataset(ProceduralDataset):
         # Build each ring with spacing inbetween
         for k, n in enumerate(counts):
             radius = self.inner_radius + k * self.ring_spacing
-            theta = torch.empty(n).uniform_(0.0, 2.0 * torch.pi)
-            r = radius + torch.empty(n).uniform_(-self.width, self.width)
+            theta = torch.empty(n).uniform_(0.0, 2.0 * torch.pi, generator=gen)
+            r = radius + torch.empty(n).uniform_(-self.width, self.width, generator=gen)
             pts = torch.stack([r * torch.cos(theta), r * torch.sin(theta)], dim=1)
             if self.noise > 0:
-                pts = pts + torch.randn_like(pts) * self.noise
+                pts = (
+                    pts
+                    + torch.randn(pts.shape, generator=gen, dtype=pts.dtype)
+                    * self.noise
+                )
             if self.dim > 2:
-                extra = torch.randn(n, self.dim - 2) * self.noise
+                extra = torch.randn(n, self.dim - 2, generator=gen) * self.noise
                 pts = torch.cat([pts, extra], dim=1)
             X_parts.append(pts)
             y_parts.append(torch.full((n,), k, dtype=self.dtype))
@@ -511,26 +524,40 @@ class ConcentricSpheresDataset(ProceduralDataset):
         )
 
     @staticmethod
-    def _randnsphere(dim: int, n: int, radius: float = 1.0) -> torch.Tensor:
+    def _randnsphere(
+        dim: int,
+        n: int,
+        radius: float = 1.0,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
         """Sample n points uniformly on the surface of a `dim`-sphere.
 
         Args:
             dim: Dimensionality of the ambient space.
             n: Number of points to sample.
             radius: Radius of the sphere.
+            generator: Source of randomness; the global one when `None`.
         """
-        v = torch.randn(n, dim)
+        v = torch.randn(n, dim, generator=generator)
         return v * (radius / v.norm(dim=1, keepdim=True))
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate concentric-sphere samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         n_inner, n_outer = self._partition(self.n_samples, 2)
-        X_inner = self._randnsphere(self.dim, n_inner, self.inner_radius)
-        X_outer = self._randnsphere(self.dim, n_outer, self.outer_radius)
+        X_inner = self._randnsphere(self.dim, n_inner, self.inner_radius, gen)
+        X_outer = self._randnsphere(self.dim, n_outer, self.outer_radius, gen)
         if self.noise > 0:
-            X_inner = X_inner + torch.randn_like(X_inner) * self.noise
-            X_outer = X_outer + torch.randn_like(X_outer) * self.noise
+            X_inner = (
+                X_inner
+                + torch.randn(X_inner.shape, generator=gen, dtype=X_inner.dtype)
+                * self.noise
+            )
+            X_outer = (
+                X_outer
+                + torch.randn(X_outer.shape, generator=gen, dtype=X_outer.dtype)
+                * self.noise
+            )
         X = torch.cat([X_inner, X_outer])
         y = torch.cat([torch.zeros(n_inner), torch.ones(n_outer)])
         return X, y
@@ -582,7 +609,7 @@ class GaussiansDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate ring-of-Gaussians samples."""
-        torch.manual_seed(self.seed)
+        gen = rng_generator(self.seed, type(self).__name__)
         X_parts: list[torch.Tensor] = []
         y_parts: list[torch.Tensor] = []
         counts = self._partition(self.n_samples, self.n_gaussians)
@@ -593,10 +620,14 @@ class GaussiansDataset(ProceduralDataset):
             centre[0] = self.radius * torch.cos(angle)
             centre[1] = self.radius * torch.sin(angle)
             # Gaussian data
-            pts = Normal(centre, torch.full((self.dim,), self.std)).sample((n,))
+            pts = centre + self.std * torch.randn(n, self.dim, generator=gen)
             # Additional jitter
             if self.noise > 0:
-                pts = pts + torch.randn_like(pts) * self.noise
+                pts = (
+                    pts
+                    + torch.randn(pts.shape, generator=gen, dtype=pts.dtype)
+                    * self.noise
+                )
             X_parts.append(pts)
             y_parts.append(torch.full((n,), k, dtype=self.dtype))
         return torch.cat(X_parts), torch.cat(y_parts)
@@ -642,17 +673,21 @@ class SwissRollDataset(ProceduralDataset):
 
     def generate(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate Swiss-roll samples."""
-        torch.manual_seed(self.seed)
-        t = self.t_min + (self.t_max - self.t_min) * torch.rand(self.n_samples)
-        h = self.height * (torch.rand(self.n_samples) - 0.5)
+        gen = rng_generator(self.seed, type(self).__name__)
+        t = self.t_min + (self.t_max - self.t_min) * torch.rand(
+            self.n_samples, generator=gen
+        )
+        h = self.height * (torch.rand(self.n_samples, generator=gen) - 0.5)
         # Build spiral
         X = torch.stack([t * torch.cos(t), h, t * torch.sin(t)], dim=1)
         # Additional jitter
         if self.noise > 0:
-            X = X + torch.randn_like(X) * self.noise
+            X = X + torch.randn(X.shape, generator=gen, dtype=X.dtype) * self.noise
         # Embed into higher-dimensional ambient space if needed
         if self.dim > 3:
-            extra = torch.randn(self.n_samples, self.dim - 3) * self.noise
+            extra = (
+                torch.randn(self.n_samples, self.dim - 3, generator=gen) * self.noise
+            )
             X = torch.cat([X, extra], dim=1)
         # Normalised winding angle as a continuous label.
         y = (t - self.t_min) / (self.t_max - self.t_min)
@@ -704,3 +739,169 @@ def generate_procedural_dataset(
     _CustomProcDataset.__name__ = getattr(fn, "__name__", "CustomProcDataset")
     _CustomProcDataset.__qualname__ = _CustomProcDataset.__name__
     return _CustomProcDataset()
+
+
+class DensityDataset(Dataset):
+    """Images of where a point cloud lies, binned into a grid.
+
+    Points are shuffled, dealt out in equal groups, and each group counted into
+    a grid. Every image therefore samples the same distribution.
+    A cloud of more than two dimensions is binned on its first two.
+
+    Attributes:
+        images: The rendered images, of shape `(n_images, 1, side, side)`.
+        side: Width and height of each image.
+        return_as: How a sample is returned, as elsewhere in `data`.
+    """
+
+    def __init__(
+        self,
+        source: type[ProceduralDataset] | ProceduralDataset = HalfMoonsDataset,
+        n_images: int = 64,
+        side: int = 64,
+        points: int = 64000,
+        seed: int = 42,
+        dtype: torch.dtype = torch.float32,
+        return_as: DataReturnTypes | None = "tuple",
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            source: Point cloud to bin, as a class to build or one already
+                built. A class is given `n_images * points` samples.
+            n_images: How many images to make.
+            side: Width and height of each image.
+            points: Points counted into each image.
+            seed: Seed the shuffle derives from.
+            dtype: Type the images come back as.
+            return_as: One of `['tuple', 'dict']` or a template naming each
+                column by its position, as `ZipDataset` takes.
+            kwargs: Passed to `source` when it is a class to build.
+
+        Raises:
+            ValueError: If the cloud holds too few points for the images
+                asked for.
+        """
+        cloud = (
+            source(n_samples=n_images * points, seed=seed, **kwargs)
+            if isinstance(source, type)
+            else source
+        )
+        if len(cloud) < n_images * points:
+            raise ValueError(
+                f"{type(cloud).__name__} holds {len(cloud)} points, too few "
+                f"for {n_images} images of {points}."
+            )
+        self.side = side
+        self.return_as = return_as
+        self.images = self._render(cloud, n_images, side, points, seed).to(dtype)
+
+    @staticmethod
+    def _render(
+        cloud: ProceduralDataset, n_images: int, side: int, points: int, seed: int
+    ) -> torch.Tensor:
+        """Return one density image per group of points.
+
+        Args:
+            cloud: The point cloud to bin.
+            n_images: How many images to make.
+            side: Width and height of each image.
+            points: Points counted into each image.
+            seed: Seed the shuffle derives from.
+        """
+        held = torch.stack([cloud[index][0] for index in range(n_images * points)])
+        held = held[:, :2]
+        order = torch.randperm(
+            len(held), generator=rng_generator(seed, "density/order")
+        )
+        held = held[order]
+        lowest, highest = held.min(0).values, held.max(0).values
+        cells = ((held - lowest) / (highest - lowest) * (side - 1)).round().long()
+        counts = torch.zeros(n_images, side * side)
+        counts.scatter_add_(
+            1,
+            (cells[:, 1] * side + cells[:, 0]).reshape(n_images, points),
+            torch.ones(n_images, points),
+        )
+        counts = counts / counts.amax(1, keepdim=True).clamp(min=1.0)
+        return counts.reshape(n_images, 1, side, side)
+
+    def __len__(self) -> int:
+        """Return how many images the dataset holds."""
+        return len(self.images)
+
+    def _formatted(self, items: tuple[torch.Tensor, ...]) -> Any:
+        """Return a sample corresponding to `return_as`.
+
+        Args:
+            items: The sample's columns, in order.
+        """
+        match self.return_as:
+            case "dict":
+                return dict(enumerate(items))
+            case dict() as template:
+                return {name: items[at] for name, at in template.items()}
+            case _:
+                return items[0] if len(items) == 1 else items
+
+    def __getitem__(self, index: int) -> Any:
+        """Return one image.
+
+        Args:
+            index: Which image.
+        """
+        return self._formatted((self.images[index],))
+
+    def __repr__(self) -> str:
+        """Return a short description of the dataset."""
+        return f"{type(self).__name__}({len(self)} of 1x{self.side}x{self.side})"
+
+
+class ConditionalDensityDataset(DensityDataset):
+    """Density images paired with a coarser version to condition on.
+
+    Conditional training processes take the coarse image as condition and
+    learn to recover the the fine one.
+
+    Attributes:
+        factor: How far down the condition is pooled before being restored.
+    """
+
+    def __init__(
+        self,
+        *args,
+        factor: int = 4,
+        **kwargs,
+    ):
+        """Constructor.
+
+        Args:
+            args: Passed to `DensityDataset`.
+            factor: How far down to pool the condition before restoring its
+                size. The image side must divide by it.
+            kwargs: Passed to `DensityDataset`.
+
+        Raises:
+            ValueError: If the side does not divide by the factor.
+        """
+        super().__init__(*args, **kwargs)
+        if self.side % factor:
+            raise ValueError(
+                f"An image of {self.side} does not divide by {factor}, so it "
+                "cannot be pooled down and restored."
+            )
+        self.factor = factor
+        self.conditions = torch.nn.functional.interpolate(
+            torch.nn.functional.avg_pool2d(self.images, factor),
+            scale_factor=factor,
+            mode="nearest",
+        )
+
+    def __getitem__(self, index: int) -> Any:
+        """Return one image and the coarse one it is recovered from.
+
+        Args:
+            index: Which pair.
+        """
+        return self._formatted((self.images[index], self.conditions[index]))

@@ -75,14 +75,14 @@ class DatasetCase(TensorCase):
         samples: Samples the dataset holds.
         data_dir: Directory the files are written under.
         batch_size: Samples one batch holds.
-        workers: Loader worker processes; `0` reads in the main process.
+        num_workers: Loader worker processes; `0` reads in the main process.
         order: `'sequential'` or `'shuffled'`.
     """
 
     samples: int
     data_dir: str
     batch_size: int = 8
-    workers: int = 0
+    num_workers: int = 0
     order: str = "sequential"
 
     # the sweep varies one sample's shape, not a batch of them
@@ -113,7 +113,7 @@ class DatasetCase(TensorCase):
         """Short description, used as the row name in every report."""
         return (
             f"{self.samples}x{super().label()} b{self.batch_size}"
-            f" w{self.workers} {self.order[:3]}"
+            f" w{self.num_workers} {self.order[:3]}"
         )
 
 
@@ -179,7 +179,7 @@ DATA_OPTIONS: tuple[tuple[str, dict[str, Any]], ...] = (
     ("--samples", {"nargs": "+", "type": int, "default": [1024]}),
     ("--sizes", {"nargs": "+", "type": shape, "default": [[1, 256, 256]],
                  "help": "shape of one sample, e.g. 1x256x256, sample axis aside"}),
-    ("--workers", {"nargs": "+", "type": int, "default": [0, 4]}),
+    ("--num-workers", {"nargs": "+", "type": int, "default": [0, 4]}),
     ("--order", {"nargs": "+", "default": ["sequential", "shuffled"],
                  "choices": ("sequential", "shuffled"),
                  "help": "order the loader draws samples in"}),
@@ -210,11 +210,11 @@ def data_case_kwargs(args: argparse.Namespace) -> Iterator[dict[str, Any]]:
         args: Parsed command line arguments.
     """
     axes = product(
-        args.sizes, args.samples, args.batch_size, args.workers, args.order
+        args.sizes, args.samples, args.batch_size, args.num_workers, args.order
     )
-    for extent, samples, batch_size, workers, order in axes:
+    for extent, samples, batch_size, num_workers, order in axes:
         yield {
             "shape": tuple(extent), "dtype": getattr(torch, args.dtype),
             "samples": samples, "batch_size": batch_size,
-            "workers": workers, "order": order, "data_dir": args.data_dir,
+            "num_workers": num_workers, "order": order, "data_dir": args.data_dir,
         }

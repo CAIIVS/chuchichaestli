@@ -5,7 +5,7 @@
 
 import pytest
 import torch
-from chuchichaestli.diffusion.ddpm import DDIM
+from chuchichaestli.diffusion.processes import DDIM
 
 
 @pytest.mark.parametrize(

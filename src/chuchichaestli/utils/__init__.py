@@ -12,6 +12,15 @@ from chuchichaestli.utils.functools import (
     broadcast,
     broadcast_kwargs,
 )
+from chuchichaestli.utils.rng import (
+    WorkerSeeder,
+    capture_rng_state,
+    derive_seed,
+    restore_rng_state,
+    rng_generator,
+    seed_ambient,
+)
+from chuchichaestli.utils.registry import require
 from chuchichaestli.utils.units import metric_suffix, nbytes
 from chuchichaestli.utils.tensors import (
     as_array,
@@ -50,8 +59,15 @@ __all__ = [
     "map_nested",
     "broadcast",
     "broadcast_kwargs",
+    "require",
     "metric_suffix",
     "nbytes",
+    "derive_seed",
+    "rng_generator",
+    "seed_ambient",
+    "capture_rng_state",
+    "restore_rng_state",
+    "WorkerSeeder",
     "as_array",
     "as_inexact",
     "npy_to_torch_dtype",

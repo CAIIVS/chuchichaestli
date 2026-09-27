@@ -16,8 +16,26 @@ from chuchichaestli.data.numpy import NumpyDataset, ZipNumpyDataset
 from chuchichaestli.data.safetensors import SafetensorsDataset, ZipSafetensorsDataset
 from chuchichaestli.data.image import ImageDataset, ZipImageDataset
 from chuchichaestli.data.save import save_dataset
+from chuchichaestli.data.split import split_dataset
+from chuchichaestli.data.archive import (
+    ARCHIVES,
+    Archive,
+    BufferedArchive,
+    Hdf5Archive,
+    archive_for,
+)
+from chuchichaestli.data.batch import (
+    BatchType,
+    as_image_batch,
+    batch_to_device,
+    input_in_batch,
+    samples_in_batch,
+    unpack_batch,
+)
 from chuchichaestli.data.procedural import (
     ProceduralDataset,  # abstract
+    ConditionalDensityDataset,
+    DensityDataset,
     HalfMoonsDataset,
     SpiralsDataset,
     CheckerboardDataset,
@@ -87,7 +105,21 @@ __all__ = [
     "ImageDataset",
     "ZipImageDataset",
     "save_dataset",
+    "split_dataset",
+    "ARCHIVES",
+    "Archive",
+    "BufferedArchive",
+    "Hdf5Archive",
+    "archive_for",
+    "BatchType",
+    "as_image_batch",
+    "batch_to_device",
+    "input_in_batch",
+    "samples_in_batch",
+    "unpack_batch",
     "ProceduralDataset",
+    "ConditionalDensityDataset",
+    "DensityDataset",
     "HalfMoonsDataset",
     "SpiralsDataset",
     "CheckerboardDataset",

@@ -16,7 +16,7 @@ class Case:
     """A case owing nothing to `TensorCase`, to keep the protocol structural."""
 
     batch_size: int = 4
-    workers: int = 0
+    num_workers: int = 0
     order: str = "sequential"
     seed: int = 0
 

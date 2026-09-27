@@ -6,64 +6,32 @@
 import torch
 
 
-__all__ = ["EvalMetric", "sanitize_ndim", "as_tri_channel", "as_batched_slices"]
-
-
-def sanitize_ndim(x: torch.Tensor, check_2D: bool = True, check_3D: bool = False):
-    """Standardize image dimensionality to (B, C, W, H)."""
-    if x.ndim == 3:
-        x = x.unsqueeze(0)
-    if x.ndim == 2:
-        x = x.unsqueeze(0).unsqueeze(0)
-    if check_2D and check_3D and (x.ndim != 4 and x.ndim != 5):
-        raise ValueError(
-            f"Require input of shape {'(C, W, H) or (B, C, W, H)' if check_2D else ''}"
-            f"{' or (B, C, W, H, D)' if check_3D else ''}."
-        )
-    elif check_3D and not check_2D and x.ndim != 5:
-        raise ValueError("Require input of shape (B, C, W, H, D).")
-    elif check_2D and not check_3D and x.ndim != 4:
-        raise ValueError("Require input of shape (C, W, H) or (B, C, W, H).")
-    return x
-
-
-def as_tri_channel(x: torch.Tensor):
-    """Morph input to resemble a three-channel image."""
-    if x.shape[1] == 1:
-        x = x.repeat(1, 3, 1, 1)
-    elif x.shape[1] < 3:
-        x = x[:, 0:1, :, :].repeat(1, 3, 1, 1)
-    if x.shape[1] > 3:
-        raise ValueError(f"Input has more than three channels ({x.shape[1]})!")
-    return x
-
-
-def as_batched_slices(x: torch.Tensor, sample: int = 0) -> torch.Tensor:
-    """Convert batches of volumetric 5D tensors into 4D slice-wise image tensors.
-
-    Args:
-        x: Volumetric 5D input tensor.
-        sample: If `> 0`, the volume depth is sampled `sample` times from the centre.
-    """
-    if x.ndim == 5:
-        B, C, W, H, D = x.shape
-        if sample > 0:
-            sample = min(sample, D)
-            center = D // 2
-            window = sample // 2
-            start = center - window
-            end = start + sample
-            if sample % 2 == 0:
-                start = center - window
-                end = center + window
-            x = x[..., start:end]
-            D = sample
-        x = x.permute(0, 4, 1, 2, 3).contiguous().view(B * D, C, W, H)
-    return x
+__all__ = ["EvalMetric"]
 
 
 class EvalMetric:
-    """Base class for image evaluation metrics."""
+    """Base class for image evaluation metrics.
+
+    Attributes:
+        ADDITIVE: State that combines across processes by summing.
+        SMALLEST: State that combines by taking the lowest seen.
+        LARGEST: State that combines by taking the highest seen.
+        FLAGS: State that is true across processes if true on any of them.
+
+    A subclass accumulating state of its own extends whichever of these it
+    belongs to, so that a distributed run can combine it. Anything left out
+    is derived rather than accumulated, and is recomputed from the rest.
+    """
+
+    ADDITIVE: tuple[str, ...] = (
+        "nan_count",
+        "n_observations",
+        "n_images",
+        "aggregate",
+    )
+    SMALLEST: tuple[str, ...] = ("min_value",)
+    LARGEST: tuple[str, ...] = ("max_value",)
+    FLAGS: tuple[str, ...] = ("is_nan",)
 
     def __init__(
         self,
@@ -101,12 +69,9 @@ class EvalMetric:
             device: Tensor allocation/computation device.
         """
         self.device = device
-        self.is_nan = self.is_nan.to(device=self.device)
-        self.nan_count = self.nan_count.to(device=self.device)
-        self.min_value = self.min_value.to(device=self.device)
-        self.max_value = self.max_value.to(device=self.device)
-        self.n_observations = self.n_observations.to(device=self.device)
-        self.n_images = self.n_images.to(device=self.device)
+        for name, value in vars(self).items():
+            if isinstance(value, torch.Tensor):
+                setattr(self, name, value.to(device=device))
         self.value = self.value.to(device=self.device)
         self.aggregate = self.aggregate.to(device=self.device)
 
@@ -159,3 +124,39 @@ class EvalMetric:
             device=self.device,
             **kwargs,
         )
+
+    def state_dict(self) -> dict[str, torch.Tensor]:
+        """Return what the metric has accumulated so far.
+
+        Every tensor attribute is state; the rest is configuration.
+        """
+        return {
+            name: value
+            for name, value in vars(self).items()
+            if isinstance(value, torch.Tensor)
+        }
+
+    def load_state_dict(self, state: dict[str, torch.Tensor]) -> None:
+        """Restore state previously returned by `state_dict`.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+
+        Raises:
+            KeyError: If the state names something the metric does not hold.
+        """
+        unknown = sorted(
+            set(state)
+            - {
+                name
+                for name, value in vars(self).items()
+                if isinstance(value, torch.Tensor)
+            }
+        )
+        if unknown:
+            raise KeyError(
+                f"{type(self).__name__} holds no {unknown}; the state was "
+                "written by a different metric."
+            )
+        for name, value in state.items():
+            setattr(self, name, value.to(self.device))

@@ -5,7 +5,7 @@
 
 import pytest
 import torch
-from chuchichaestli.diffusion.ddpm import DDPM
+from chuchichaestli.diffusion.processes import DDPM
 
 
 @pytest.mark.parametrize(
@@ -155,3 +155,38 @@ def test_noise_indices():
 
     # Check the output shape
     assert output[2].shape[0] == 4 * 4  # 4 timesteps, 4 samples
+
+
+def _rows_marked(batchsize, shape):
+    """Return a batch whose every row is the constant of its index.
+
+    Args:
+        batchsize: Number of rows.
+        shape: Shape of one row.
+    """
+    index = torch.arange(float(batchsize)).view(batchsize, *([1] * len(shape)))
+    return index.expand(batchsize, *shape).contiguous()
+
+
+def test_a_condition_is_expanded_with_the_sample_over_timesteps():
+    """Without it the cat raises, and a broadcast would pair the wrong rows."""
+    c = _rows_marked(4, (3, 32, 32))
+    x_t = torch.randn(4, 3, 32, 32)
+    ddpm = DDPM(num_timesteps=10)
+    out, _, timesteps = ddpm.noise_step(
+        x_t, condition=c, timesteps=torch.tensor([0, 1, 2, 3])
+    )
+    assert out.shape[0] == 4 * 4
+    # the condition is cat onto the sample, so it reads back off the front
+    assert torch.equal(out[:, :3], torch.cat([c] * 4, dim=0))
+    assert timesteps.tolist() == [0] * 4 + [1] * 4 + [2] * 4 + [3] * 4
+
+
+def test_an_absent_condition_still_expands_the_sample():
+    """The guard must not skip the unconditional path."""
+    ddpm = DDPM(num_timesteps=10)
+    out, _, timesteps = ddpm.noise_step(
+        torch.randn(4, 3, 32, 32), timesteps=torch.tensor([0, 1])
+    )
+    assert out.shape[0] == 2 * 4
+    assert len(timesteps) == 2 * 4
