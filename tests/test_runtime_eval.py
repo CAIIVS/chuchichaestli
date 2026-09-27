@@ -506,3 +506,41 @@ def test_what_an_eval_measured_rides_in_its_closing_event():
     ).run()
     assert stage.summary() == {"mse": pytest.approx(1.0)}
     assert "mse=1" in stream.getvalue()
+
+
+def test_a_metric_is_given_the_target_before_the_prediction():
+    """`EvalMetric.update(data, prediction)`, or an asymmetric metric lies."""
+    seen: list[tuple[float, float]] = []
+
+    class Order(nn.Module):
+        """Record the two tensors a metric is handed, in order."""
+
+        name = "order"
+
+        def update(self, data, prediction, update_range=True):
+            """Note which tensor arrived first.
+
+            Args:
+                data: Observed data aka target.
+                prediction: Predicted data aka inferred target.
+                update_range: Unused, part of the metric interface.
+            """
+            seen.append((float(data.flatten()[0]), float(prediction.flatten()[0])))
+
+        def compute(self):
+            """Return a value, as a metric must."""
+            return torch.tensor(0.0)
+
+        def reset(self):
+            """Discard what was recorded."""
+            seen.clear()
+
+    pairs = TensorDataset(torch.full((4, 1), 1.0), torch.full((4, 1), 2.0))
+    Runtime(
+        Program(
+            [Eval("probe", model=None, data=pairs, batch_size=4, metrics=[Order()])]
+        ),
+        hooks=(),
+        device="cpu",
+    ).run()
+    assert seen == [(2.0, 1.0)]

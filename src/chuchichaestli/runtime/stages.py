@@ -1572,7 +1572,7 @@ class Eval(Inference):
                 targets = read[-1]
                 prediction = read[0] if model is None else model(*read[:-1])
                 for metric in self.metrics.values():
-                    metric.update(prediction, targets)
+                    metric.update(targets, prediction)
         return None
 
     def leave(self, ctx: Context) -> Signal:
