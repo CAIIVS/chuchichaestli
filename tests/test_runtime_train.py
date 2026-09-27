@@ -23,6 +23,7 @@ from chuchichaestli.runtime import (
 )
 from chuchichaestli.runtime.runtime import C3liProgramError
 from chuchichaestli.training import OptimSpec
+from chuchichaestli.training.update import Ema
 
 
 def linear(out: int = 1, fill: float | None = None) -> nn.Module:
@@ -771,3 +772,63 @@ def test_a_stage_counts_the_work_of_every_entry():
     stage = repeated(one_pass(), times=3)
     assert stage.progress().global_step == 2
     assert stage.total_steps == 6
+
+
+@pytest.mark.parametrize(
+    ("request_", "decay"),
+    [
+        (True, 0.9999),
+        ("model", 0.9999),
+        (["model"], 0.9999),
+        (0.99, 0.99),
+        ({"model": 0.9}, 0.9),
+    ],
+)
+def test_every_ema_spelling_builds_an_average(request_, decay):
+    """A flag and a bare name mean the default decay, not no decay."""
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=ramp(4),
+        batch_size=2,
+        loss=nn.MSELoss(),
+        epochs=1,
+        ema=request_,
+    )
+    Runtime(stage, hooks=(), device="cpu").run()
+    averaged = stage._ema["model"]
+    assert isinstance(averaged, Ema)
+    assert averaged.decay == pytest.approx(decay)
+
+
+def test_a_built_ema_is_kept_as_given():
+    """One built by the caller carries its own decay and must not be rebuilt."""
+    model = linear()
+    built = Ema(model, decay=0.5)
+    stage = Train(
+        "fit",
+        model=model,
+        data=ramp(4),
+        batch_size=2,
+        loss=nn.MSELoss(),
+        epochs=1,
+        ema=built,
+    )
+    Runtime(stage, hooks=(), device="cpu").run()
+    assert stage._ema["model"] is built
+
+
+def test_an_ema_is_published_for_later_stages():
+    """A later stage evaluates the average by name, so it must resolve."""
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=ramp(4),
+        batch_size=2,
+        loss=nn.MSELoss(),
+        epochs=1,
+        ema=True,
+    )
+    ctx = Context("t")
+    stage.enter(ctx)
+    assert isinstance(ctx["model/ema"], Ema)

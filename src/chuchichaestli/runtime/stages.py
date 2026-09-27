@@ -1092,8 +1092,8 @@ class Train(StageLoop):
             lr: Learning rate, when no `optim` spells one out.
             update: How the optimizers are stepped; one `Step` by default.
             ema: Decay of an exponential moving average, a built one, or one
-                per binding name. Each is published as `"<binding>/ema"` for
-                later stages to evaluate or predict with.
+                per binding name. `True` or a binding name averages at `Ema`'s
+                own decay. Each is published as `"<binding>/ema"`.
             swa: Whether to average weights equally over the tail of the run,
                 or the bindings to average. Published as `"<binding>/swa"`.
             swa_start: Fraction of the epochs after which averaging begins;
@@ -1247,9 +1247,11 @@ class Train(StageLoop):
         """
         built: dict[str, Ema] = {}
         for name, decay in average_targets(self.ema, self.model_binding).items():
-            averaged = (
-                decay if isinstance(decay, Ema) else Ema(ctx.resolve(name), decay)
-            )
+            if isinstance(decay, Ema):
+                averaged = decay
+            else:
+                model = ctx.resolve(name)
+                averaged = Ema(model) if decay is None else Ema(model, decay)
             ctx.publish(f"{name}/ema", averaged)
             built[name] = averaged
         return built
