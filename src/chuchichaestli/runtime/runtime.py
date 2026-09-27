@@ -8,7 +8,7 @@ import os
 import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Literal, NamedTuple
+from typing import Any, Literal, NamedTuple
 import torch
 from torch import nn
 from chuchichaestli.runtime.ckpt import CheckpointStore
@@ -247,23 +247,32 @@ class Runtime:
         Each module is placed on the device before the topology wraps it,
         since a distributed wrapper requires a module already on its own.
         """
-        provide = getattr(self.program, "provide", None) or {}
+        provide = getattr(self.program, "provide", None)
+        if provide is None:
+            provide = {}
         for key, value in list(provide.items()):
             if isinstance(value, nn.Module):
                 provide[key] = self.topology.wrap(value.to(self.device))
-        self._provision_stage(self.program)
+        self._provision_stage(self.program, provide, self.program.name)
 
-    def _provision_stage(self, stage: Stage) -> None:
+    def _provision_stage(
+        self, stage: Stage, provide: dict[str, Any], path: str
+    ) -> None:
         """Place a model a stage holds directly rather than as a binding.
+
+        Such a model is bound for the whole run under the stage's path.
 
         Args:
             stage: The stage to provision, and whose children to walk.
+            provide: Run-wide bindings a direct model is promoted into.
+            path: Path of this stage, which names what it holds.
         """
         model = getattr(stage, "model", None)
         if isinstance(model, nn.Module):
             stage.model = self.topology.wrap(model.to(self.device))
-        for child in getattr(stage, "stages", ()):
-            self._provision_stage(child)
+            provide[f"{path}/model"] = stage.model
+        for index, child in enumerate(getattr(stage, "stages", ())):
+            self._provision_stage(child, provide, f"{path}/{index}:{child.name}")
 
     def run(self) -> Progress:
         """Execute the program and return where it finished.

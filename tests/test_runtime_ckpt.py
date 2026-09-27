@@ -1136,3 +1136,37 @@ def test_a_resume_refuses_a_checkpoint_seeded_differently(tmp_path):
     Runtime(program(), seed=42, store=store, resume="last~2", hooks=[]).run()
     with pytest.raises(C3liCheckpointError, match="seeded with 42"):
         Runtime(program(), seed=7, store=store, resume="last~2", hooks=[]).run()
+
+
+def test_a_model_given_to_a_stage_is_checkpointed(tmp_path):
+    """Otherwise a resume silently carries on from fresh weights."""
+    import torch.nn as nn
+    from torch.utils.data import TensorDataset
+    from chuchichaestli.runtime.stages import Train
+
+    rows = TensorDataset(torch.rand(16, 2), torch.rand(16, 1))
+
+    def stage():
+        torch.manual_seed(0)
+        return Train(
+            "fit",
+            model=nn.Linear(2, 1),
+            data=rows,
+            batch_size=4,
+            epochs=4,
+            loss=nn.MSELoss(),
+        )
+
+    store = tmp_path / "run"
+    whole = stage()
+    Runtime(
+        Program([whole]),
+        seed=1,
+        store=store,
+        hooks=[Checkpointer(every=1, unit="epoch")],
+    ).run()
+    carried = stage()
+    Runtime(Program([carried]), seed=1, store=store, resume="last~2", hooks=[]).run()
+    expected = whole.model.state_dict()
+    actual = carried.model.state_dict()
+    assert all(torch.equal(v, actual[k]) for k, v in expected.items())
