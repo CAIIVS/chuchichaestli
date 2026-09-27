@@ -17,6 +17,8 @@ __all__ = [
     "unpack_tree",
     "merge_tree",
     "stage_signature",
+    "stages_by_path",
+    "training_states",
     "writable_spec",
 ]
 
@@ -128,6 +130,62 @@ def stage_signature(stage: Stage) -> list[list[str]]:
     if callable(walk):
         return [[path, name] for path, name in walk()]
     return [[stage.name, type(stage).__name__]]
+
+
+def stages_by_path(stage: Stage) -> dict[str, Stage]:
+    """Return each distinct stage of a tree, keyed by where it first appears.
+
+    A repeated stage holds one object in every slot, so it is keyed once.
+
+    Args:
+        stage: Root of the stage tree, usually the program.
+    """
+    walk = getattr(stage, "walk", None)
+    if not callable(walk):
+        return {stage.name: stage}
+    found: dict[str, Stage] = {}
+    seen: set[int] = set()
+    for path, _ in walk():
+        held = _stage_at(stage, path)
+        if held is None or id(held) in seen:
+            continue
+        seen.add(id(held))
+        found[path] = held
+    return found
+
+
+def _stage_at(root: Stage, path: str) -> Stage | None:
+    """Return the stage a walked path names.
+
+    Args:
+        root: Root of the stage tree.
+        path: Path as `walk` spells it, e.g. `"program/0:fit"`.
+    """
+    held = root
+    for step in path.split("/")[1:]:
+        index = int(step.split(":", 1)[0])
+        children = getattr(held, "stages", ())
+        if index >= len(children):
+            return None
+        held = children[index]
+    return held
+
+
+def training_states(stage: Stage) -> dict[str, Any]:
+    """Return what each stage of a tree learned, keyed by its path.
+
+    Recorded apart from the stages' own state, which a phase keeps only while
+    its child is open.
+
+    Args:
+        stage: Root of the stage tree, usually the program.
+    """
+    states: dict[str, Any] = {}
+    for path, held in stages_by_path(stage).items():
+        capture = getattr(held, "training_state", None)
+        if callable(capture):
+            states[path] = capture()
+    return states
 
 
 def writable_spec(value: Any) -> ModelSpec | None:

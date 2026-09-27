@@ -1282,3 +1282,112 @@ def test_two_artifacts_under_one_name_are_reported(tmp_path):
             hooks=[Checkpointer(every=1, unit="advance")],
             device="cpu",
         ).run()
+
+
+def carrying_program(epochs: int = 6):
+    """Build an each_pass program whose optimizer carries momentum.
+
+    Args:
+        epochs: Passes the loop makes in all.
+    """
+    from torch.utils.data import TensorDataset
+    from chuchichaestli.runtime import DataManager, Phase, Train
+    from chuchichaestli.training import OptimSpec
+
+    x = torch.arange(24, dtype=torch.float32).reshape(8, 3)
+    model = nn.Linear(3, 1, bias=False)
+    stage = Train(
+        "train",
+        model="model",
+        data=DataManager(TensorDataset(x, torch.zeros(8, 1)), batch_size=4),
+        loss=nn.MSELoss(),
+        epochs=epochs,
+        optim=OptimSpec.sgd(lr=0.01, momentum=0.9),
+        ema=0.9,
+    )
+    program = Program(provide={"model": model}, stages=[Phase.each_pass(epochs, stage)])
+    return program, stage, model
+
+
+def momentum_of(stage):
+    """Return the optimizer's momentum buffers.
+
+    Args:
+        stage: The training stage to inspect.
+    """
+    return [
+        s["momentum_buffer"]
+        for s in stage.update.optimizers[None].state.values()
+        if s.get("momentum_buffer") is not None
+    ]
+
+
+def test_what_a_stage_learned_is_recorded_apart_from_its_counters(tmp_path):
+    """A phase keeps a child's state only while it is open, which a boundary is not."""
+    store = tmp_path / "run"
+    program, stage, _ = carrying_program()
+    Runtime(
+        program, store=store, hooks=[Checkpointer(every=1, unit="epoch")], device="cpu"
+    ).run()
+    training = CheckpointStore(store).load("last").training
+    assert sorted(training) == ["program/0:repeat/0:epoch/0:train"]
+    assert "optim" in training["program/0:repeat/0:epoch/0:train"]
+    assert "progress" not in training["program/0:repeat/0:epoch/0:train"]
+
+
+def test_a_resumed_pass_at_a_time_run_keeps_its_optimizer(tmp_path):
+    """Momentum reset to zero makes a resumed run diverge from an unbroken one."""
+    store = tmp_path / "run"
+    torch.manual_seed(0)
+    whole, trained, weights = carrying_program()
+    Runtime(
+        whole,
+        seed=5,
+        store=store,
+        hooks=[Checkpointer(every=1, unit="epoch")],
+        device="cpu",
+    ).run()
+
+    torch.manual_seed(0)
+    again, resumed, revived = carrying_program()
+    Runtime(again, seed=5, store=store, resume="last~3", hooks=[], device="cpu").run()
+
+    assert momentum_of(resumed)
+    for before, after in zip(momentum_of(trained), momentum_of(resumed)):
+        assert torch.allclose(before, after, atol=1e-6)
+    assert torch.allclose(weights.weight, revived.weight, atol=1e-6)
+
+
+def test_a_resumed_pass_at_a_time_run_keeps_its_average(tmp_path):
+    """The average is published, so only the stage itself records it."""
+    store = tmp_path / "run"
+    torch.manual_seed(0)
+    whole, trained, _ = carrying_program()
+    Runtime(
+        whole,
+        seed=5,
+        store=store,
+        hooks=[Checkpointer(every=1, unit="epoch")],
+        device="cpu",
+    ).run()
+
+    torch.manual_seed(0)
+    again, resumed, _ = carrying_program()
+    Runtime(again, seed=5, store=store, resume="last~3", hooks=[], device="cpu").run()
+    assert torch.allclose(
+        trained._ema["model"].module.weight,
+        resumed._ema["model"].module.weight,
+        atol=1e-6,
+    )
+
+
+def test_a_repeated_stage_is_recorded_once(tmp_path):
+    """Every slot of a repeat holds one object, whose state is not a copy each."""
+    from chuchichaestli.runtime.serialize import stages_by_path
+    from chuchichaestli.runtime import Repeat
+
+    inner = Call("a", fn=lambda ctx: None)
+    program = Program([Repeat(4, inner)])
+    found = stages_by_path(program)
+    assert list(found).count("program/0:repeat/0:a") == 1
+    assert sum(1 for v in found.values() if v is inner) == 1

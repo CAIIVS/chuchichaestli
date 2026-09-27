@@ -1411,18 +1411,13 @@ class Train(StageLoop):
             if saved is not None:
                 scheduler.load_state_dict(saved)
 
-    def state_dict(self) -> dict[str, Any]:
-        """Return the stage's resumable state."""
-        return {**super().state_dict(), **self.training_state()}
-
-    def load_state_dict(self, state: dict[str, Any]) -> None:
-        """Restore state previously returned by `state_dict`.
+    def carry_training_state(self, state: dict[str, Any]) -> None:
+        """Hold what a stage learned until `prepare` has built it again.
 
         Args:
-            state: Mapping as returned by `state_dict`.
+            state: Mapping as returned by `training_state`.
         """
-        super().load_state_dict(state)
-        self.load_training_state(state)
+        self._carried = dict(state)
 
 
 Finetune = partialclass(
