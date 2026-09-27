@@ -776,6 +776,8 @@ class StageLoop(ABC):
         total_steps: Units of work done in all, across however many times the
             stage was entered. Its `progress` counts the entry in hand, as
             `enter` resets that by contract.
+        total_passes: Passes finished in all, across however many times the
+            stage was entered.
         data: What the loop draws batches from, or the name of a binding.
         batch_size: Samples one forward sees, for a bare dataset.
         epochs: Passes over the data to make, or `None`.
@@ -828,6 +830,7 @@ class StageLoop(ABC):
         self.accumulate = accumulate
         self.planned_passes: int | None = None
         self.total_steps = 0
+        self.total_passes = 0
         self.requires = tuple(requires)
         self.provides = tuple(provides)
         self._progress = Progress()
@@ -943,6 +946,7 @@ class StageLoop(ABC):
         return {
             "progress": self._progress.to_dict(),
             "total_steps": self.total_steps,
+            "total_passes": self.total_passes,
         }
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
@@ -953,6 +957,7 @@ class StageLoop(ABC):
         """
         self._progress = Progress.from_dict(state.get("progress", {}))
         self.total_steps = int(state.get("total_steps", 0))
+        self.total_passes = int(state.get("total_passes", 0))
 
     def _take(self) -> list[BatchType]:
         """Return the next unit's micro-batches, short at an epoch's end."""
@@ -1011,6 +1016,7 @@ class StageLoop(ABC):
             ctx: Execution context for this entry.
         """
         self.finalize_sweep(ctx)
+        self.total_passes += 1
         reported = {} if self.planned_passes is None else {"total": self.planned_passes}
         ctx.emit(
             EventType.EPOCH_ENDED,
@@ -1243,7 +1249,8 @@ class Train(StageLoop):
         Args:
             ctx: Execution context for this entry.
         """
-        if self.swa_window.is_open(self._progress.epoch, self.epochs):
+        planned = self.planned_passes if self.planned_passes else self.epochs
+        if self.swa_window.is_open(self.total_passes, planned):
             self.swa_window.hand_over(
                 self._sweepwise_schedulers, self.update.schedulers
             )

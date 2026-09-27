@@ -930,3 +930,70 @@ def test_a_cached_forward_is_rebuilt_for_each_micro_batch():
     stage.enter(ctx)
     stage.execute(ctx)
     assert len(forwards) == 3
+
+
+@pytest.mark.parametrize("swa_start", [0.0, 0.5, 0.75])
+def test_swa_averages_the_same_tail_a_pass_at_a_time(swa_start):
+    """`each_pass` rewrites the loop to one epoch, which is not the window."""
+
+    def averaged(each_pass: bool) -> int:
+        """Return how many passes the window took.
+
+        Args:
+            each_pass: Whether to run the loop a pass at a time.
+        """
+        stage = Train(
+            "fit",
+            model=linear(),
+            data=DataManager(ramp(8), batch_size=4),
+            loss=nn.MSELoss(),
+            epochs=4,
+            lr=0.1,
+            swa=True,
+            swa_start=swa_start,
+        )
+        program = Phase.each_pass(4, stage) if each_pass else stage
+        Runtime(program, hooks=(), device="cpu").run()
+        return int(stage.swa_window.averages["model"].n_averaged)
+
+    assert averaged(each_pass=True) == averaged(each_pass=False)
+
+
+def test_a_loop_counts_its_passes_across_every_entry():
+    """`enter` resets the progress by contract, so a visit count cannot live there."""
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=DataManager(ramp(8), batch_size=4),
+        loss=nn.MSELoss(),
+        epochs=1,
+        lr=0.1,
+    )
+    Runtime(Phase.each_pass(3, stage), hooks=(), device="cpu").run()
+    assert stage.total_passes == 3
+    assert stage.progress().epoch == 1
+
+
+def test_a_pass_count_survives_a_resume():
+    """A window measured from it would reopen if the count came back zero."""
+    stage = Train(
+        "fit",
+        model=linear(),
+        data=DataManager(ramp(8), batch_size=4),
+        loss=nn.MSELoss(),
+        epochs=2,
+        lr=0.1,
+    )
+    Runtime(stage, hooks=(), device="cpu").run()
+    saved = stage.state_dict()
+    assert saved["total_passes"] == 2
+    revived = Train(
+        "fit",
+        model=linear(),
+        data=DataManager(ramp(8), batch_size=4),
+        loss=nn.MSELoss(),
+        epochs=2,
+        lr=0.1,
+    )
+    revived.load_state_dict(saved)
+    assert revived.total_passes == 2
