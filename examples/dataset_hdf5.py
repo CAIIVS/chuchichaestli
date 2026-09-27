@@ -10,7 +10,7 @@ each file containing one or more image datasets under the `/image` group.
 
 Run from repository root:
 ```
-[uv run] python examples/hdf5_dataset.py
+[uv run] python examples/dataset_hdf5.py
 ```
 """
 import matplotlib.pyplot as plt

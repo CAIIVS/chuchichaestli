@@ -16,7 +16,7 @@ of a loop with the same box.
 
 Run from repository root:
 ```
-[uv run] python examples/arts4ska_dataset.py
+[uv run] python examples/dataset_arts4ska.py
 ```
 
 > Note: for this example to work, you need to set the `data_dir` to a directory

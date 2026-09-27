@@ -94,13 +94,13 @@ All of them are optional, `hooks=[]` would run the same pipeline in silence.
 
 ## Adversarial Training
 
-[`examples/runtime_pix2pix.py`](https://github.com/CAIIVS/chuchichaestli/blob/main/examples/runtime_pix2pix.py)
+[`examples/runtime_gan.py`](https://github.com/CAIIVS/chuchichaestli/blob/main/examples/runtime_gan.py)
 fits the same task with a Pix2Pix GAN. It is the reference for **two models
 trained against each other in one stage**, and reads the same paired dataset
 as above.
 
 ```python
---8<-- "examples/runtime_pix2pix.py:setup"
+--8<-- "examples/runtime_gan.py:setup"
 ```
 
 Two models, so the program binds two names. The generator maps one channel to
@@ -108,7 +108,7 @@ one; the discriminator takes `in_channels=2` because it scores the condition
 joined to a sample.
 
 ```python
---8<-- "examples/runtime_pix2pix.py:model"
+--8<-- "examples/runtime_gan.py:model"
 ```
 
 A GAN is one `Train` stage with two update groups. Each `Term` names the
@@ -117,7 +117,7 @@ parameters its `params=` names — which is how one stage trains two models
 without either optimizer touching the other's weights.
 
 ```python
---8<-- "examples/runtime_pix2pix.py:stages"
+--8<-- "examples/runtime_gan.py:stages"
 ```
 
 `Adversarial` and its two halves read the batch the way the rest of the
@@ -139,7 +139,7 @@ being guessed once: over this run it moves from about 5 to 0.005 as the L1
 term converges and the adversarial one grows.
 
 ```python
---8<-- "examples/runtime_pix2pix.py:run"
+--8<-- "examples/runtime_gan.py:run"
 ```
 
 The run is shaped like the diffusion one — same phases, same hooks — so the

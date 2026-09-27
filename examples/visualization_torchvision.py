@@ -9,7 +9,7 @@ than the chuchichaestli models, but summaries and figures still render.
 
 Usage (requires `chuchichaestli[viz]`):
 ```python
-    [uv run --extra viz] python examples/torchvision_visualization.py
+    [uv run --extra viz] python examples/visualization_torchvision.py
 ```
 """
 

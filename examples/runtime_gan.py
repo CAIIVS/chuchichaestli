@@ -29,7 +29,7 @@ conditional: each coarse image is refined into a fine one.
 
 Run from repository root (plotting needs `chuchichaestli[viz]`):
 ```
-[uv run --extra viz] python examples/runtime_pix2pix.py
+[uv run --extra viz] python examples/runtime_gan.py
 ```
 """
 

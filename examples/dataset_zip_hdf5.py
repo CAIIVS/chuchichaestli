@@ -13,7 +13,7 @@ same HDF5 groups from multiple file sources.
 
 Run from repository root:
 ```
-[uv run] python examples/zip_hdf5_dataset.py
+[uv run] python examples/dataset_zip_hdf5.py
 ```
 """
 

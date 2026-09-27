@@ -68,13 +68,13 @@ then the following creates a dataset with 16 MiB of shared memory allocation to
 cache image tensors read from the H5 MNIST dataset (test scenario 13)
 
 ```python
---8<-- "examples/hdf5_dataset.py:build"
+--8<-- "examples/dataset_hdf5.py:build"
 ```
 
 [ZipHDF5Dataset][chuchichaestli.data.ZipHDF5Dataset] reads multiple sample
 groups in parallel
 ```python
---8<-- "examples/zip_hdf5_dataset.py:build"
+--8<-- "examples/dataset_zip_hdf5.py:build"
 ```
 
 #### Procedural toy datasets
@@ -94,20 +94,20 @@ for reproducibility, generating in pure PyTorch into the same
 shared-memory cache as the file-backed datasets.
 
 ```python
---8<-- "examples/procedural_datasets.py:build"
+--8<-- "examples/dataset_procedural.py:build"
 ```
 
 The shapes are not restricted to the plane; raise `dim` to embed them in
 a volume instead.
 
 ```python
---8<-- "examples/procedural_datasets.py:swissroll"
+--8<-- "examples/dataset_procedural.py:swissroll"
 ```
 
 Finally, you can also wrap your own generator function with
 [generate_procedural_dataset][chuchichaestli.data.generate_procedural_dataset].
 
-Running `examples/procedural_datasets.py` renders all preset generators:
+Running `examples/dataset_procedural.py` renders all preset generators:
 
 ![Scatter plots of six procedural toy datasets: two interleaving half
 moons, two interlocking spiral arms, two concentric rings, and six
@@ -138,7 +138,7 @@ convolutional, whereas the lowest levels include a mixture of attention and
 (transposed) convolutional layers.
 
 ```python
---8<-- "examples/unet_visualization.py:unet"
+--8<-- "examples/visualization_unet.py:unet"
 ```
 
 [`summary`][chuchichaestli.utils.info.summary] provides a torchinfo-style 
@@ -146,7 +146,7 @@ text table (no extra dependency) that allows for detailed inspection of any
 model
 
 ```python
---8<-- "examples/unet_visualization.py:summary"
+--8<-- "examples/visualization_unet.py:summary"
 ```
 
 Similarly, you can build other models such as a Variational Auto-encoder (VAE)
@@ -155,7 +155,7 @@ U-Net, but misses skip connections and instead includes a stochastic regularizat
 in the lowest layer (the latent)
 
 ```python
---8<-- "examples/vae_visualization.py:vae"
+--8<-- "examples/visualization_vae.py:vae"
 ```
 
 Autoencoders take their two components as arguments, so an encoder and a decoder
@@ -291,7 +291,7 @@ to produce publication-ready illustrations.
 encode (`component`, `type`, or `name`); `node_size` is `small`/`medium`/`large`.
 
 ```python
---8<-- "examples/unet_visualization.py:matplotlib"
+--8<-- "examples/visualization_unet.py:matplotlib"
 ```
 
 An *exemplary zoom* callout expands a block into its layers: `zoom=True`
@@ -300,7 +300,7 @@ places the inset (right/left/top/bottom, the four corners, or center); pass a
 list of `ZoomSpec`s to draw several at once.
 
 ```python
---8<-- "examples/unet_visualization.py:zoom"
+--8<-- "examples/visualization_unet.py:zoom"
 ```
 
 ![U-Net block-level diagram with two exemplary-zoom insets expanding an encoder
@@ -322,7 +322,7 @@ can be dragged to fine-tune the layout. The overall flow is controlled with
 the encoder/decoder subgraphs; skip connections render as dashed edges.
 
 ```python
---8<-- "examples/unet_visualization.py:mermaid"
+--8<-- "examples/visualization_unet.py:mermaid"
 ```
 
 Runnable end-to-end scripts for a U-Net, a VAE, a PatchGAN discriminator, and

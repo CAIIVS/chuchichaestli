@@ -17,7 +17,7 @@ memory, and are fully compatible with `torch.utils.data.DataLoader`.
 
 Run from repository root:
 ```
-[uv run --extra viz] python examples/procedural_datasets.py
+[uv run --extra viz] python examples/dataset_procedural.py
 ```
 """
 

@@ -18,7 +18,7 @@ This example pairs the `gas`, `dm`, and `star` fields into dict samples via
 
 Run from repository root:
 ```
-[uv run] python examples/tng50-1_2D_dataset.py
+[uv run] python examples/dataset_tng50-1_2D.py
 ```
 
 > Note: for this example to work, you need to set the `data_dir` to a directory

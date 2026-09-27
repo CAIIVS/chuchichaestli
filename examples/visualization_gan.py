@@ -9,7 +9,7 @@ The mermaid backend generates a Mermaid file to be visualized in the browser.
 
 Usage (requires `chuchichaestli[viz]`):
 ```python
-    [uv run --extra viz] python examples/gan_visualization.py
+    [uv run --extra viz] python examples/visualization_gan.py
 ```
 """
 
