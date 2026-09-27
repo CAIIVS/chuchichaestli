@@ -292,3 +292,28 @@ def test_a_pinned_seed_replaces_the_runs_but_still_derives():
     assert stream._generator(ctx(seed=8), "data/epoch=0").initial_seed() == first
     assert stream._generator(ctx(), "data/epoch=1").initial_seed() != first
     assert stream._generator(ctx(), "data/epoch=0").initial_seed() == first
+
+
+@pytest.mark.parametrize("world", [2, 3, 4, 8])
+@pytest.mark.parametrize("batches", [1, 2, 3, 5, 7])
+def test_every_rank_draws_the_same_number_however_short_the_plan(batches, world):
+    """A rank running dry while the others step deadlocks the next collective."""
+    stream = DataManager(Counting(4))
+    plan = [[index] for index in range(batches)]
+    counts = {len(stream.shard(plan, Ranks(rank, world))) for rank in range(world)}
+    assert len(counts) == 1
+    assert counts != {0}
+
+
+@pytest.mark.parametrize("world", [2, 3, 4, 8])
+@pytest.mark.parametrize("batches", [1, 2, 3, 5, 7])
+def test_padding_repeats_batches_rather_than_dropping_them(batches, world):
+    """Padding pays for an even share with repeats, never with lost work."""
+    stream = DataManager(Counting(4))
+    plan = [[index] for index in range(batches)]
+    dealt = [
+        batch
+        for rank in range(world)
+        for batch in stream.shard(plan, Ranks(rank, world))
+    ]
+    assert {tuple(batch) for batch in dealt} == {tuple(batch) for batch in plan}

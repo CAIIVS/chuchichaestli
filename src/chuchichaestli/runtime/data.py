@@ -241,7 +241,10 @@ class DataManager:
         if not plan:
             return []
         per_rank = math.ceil(len(plan) / topology.world_size)
-        padded = plan + plan[: per_rank * topology.world_size - len(plan)]
+        padded = [
+            plan[position % len(plan)]
+            for position in range(per_rank * topology.world_size)
+        ]
         return padded[topology.rank :: topology.world_size]
 
     def sharded_plan(self, ctx: Context, epoch: int = 0) -> list[list[int]]:
