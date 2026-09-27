@@ -205,6 +205,65 @@ model:
 ```
 
 
+### Training and the runtime
+
+The [training][chuchichaestli.training] module provides utilities for fitting
+models. [`OptimSpec`][chuchichaestli.training.optim.OptimSpec] describes how
+to construct optimizer and schedulers, so a training loop can use them once it
+knows which parameters it owns.
+[`Term`][chuchichaestli.training.objective.Term] is one named, weighted
+contribution to a composite objective, and
+[`Loss`][chuchichaestli.training.objective.Loss] carries a total computation
+as sum of its parts.
+
+The [runtime][chuchichaestli.runtime] module allows to construct model
+pipelines. Training and inference are the same kind of thing here: both are
+stages, and a run is a list of them.
+
+- [`Train`][chuchichaestli.runtime.stages.Train] is a stage loop — it draws
+  batches, computes the loss and steps the optimizer.
+- [`Program`][chuchichaestli.runtime.stages.Program] holds the stages and the
+  contextual bindings they share.
+- [`Runtime`][chuchichaestli.runtime.runtime.Runtime] runs the program and
+  reports everything that happens as
+  [`Event`][chuchichaestli.runtime.events.Event] signals.
+- A [`Hook`][chuchichaestli.runtime.traits.Hook] watches those events:
+  [`Console`][chuchichaestli.runtime.hooks.Console] prints them,
+  [`Checkpointer`][chuchichaestli.runtime.hooks.Checkpointer] writes
+  checkpoints, [`Jsonl`][chuchichaestli.runtime.hooks.Jsonl] records a trace.
+
+#### Example
+
+Initialize a model, and the data to fit it on:
+
+```python
+--8<-- "examples/runtime_train.py:setup"
+```
+
+The stage says what to fit and for how long; the program says what the stages
+share. `model="model"` names a binding instead of holding the module.
+
+```python
+--8<-- "examples/runtime_train.py:program"
+```
+
+The objective is a list of named `Term`s: the stage reports them as a composite
+loss, for instance `loss=0.06419 mse=0.04953 mae=0.1466`. A single `loss=` 
+argument is shorthand for one unnamed term.
+
+Nothing has run yet — a program is a description. `Runtime` executes it and
+hands every event to the hooks, so what a run reports is chosen at the call
+site rather than baked into the loop.
+
+```python
+--8<-- "examples/runtime_train.py:run"
+```
+
+That is a simple but complete run. Everything else is more stages: `Predict` and
+`Eval` for inference, `Phase` to nest and repeat them, `Checkpointer` and
+`resume=` to survive an interruption. See [Runtime](runtime.md) for more
+advanced examples.
+
 ### Visualization
 
 The [visualization][chuchichaestli.utils.visualization] utilities turn a model
