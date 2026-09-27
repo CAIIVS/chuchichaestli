@@ -1088,7 +1088,9 @@ class Train(StageLoop):
                 default objective.
             objective: What produces the loss: an object with `compute`, or a
                 sequence of `Term`s to sum. Overrides `loss`.
-            optim: The optimizer spec, or one per update group.
+            optim: The optimizer spec, or one per update group. A
+                multi-group update needs one per group, each naming the
+                parameters it owns.
             lr: Learning rate, when no `optim` spells one out.
             update: How the optimizers are stepped; one `Step` by default.
             ema: Decay of an exponential moving average, a built one, or one
@@ -1119,7 +1121,8 @@ class Train(StageLoop):
         Raises:
             ValueError: If neither `loss` nor `objective` says what to
                 compute, an update is given alongside the settings that would
-                configure one, `swa_start` lies outside `[0, 1)`, or `swa` is
+                configure one, a multi-group update is given a single
+                optimizer spec, `swa_start` lies outside `[0, 1)`, or `swa` is
                 asked for without the epochs it averages over.
         """
         if swa is not None and epochs is None:
@@ -1162,6 +1165,15 @@ class Train(StageLoop):
                 raise ValueError(
                     f"{sorted(configured)} configure an update, but {update!r} "
                     "was given and carries its own; set them in one place."
+                )
+            groups = update.groups()
+            if len(groups) > 1 and not isinstance(optim, Mapping):
+                raise ValueError(
+                    f"Groups {sorted(map(str, groups))} each own their own "
+                    f"parameters, but {optim!r} covers them all, so every group "
+                    "would step the same ones. Give one optimizer per group, "
+                    "e.g. optim={'gen': OptimSpec.adam(params='model'), "
+                    "'disc': OptimSpec.adam(params='disc')}."
                 )
         self.policy = UpdatePolicy(
             clip=clip,

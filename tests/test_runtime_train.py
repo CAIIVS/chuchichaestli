@@ -832,3 +832,55 @@ def test_an_ema_is_published_for_later_stages():
     ctx = Context("t")
     stage.enter(ctx)
     assert isinstance(ctx["model/ema"], Ema)
+
+
+@pytest.mark.parametrize("optim", [None, OptimSpec.sgd(lr=0.1)])
+def test_a_multi_group_update_refuses_one_optimizer_spec(optim):
+    """One spec names one set of parameters, so every group would step it."""
+    with pytest.raises(ValueError, match="each own their own parameters"):
+        Train(
+            "t",
+            model=linear(),
+            data=ramp(),
+            loss=nn.MSELoss(),
+            steps=1,
+            update=Alternating(("disc", "gen")),
+            optim=optim,
+        )
+
+
+def test_a_single_group_update_takes_one_optimizer_spec():
+    """The default update has one group, which one spec covers exactly."""
+    stage = Train(
+        "t",
+        model=linear(),
+        data=ramp(),
+        loss=nn.MSELoss(),
+        steps=1,
+        optim=OptimSpec.sgd(lr=0.1),
+    )
+    assert stage.update.groups() == (None,)
+
+
+def test_each_group_gets_its_own_parameters():
+    """Two optimizers over one parameter would apply its update twice."""
+    gen, disc = linear(), linear()
+    stage = Train(
+        "t",
+        model=gen,
+        data=ramp(),
+        loss=nn.MSELoss(),
+        steps=1,
+        update=Alternating(("disc", "gen")),
+        optim={
+            "disc": OptimSpec.sgd(lr=0.1, params="disc"),
+            "gen": OptimSpec.sgd(lr=0.1, params="model"),
+        },
+    )
+    ctx = Context("t", bindings={"model": gen, "disc": disc})
+    owned = {
+        group: {id(p) for pg in optimizer.param_groups for p in pg["params"]}
+        for group, optimizer in stage._optimizers(ctx).items()
+    }
+    assert owned["disc"].isdisjoint(owned["gen"])
+    assert owned["gen"] == {id(p) for p in gen.parameters()}
