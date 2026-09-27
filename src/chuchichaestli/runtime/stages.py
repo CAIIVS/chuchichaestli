@@ -1716,7 +1716,20 @@ class Predict(Inference):
 
         Args:
             ctx: Execution context for this entry.
+
+        Raises:
+            ValueError: If a fixed draw is asked to cover several batches,
+                which would repeat one set rather than extend it.
         """
+        if getattr(self.draw, "fixed", False):
+            batches = self._manager.batches_in(ctx)
+            if batches > 1:
+                raise ValueError(
+                    f"{self.draw!r} draws one fixed set per pass, but "
+                    f"{self.name!r} draws {batches} batches, which would "
+                    f"repeat that set {batches} times. Ask for the whole set "
+                    "at once with batch_size=len(data), or raise draws=."
+                )
         self._predictions = []
         self._truths = []
         self._writer = None
@@ -1918,10 +1931,16 @@ class FromProcess:
 class FromLatent:
     """Draws by handing a model noise, as a generator network reads it.
 
+    Draws one fixed set for a whole pass, which is what a sample grid wants;
+    a pass of several batches would repeat that set rather than extend it.
+
     Attributes:
         shape: Shape of one latent.
         draws: Latents to draw per condition, or in all when unconditioned.
+        fixed: Whether every batch of a pass is handed the same latents.
     """
+
+    fixed: bool = True
 
     def __init__(self, shape: tuple[int, ...], draws: int = 1):
         """Constructor.
@@ -1934,15 +1953,20 @@ class FromLatent:
         self.shape = tuple(shape)
         self.draws = draws
 
+    def __repr__(self) -> str:
+        """Return a short description of the draw."""
+        shape, draws = self.shape, self.draws
+        return f"FromLatent({shape=}, {draws=})"
+
     def __call__(
         self, model: nn.Module, inputs: tuple[Any, ...], ctx: Context
     ) -> torch.Tensor:
         """Return what the model makes of fresh noise.
 
-        The noise comes from the stage's own stream, so a run drawing again
-        from the same position draws the same latents. It is drawn where
-        that stream lives and moved afterwards, so the draw does not depend
-        on which device the run is using.
+        Every batch of a pass is handed the same latents, so a grid drawn
+        once can be compared from one visit to the next. It is drawn where
+        the stage's stream lives and moved afterwards, so the draw does not
+        depend on which device the run is using.
 
         Args:
             model: The model reading the latent.

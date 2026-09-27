@@ -346,6 +346,33 @@ def test_the_same_position_draws_the_same_latents():
     assert torch.equal(drawn(), drawn())
 
 
+def test_a_fixed_draw_refuses_to_cover_several_batches():
+    """Repeating one set over four batches is never what a caller meant."""
+    from chuchichaestli.runtime import FromLatent
+
+    stage = Predict(
+        "draw",
+        model=nn.Identity(),
+        draw=FromLatent((3,), draws=2),
+        data=TensorDataset(torch.zeros(4, 1)),
+        batch_size=1,
+        inputs=None,
+    )
+    with pytest.raises(ValueError, match="draws one fixed set per pass"):
+        Runtime(Program(stages=[stage]), seed=11, hooks=(), device="cpu").run()
+
+
+def test_a_fixed_draw_hands_every_batch_the_same_latents():
+    """A grid is only comparable between visits if the noise does not move."""
+    from chuchichaestli.runtime import FromLatent
+
+    draw = FromLatent((3,), draws=2)
+    ctx = Context("program/0:draw", 11)
+    first = draw(nn.Identity(), (), ctx).clone()
+    ctx.progress = ctx.progress.next_step()
+    assert torch.equal(draw(nn.Identity(), (), ctx), first)
+
+
 def test_eval_scores_what_a_batch_already_holds():
     """Data an earlier stage produced needs no model run over it again."""
     drawn = torch.zeros(4, 1)
