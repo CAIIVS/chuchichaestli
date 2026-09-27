@@ -611,7 +611,7 @@ class Alternating(Updater):
             ctx: Execution context for the stage.
         """
         results: dict[str | None, Loss] = {}
-        for group in self.groups(ctx.progress.step):
+        for group in self.groups(ctx.progress.global_step):
             self.policy.zero_grad(self.optimizers[group])
             results[group] = self._accumulate(objective, batches, ctx, group)
             self._step_group(group, ctx)
@@ -631,7 +631,7 @@ class Simultaneous(Updater):
             batches: The micro-batches making up this step.
             ctx: Execution context for the stage.
         """
-        groups = self.groups(ctx.progress.step)
+        groups = self.groups(ctx.progress.global_step)
         for group in groups:
             self.policy.zero_grad(self.optimizers[group])
         results = {g: self._accumulate(objective, batches, ctx, g) for g in groups}

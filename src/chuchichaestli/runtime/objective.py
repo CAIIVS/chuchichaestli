@@ -135,7 +135,7 @@ class CompositeObjective(Computes, Objective):
             batch: One micro-batch of the stage's data.
             ctx: Execution context, carrying the update group being applied.
         """
-        terms = self.terms(ctx.group, ctx.progress.step)
+        terms = self.terms(ctx.group, ctx.progress.global_step)
         values: dict[str, torch.Tensor] = {}
         nested: dict[str, torch.Tensor] = {}
         for term in terms:

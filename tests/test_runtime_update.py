@@ -453,3 +453,33 @@ def test_the_scaler_state_is_saved_beside_the_optimizer():
     state = update.state_dict()
     assert any(key.startswith("scaler") for key in state)
     update.load_state_dict(state)
+
+
+def test_a_group_cadence_keeps_its_phase_across_a_pass():
+    """`step` restarts each pass, which would re-phase every frequency."""
+    gen, disc = linear(), linear()
+    update = gan_update(Alternating, gen, disc, {"disc": 3, "gen": 1})
+    ctx = a_context(gen=gen, disc=disc)
+    stepped: list[int] = []
+    for _ in range(3):
+        for _ in range(4):
+            before = gen.weight.detach().clone()
+            update.apply(Adversarial(), [torch.ones(4, 1)], ctx)
+            if not torch.equal(gen.weight, before):
+                stepped.append(ctx.progress.global_step)
+            ctx.progress = ctx.progress.next_step()
+        ctx.progress = ctx.progress.next_epoch()
+    assert stepped == [0, 3, 6, 9]
+
+
+def test_a_sat_out_group_stays_sat_out_after_a_pass():
+    """A generator whose cadence has not come round must not step regardless."""
+    gen, disc = linear(), linear()
+    update = gan_update(Alternating, gen, disc, {"disc": 2, "gen": 1})
+    ctx = a_context(gen=gen, disc=disc)
+    ctx.progress = ctx.progress.next_step()
+    ctx.progress = ctx.progress.next_epoch()
+    assert (ctx.progress.step, ctx.progress.global_step) == (0, 1)
+    before = gen.weight.detach().clone()
+    update.apply(Adversarial(), [torch.ones(4, 1)], ctx)
+    assert torch.equal(gen.weight, before)

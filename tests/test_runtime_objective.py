@@ -323,3 +323,34 @@ def test_a_direct_objective_carrying_weights_moves_with_it():
     """A loss module registers, so it moves and checkpoints."""
     objective = Criterion(nn.Linear(2, 2))
     assert sorted(objective.state_dict()) == ["loss.bias", "loss.weight"]
+
+
+def test_a_warmup_longer_than_one_pass_still_switches_on():
+    """`step` restarts each pass, so a warmup counted in it would never finish."""
+    late = Constant(5.0)
+    objective = CompositeObjective(
+        [Term("rec", Constant()), Term("gadv", late, after=3)]
+    )
+    ctx = a_context()
+    for _ in range(2):
+        ctx.progress = ctx.progress.next_step()
+    ctx.progress = ctx.progress.next_epoch()
+    assert (ctx.progress.step, ctx.progress.global_step) == (0, 2)
+    assert "gadv" not in objective.compute(torch.ones(4), ctx).parts
+    ctx.progress = ctx.progress.next_step()
+    assert (ctx.progress.step, ctx.progress.global_step) == (1, 3)
+    assert "gadv" in objective.compute(torch.ones(4), ctx).parts
+
+
+def test_an_interval_keeps_its_phase_across_a_pass():
+    """A term on `every=` must not be re-phased by a pass boundary."""
+    objective = CompositeObjective([Term("rec", Constant(), every=2)])
+    ctx = a_context()
+    on: list[int] = []
+    for _ in range(3):
+        for _ in range(3):
+            if "rec" in objective.compute(torch.ones(4), ctx).parts:
+                on.append(ctx.progress.global_step)
+            ctx.progress = ctx.progress.next_step()
+        ctx.progress = ctx.progress.next_epoch()
+    assert on == [0, 2, 4, 6, 8]
