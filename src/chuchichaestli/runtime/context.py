@@ -4,6 +4,7 @@
 """Execution contexts: one per stage entry, chained to the enclosing stage."""
 
 from __future__ import annotations
+import warnings
 from collections.abc import Callable, Iterator
 from typing import Any
 import torch
@@ -72,8 +73,7 @@ class Context:
             bindings: Artifacts bound at this level.
             group: Update group currently being applied.
             totals: Units completed so far, shared with every child.
-            registry: Every binding of the run, shared with every child and
-                keyed by the path it was bound at.
+            registry: Every binding of the run, shared with every child.
             watcher: Receives each binding as it is registered.
         """
         self.path = path
@@ -166,34 +166,42 @@ class Context:
             value: Artifact to bind.
         """
         self._bindings[key] = value
-        self._register(self.path, key, value)
+        self._register(key, value)
 
     def publish(self, key: str, value: Any) -> None:
         """Bind an artifact into the enclosing phase, so later siblings see it.
+
+        A published artifact is derived from one already bound, whose own
+        stage records it, so it is not registered for the run.
 
         Args:
             key: Name to bind under.
             value: Artifact to bind.
         """
-        target = self.parent or self
-        target._bindings[key] = value
-        self._register(target.path, key, value)
+        (self.parent or self)._bindings[key] = value
 
-    def _register(self, path: str, key: str, value: Any) -> None:
-        """Record a binding run-wide under the path it was bound at.
+    def _register(self, key: str, value: Any) -> None:
+        """Record a binding run-wide, wherever in the program it was bound.
 
         Args:
-            path: Path of the context the binding landed in.
             key: Name it was bound under.
             value: Artifact that was bound.
         """
-        name = f"{path}/{key}"
-        self._registry[name] = value
+        held = self._registry.get(key)
+        if held is value:
+            return
+        if held is not None:
+            warnings.warn(
+                f"Two artifacts are bound as {key!r}; only the later one is "
+                "recorded for the run. Give them distinct names.",
+                stacklevel=3,
+            )
+        self._registry[key] = value
         if self._watcher is not None:
-            self._watcher(name, value)
+            self._watcher(key, value)
 
     def run_stateful(self) -> dict[str, Any]:
-        """Return every stateful binding of the run, keyed by qualified name."""
+        """Return every stateful binding of the run, keyed by binding name."""
         return {
             name: value
             for name, value in self._registry.items()

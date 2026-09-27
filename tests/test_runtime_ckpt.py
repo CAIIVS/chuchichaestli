@@ -1204,7 +1204,7 @@ def test_a_nested_phase_provides_state_that_is_checkpointed(tmp_path):
     program, _ = nested_program(tmp_path)
     Runtime(program, store=store, hooks=[Checkpointer(every=1)], device="cpu").run()
     recorded = sorted(CheckpointStore(store).load("last").bindings)
-    assert recorded == ["program/0:nested/inner", "program/outer"]
+    assert recorded == ["inner", "outer"]
 
 
 def test_a_nested_phase_provides_state_that_is_restored(tmp_path):
@@ -1220,32 +1220,6 @@ def test_a_nested_phase_provides_state_that_is_restored(tmp_path):
     assert torch.allclose(trained.weight, resumed.weight, atol=1e-6)
 
 
-def test_a_binding_is_found_by_its_unqualified_name(tmp_path):
-    """A caller asking for a model should not have to spell out its path."""
-    store = tmp_path / "run"
-    program, _ = nested_program(tmp_path)
-    Runtime(program, store=store, hooks=[Checkpointer(every=1)], device="cpu").run()
-    checkpoint = CheckpointStore(store).load("last")
-    assert checkpoint.qualified("inner") == "program/0:nested/inner"
-    assert checkpoint.qualified("program/outer") == "program/outer"
-
-
-def test_an_ambiguous_binding_name_is_refused(tmp_path):
-    """Two phases may each provide a `model`, so the short name cannot win."""
-    store = tmp_path / "run"
-    written = CheckpointStore(store).save(
-        index=1,
-        program=Program([Call("a", fn=lambda ctx: None)]),
-        bindings={
-            "program/0:a/model": nn.Linear(2, 1),
-            "program/1:b/model": nn.Linear(2, 1),
-        },
-        topology=Local(device="cpu"),
-    )
-    with pytest.raises(C3liCheckpointError, match="ambiguous"):
-        written.qualified("model")
-
-
 def test_state_nothing_is_bound_for_is_reported(tmp_path):
     """A renamed binding would otherwise resume untrained in silence."""
     store = tmp_path / "run"
@@ -1256,3 +1230,55 @@ def test_state_nothing_is_bound_for_is_reported(tmp_path):
     renamed.provide = {"elsewhere": renamed.provide["outer"]}
     with pytest.warns(UserWarning, match="Nothing in this run was bound for"):
         Runtime(renamed, store=store, resume="last", hooks=[], device="cpu").run()
+
+
+def test_a_checkpoint_holds_one_file_per_bound_model(tmp_path):
+    """A published average is the stage's to record, not a file of its own."""
+    from torch.utils.data import TensorDataset
+    from chuchichaestli.runtime import DataManager, Phase, Train
+
+    store = tmp_path / "run"
+    x = torch.arange(24, dtype=torch.float32).reshape(8, 3)
+    model = nn.Linear(3, 1, bias=False)
+    training = Train(
+        "train",
+        model="model",
+        data=DataManager(TensorDataset(x, torch.zeros(8, 1)), batch_size=4),
+        loss=nn.MSELoss(),
+        epochs=4,
+        lr=0.1,
+        ema=0.9,
+    )
+    program = Program(provide={"model": model}, stages=[Phase.each_pass(4, training)])
+    Runtime(
+        program,
+        store=store,
+        hooks=[Checkpointer(every=2, unit="epoch")],
+        device="cpu",
+    ).run()
+    written = sorted(p.name for p in sorted(store.glob("ckpt_*"))[-1].iterdir())
+    assert written == ["manifest.json", "model.safetensors", "state.safetensors"]
+
+
+def test_two_artifacts_under_one_name_are_reported(tmp_path):
+    """Recording only the later one would lose the other without a word."""
+    from chuchichaestli.runtime import Phase
+
+    store = tmp_path / "run"
+    program = Program(
+        provide={"model": nn.Linear(3, 1)},
+        stages=[
+            Phase(
+                "inner",
+                [Call("a", fn=lambda ctx: None)],
+                provide={"model": nn.Linear(3, 1)},
+            )
+        ],
+    )
+    with pytest.warns(UserWarning, match="Two artifacts are bound as 'model'"):
+        Runtime(
+            program,
+            store=store,
+            hooks=[Checkpointer(every=1, unit="advance")],
+            device="cpu",
+        ).run()

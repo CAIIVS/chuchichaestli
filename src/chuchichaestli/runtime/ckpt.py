@@ -88,52 +88,24 @@ class Checkpoint:
         index, bindings = self.index, sorted(self.bindings)
         return f"Checkpoint({self.path.name!r}, {index=}, {bindings=})"
 
-    def qualified(self, name: str) -> str:
-        """Return the recorded name a binding name refers to.
-
-        A run records a binding under the path it was bound at, so `"model"`
-        finds `"program/model"` as long as only one binding ends that way.
-
-        Args:
-            name: Recorded name, or the binding name at the end of one.
-
-        Raises:
-            C3liCheckpointError: If nothing matches, or several do.
-        """
-        if name in self.bindings:
-            return name
-        matches = [n for n in self.bindings if n.endswith(f"/{name}")]
-        if len(matches) == 1:
-            return matches[0]
-        if not matches:
-            raise C3liCheckpointError(
-                f"No binding {name!r} in {str(self.path)!r}. "
-                f"Recorded: {sorted(self.bindings) or 'none'}."
-            )
-        raise C3liCheckpointError(
-            f"Binding {name!r} is ambiguous in {str(self.path)!r}; "
-            f"it could be any of {sorted(matches)}."
-        )
-
     def build(self, name: str, strict: bool = True, **overrides: Any) -> nn.Module:
         """Rebuild a binding from its spec and load its weights into it.
 
         Args:
-            name: Binding to rebuild, qualified or not.
+            name: Binding to rebuild.
             strict: Whether every key must match, as for `load_state_dict`.
             overrides: Constructor arguments to replace before building.
 
         Raises:
             C3liCheckpointError: If no spec was recorded for that binding.
         """
-        found = self.qualified(name)
-        if found not in self.specs:
+        if name not in self.specs:
             raise C3liCheckpointError(
                 f"No model spec for binding {name!r} in {str(self.path)!r}. "
                 f"Recorded specs: {sorted(self.specs) or 'none'}."
             )
-        model = self.specs[found].build(**overrides)
-        model.load_state_dict(self.bindings[found], strict=strict)
+        model = self.specs[name].build(**overrides)
+        model.load_state_dict(self.bindings[name], strict=strict)
         return model
 
 
