@@ -1110,3 +1110,29 @@ def test_a_loop_keeps_its_step_count_across_a_resume(tmp_path):
     whole = Train("fit", data=rows, batch_size=2, loss=nn.MSELoss())
     Runtime(program(whole), hooks=[]).run()
     assert carried.total_steps == whole.total_steps
+
+
+def test_a_resume_refuses_a_checkpoint_seeded_differently(tmp_path):
+    """Derived randomness diverges, so the bit-for-bit guarantee would not hold."""
+    import torch.nn as nn
+    from torch.utils.data import TensorDataset
+    from chuchichaestli.runtime.stages import Train
+
+    rows = TensorDataset(torch.rand(16, 2), torch.rand(16, 1))
+
+    def program():
+        return Program(
+            provide={"model": nn.Linear(2, 1)},
+            stages=[Train("fit", data=rows, batch_size=4, epochs=4, loss=nn.MSELoss())],
+        )
+
+    store = tmp_path / "run"
+    Runtime(
+        program(),
+        seed=42,
+        store=store,
+        hooks=[Checkpointer(every=1, unit="epoch")],
+    ).run()
+    Runtime(program(), seed=42, store=store, resume="last~2", hooks=[]).run()
+    with pytest.raises(C3liCheckpointError, match="seeded with 42"):
+        Runtime(program(), seed=7, store=store, resume="last~2", hooks=[]).run()

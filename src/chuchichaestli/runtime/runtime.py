@@ -325,7 +325,8 @@ class Runtime:
             ctx: Root context of the run.
 
         Raises:
-            C3liCheckpointError: If the checkpoint cannot be found or trusted.
+            C3liCheckpointError: If the checkpoint cannot be found or trusted,
+                or was written by a run with a different seed.
         """
         store = self.checkpoints
         if store is None:
@@ -333,6 +334,13 @@ class Runtime:
                 f"resume={self.resume!r} needs a store to resume from."
             )
         checkpoint = store.load(self.resume)
+        if checkpoint.seed != self.seed:
+            raise C3liCheckpointError(
+                f"This run seeds with {self.seed}, but {self.resume!r} was "
+                f"written by a run seeded with {checkpoint.seed}. Randomness "
+                "is derived from the seed, so resuming would diverge from the "
+                "run being continued; seed this run the same."
+            )
         store.restore(
             checkpoint,
             program=self.program,
