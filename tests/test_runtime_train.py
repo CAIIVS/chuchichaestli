@@ -306,7 +306,7 @@ def test_optimizer_state_rides_in_the_stage_state():
     )
     Runtime(stage, hooks=()).run()
     assert "progress" in stage.state_dict()
-    assert "optim" in stage.training_state()
+    assert "optim" in stage.component_states()
 
 
 def test_a_bare_dataset_takes_the_stage_batch_size():
@@ -571,7 +571,7 @@ def test_swa_rides_in_the_stage_state():
         swa_start=0.0,
     )
     Runtime(stage, hooks=(), device="cpu").run()
-    assert "swa/model" in stage.training_state()
+    assert "swa/model" in stage.component_states()
 
 
 def test_swalr_takes_over_from_the_main_schedule():
@@ -692,7 +692,7 @@ def test_the_swa_schedule_rides_in_the_stage_state():
         swa_lr=0.01,
     )
     Runtime(stage, hooks=(), device="cpu").run()
-    assert "swalr/None" in stage.training_state()
+    assert "swalr/None" in stage.component_states()
 
 
 def adam_steps(stage) -> int:

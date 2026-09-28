@@ -18,7 +18,7 @@ __all__ = [
     "merge_tree",
     "stage_signature",
     "stages_by_path",
-    "training_states",
+    "component_states",
     "writable_spec",
 ]
 
@@ -171,18 +171,15 @@ def _stage_at(root: Stage, path: str) -> Stage | None:
     return held
 
 
-def training_states(stage: Stage) -> dict[str, Any]:
-    """Return what each stage of a tree learned, keyed by its path.
-
-    Recorded apart from the stages' own state, which a phase keeps only while
-    its child is open.
+def component_states(stage: Stage) -> dict[str, Any]:
+    """Return the component states of each stage of a tree, keyed by its path.
 
     Args:
         stage: Root of the stage tree, usually the program.
     """
     states: dict[str, Any] = {}
     for path, held in stages_by_path(stage).items():
-        capture = getattr(held, "training_state", None)
+        capture = getattr(held, "component_states", None)
         if callable(capture):
             states[path] = capture()
     return states

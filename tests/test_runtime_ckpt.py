@@ -1329,10 +1329,10 @@ def test_what_a_stage_learned_is_recorded_apart_from_its_counters(tmp_path):
     Runtime(
         program, store=store, hooks=[Checkpointer(every=1, unit="epoch")], device="cpu"
     ).run()
-    training = CheckpointStore(store).load("last").training
-    assert sorted(training) == ["program/0:repeat/0:epoch/0:train"]
-    assert "optim" in training["program/0:repeat/0:epoch/0:train"]
-    assert "progress" not in training["program/0:repeat/0:epoch/0:train"]
+    components = CheckpointStore(store).load("last").components
+    assert sorted(components) == ["program/0:repeat/0:epoch/0:train"]
+    assert "optim" in components["program/0:repeat/0:epoch/0:train"]
+    assert "progress" not in components["program/0:repeat/0:epoch/0:train"]
 
 
 def test_a_resumed_pass_at_a_time_run_keeps_its_optimizer(tmp_path):

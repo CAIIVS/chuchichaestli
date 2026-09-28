@@ -19,7 +19,7 @@ from chuchichaestli.runtime.serialize import (
     unpack_tree,
     stage_signature,
     stages_by_path,
-    training_states,
+    component_states,
     merge_tree,
     writable_spec,
 )
@@ -66,7 +66,7 @@ class Checkpoint:
         progress: Counters at the time of writing.
         program: The program's own state.
         bindings: Per-binding state, keyed by binding name.
-        training: What each stage learned while training, keyed by its path.
+        components: Component states of each stage, keyed by its path.
         specs: How to rebuild each binding that records a model spec.
         weights: File each model binding was written to.
         rng: Ambient RNG capture, or `None` if it was not recorded.
@@ -82,7 +82,7 @@ class Checkpoint:
     at: str | None = None
     program: Stage | None = None
     bindings: Mapping[str, Any] = field(default_factory=dict)
-    training: Mapping[str, Any] = field(default_factory=dict)
+    components: Mapping[str, Any] = field(default_factory=dict)
     specs: Mapping[str, ModelSpec] = field(default_factory=dict)
     weights: Mapping[str, Path] = field(default_factory=dict)
     rng: Mapping[str, Any] | None = None
@@ -351,7 +351,7 @@ class CheckpointStore:
         payload: dict[str, Any] = {
             "program": topology.state_of(program),
             "bindings": {n: topology.state_of(v) for n, v in rest.items()},
-            "training": training_states(program),
+            "components": component_states(program),
         }
         if rng:
             payload["rng"] = capture_rng_state()
@@ -397,7 +397,7 @@ class CheckpointStore:
             at=at,
             program=payload["program"],
             bindings={**payload["bindings"], **weights},
-            training=payload["training"],
+            components=payload["components"],
             specs={n: s for n, s in specs.items() if s is not None},
             weights=files,
             rng=payload.get("rng"),
@@ -483,7 +483,7 @@ class CheckpointStore:
             at=manifest.get("at"),
             program=payload.get("program"),
             bindings=bindings,
-            training=payload.get("training") or {},
+            components=payload.get("components") or {},
             specs=specs,
             weights=files,
             rng=payload.get("rng"),
@@ -522,10 +522,10 @@ class CheckpointStore:
         if checkpoint.program is not None:
             topology.load_state(program, checkpoint.program)
         held = stages_by_path(program)
-        for path, trained in checkpoint.training.items():
-            carry = getattr(held.get(path), "carry_training_state", None)
-            if callable(carry):
-                carry(trained)
+        for path, states in checkpoint.components.items():
+            defer = getattr(held.get(path), "defer_component_states", None)
+            if callable(defer):
+                defer(states)
         unplaced: dict[str, Any] = {}
         for name, state in checkpoint.bindings.items():
             if name in bindings:

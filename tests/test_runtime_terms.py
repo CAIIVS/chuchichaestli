@@ -254,7 +254,7 @@ def test_a_two_group_stage_trains_both(tmp_path):
     Runtime(program, hooks=(), device="cpu").run()
     assert not torch.equal(gen.weight, g0)
     assert not torch.equal(disc.weight, d0)
-    assert sorted(k for k in stage.training_state() if k.startswith("optim")) == [
+    assert sorted(k for k in stage.component_states() if k.startswith("optim")) == [
         "optim/disc",
         "optim/gen",
     ]
@@ -604,7 +604,7 @@ def test_an_average_is_kept_per_binding():
     )
     Runtime(gan_program(stage, gen, disc), hooks=(), device="cpu").run()
     assert sorted(stage._ema) == ["disc", "model"]
-    assert sorted(k for k in stage.training_state() if k.startswith("ema/")) == [
+    assert sorted(k for k in stage.component_states() if k.startswith("ema/")) == [
         "ema/disc",
         "ema/model",
     ]
@@ -647,7 +647,7 @@ def test_every_scheduler_rides_in_the_stage_state():
         },
     )
     Runtime(gan_program(stage, gen, disc), hooks=(), device="cpu").run()
-    assert sorted(k for k in stage.training_state() if k.startswith("sched/")) == [
+    assert sorted(k for k in stage.component_states() if k.startswith("sched/")) == [
         "sched/disc",
         "sched/gen",
     ]

@@ -1193,7 +1193,7 @@ class Train(StageLoop):
         self._ema: dict[str, Ema] = {}
         self._sweepwise_schedulers: dict[str | None, LRScheduler] = {}
         self._specs: dict[str | None, OptimSpec] = {}
-        self._carried: dict[str, Any] | None = None
+        self._deferred_states: dict[str, Any] | None = None
         self._objective: Objective | None = None
         self._monitors: dict[str | None, str | None] = {}
 
@@ -1227,8 +1227,8 @@ class Train(StageLoop):
         self.update.bind(optimizers, stepwise_schedulers, self._monitors)
         self._ema = self._build_ema(ctx)
         self.swa_window.build(self.model_binding, optimizers, ctx)
-        if self._carried is not None:
-            self.load_training_state(self._carried)
+        if self._deferred_states is not None:
+            self.load_component_states(self._deferred_states)
 
     def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
         """Take one optimizer step over the micro-batches.
@@ -1371,7 +1371,7 @@ class Train(StageLoop):
         Args:
             ctx: Execution context for this entry.
         """
-        self._carried = self.training_state()
+        self._deferred_states = self.component_states()
         self.swa_window.refresh_batch_stats(
             lambda: (
                 input_in_batch(batch, getattr(self._objective, "inputs", "x"))
@@ -1381,8 +1381,8 @@ class Train(StageLoop):
         )
         return super().leave(ctx)
 
-    def training_state(self) -> dict[str, Any]:
-        """Return what the stage learned, without the counters saying where."""
+    def component_states(self) -> dict[str, Any]:
+        """Return the states of the components the stage owns."""
         state = dict(self.update.state_dict())
         state.update({f"ema/{n}": a.state_dict() for n, a in self._ema.items()})
         state.update(self.swa_window.state_dict())
@@ -1394,11 +1394,11 @@ class Train(StageLoop):
         )
         return state
 
-    def load_training_state(self, state: dict[str, Any]) -> None:
-        """Restore what `training_state` captured, into what `prepare` built.
+    def load_component_states(self, state: dict[str, Any]) -> None:
+        """Restore the component states into what `prepare` built.
 
         Args:
-            state: Mapping as returned by `training_state`.
+            state: Mapping as returned by `component_states`.
         """
         self.update.load_state_dict(state)
         for name, averaged in self._ema.items():
@@ -1411,13 +1411,13 @@ class Train(StageLoop):
             if saved is not None:
                 scheduler.load_state_dict(saved)
 
-    def carry_training_state(self, state: dict[str, Any]) -> None:
-        """Hold what a stage learned until `prepare` has built it again.
+    def defer_component_states(self, state: dict[str, Any]) -> None:
+        """Hold the component states until `prepare` has built them again.
 
         Args:
-            state: Mapping as returned by `training_state`.
+            state: Mapping as returned by `component_states`.
         """
-        self._carried = dict(state)
+        self._deferred_states = dict(state)
 
 
 Finetune = partialclass(
