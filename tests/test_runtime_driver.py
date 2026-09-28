@@ -137,6 +137,42 @@ def test_an_interrupt_is_named_in_the_closing_event():
     assert hook.events[-1].payload["aborted"] == "KeyboardInterrupt: "
 
 
+class FailsOnClose:
+    """A critical hook that raises when the run ends."""
+
+    critical = True
+
+    def on(self, event: Event) -> Signal:
+        """Raise on the closing event.
+
+        Args:
+            event: What the runtime just did.
+        """
+        if event.type is EventType.RUN_ENDED:
+            raise OSError("disk full")
+        return Signal.GO
+
+
+def test_a_failure_while_closing_does_not_hide_why_the_run_failed():
+    """An out-of-memory run must not surface as a checkpoint error."""
+
+    def explode(_ctx):
+        """Fail the way a stage fails when its own code is wrong."""
+        raise ValueError("bad shape")
+
+    with pytest.warns(UserWarning, match="disk full"):
+        with pytest.raises(ValueError, match="bad shape"):
+            Runtime(Program([Call("bad", fn=explode)]), hooks=[FailsOnClose()]).run()
+
+
+def test_a_failure_while_closing_a_finished_run_still_raises():
+    """With nothing else to report, the closing failure is the news."""
+    with pytest.raises(OSError, match="disk full"):
+        Runtime(
+            Program([Call("fine", fn=lambda c: None)]), hooks=[FailsOnClose()]
+        ).run()
+
+
 def test_check_rejects_an_unsatisfiable_requirement_before_any_compute():
     """A plan error must surface before the first stage runs."""
     log: list[str] = []

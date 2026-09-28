@@ -319,7 +319,14 @@ class Runtime:
             self.program.leave(ctx)
             ctx.progress = self.program.progress()
             self._report_unplaced()
-            ctx.emit(EventType.RUN_ENDED, aborted=failure)
+            try:
+                ctx.emit(EventType.RUN_ENDED, aborted=failure)
+            except Exception as exc:
+                if failure is None:
+                    raise
+                warnings.warn(
+                    f"Closing the failed run also raised {exc!r}.", stacklevel=2
+                )
         return self.program.progress()
 
     def _advanced(self, ctx: Context) -> Signal:
