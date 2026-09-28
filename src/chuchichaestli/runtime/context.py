@@ -187,9 +187,9 @@ class Context:
             key: Name it was bound under.
             value: Artifact that was bound.
         """
-        held = self._registry.get(key)
-        if held is value:
+        if any(held is value for held in self._registry.values()):
             return
+        held = self._registry.get(key)
         if held is not None:
             warnings.warn(
                 f"Two artifacts are bound as {key!r}; only the later one is "

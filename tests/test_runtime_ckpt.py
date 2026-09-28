@@ -1391,3 +1391,60 @@ def test_a_repeated_stage_is_recorded_once(tmp_path):
     found = stages_by_path(program)
     assert list(found).count("program/0:repeat/0:a") == 1
     assert sum(1 for v in found.values() if v is inner) == 1
+
+
+def stage_held(name: str):
+    """Build a training stage that holds its own model.
+
+    Args:
+        name: Identifies the stage.
+    """
+    from torch.utils.data import TensorDataset
+    from chuchichaestli.runtime import DataManager, Train
+
+    x = torch.arange(24, dtype=torch.float32).reshape(8, 3)
+    return Train(
+        name,
+        model=nn.Linear(3, 1),
+        data=DataManager(TensorDataset(x, torch.zeros(8, 1)), batch_size=4),
+        loss=nn.MSELoss(),
+        epochs=2,
+        lr=0.1,
+    )
+
+
+def weight_files_in(store):
+    """Return the weight files of a store's latest checkpoint.
+
+    Args:
+        store: Directory the run wrote under.
+    """
+    latest = sorted(store.glob("ckpt_*"))[-1]
+    return sorted(p.name for p in latest.glob("*.safetensors") if p.stem != "state")
+
+
+def test_a_model_bound_twice_is_written_once(tmp_path):
+    """A stage binds the model it holds, which the run also records by path."""
+    store = tmp_path / "run"
+    Runtime(
+        Program([stage_held("fit")]),
+        store=store,
+        hooks=[Checkpointer(every=1)],
+        device="cpu",
+    ).run()
+    assert weight_files_in(store) == ["program-0-fit-model.safetensors"]
+
+
+def test_two_stages_holding_models_keep_them_apart(tmp_path):
+    """Each binds its own as `model`, so the name alone cannot tell them apart."""
+    store = tmp_path / "run"
+    Runtime(
+        Program([stage_held("a"), stage_held("b")]),
+        store=store,
+        hooks=[Checkpointer(every=1)],
+        device="cpu",
+    ).run()
+    assert weight_files_in(store) == [
+        "program-0-a-model.safetensors",
+        "program-1-b-model.safetensors",
+    ]
