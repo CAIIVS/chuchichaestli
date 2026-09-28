@@ -37,7 +37,7 @@ __all__ = [
 
 @contextmanager
 def staged(*targets: Path) -> Iterator[list[Path]]:
-    """Yield a scratch path per target; all are moved into place, or none are.
+    """Yield a scratch path per target, each moved into place if the block succeeds.
 
     Args:
         targets: Files the write is to land on.
@@ -45,12 +45,11 @@ def staged(*targets: Path) -> Iterator[list[Path]]:
     scratches = [t.with_stem(f"{t.stem}.part") for t in targets]
     try:
         yield scratches
-    except BaseException:
+        for scratch, target in zip(scratches, targets):
+            scratch.replace(target)
+    finally:
         for scratch in scratches:
             scratch.unlink(missing_ok=True)
-        raise
-    for scratch, target in zip(scratches, targets):
-        scratch.replace(target)
 
 
 def _read_safetensors(

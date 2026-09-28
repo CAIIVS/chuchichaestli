@@ -187,3 +187,30 @@ def test_read_state_returns_the_state_alone_by_default(tmp_path):
     model = Tiny()
     write_state(path, model.state_dict(), spec=model.spec)
     assert set(read_state(path)) == set(model.state_dict())
+
+
+def test_a_move_failing_part_way_leaves_no_scratch(tmp_path, monkeypatch):
+    """The files not yet moved must not be left behind as stray scratch."""
+    from pathlib import Path
+
+    first, second = tmp_path / "a.txt", tmp_path / "b.txt"
+    replace = Path.replace
+
+    def refuse_second(self, target):
+        """Move the first scratch into place, then fail.
+
+        Args:
+            self: The scratch being moved.
+            target: Where the scratch is moved to.
+        """
+        if Path(target) == second:
+            raise OSError("disk full")
+        return replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", refuse_second)
+    with pytest.raises(OSError, match="disk full"):
+        with staged(first, second) as scratches:
+            for scratch in scratches:
+                scratch.write_text("new")
+    assert first.read_text() == "new"
+    assert not list(tmp_path.glob("*.part*"))
