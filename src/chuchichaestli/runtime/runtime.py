@@ -249,15 +249,13 @@ class Runtime:
         since a distributed wrapper requires a module already on its own.
         """
         provide = getattr(self.program, "provide", None)
-        if provide is None:
-            provide = {}
-        for key, value in list(provide.items()):
+        for key, value in list((provide or {}).items()):
             if isinstance(value, nn.Module):
                 provide[key] = self.topology.wrap(value.to(self.device))
         self._provision_stage(self.program, provide, self.program.name)
 
     def _provision_stage(
-        self, stage: Stage, provide: dict[str, Any], path: str
+        self, stage: Stage, provide: dict[str, Any] | None, path: str
     ) -> None:
         """Place a model a stage holds directly rather than as a binding.
 
@@ -265,13 +263,15 @@ class Runtime:
 
         Args:
             stage: The stage to provision, and whose children to walk.
-            provide: Run-wide bindings a direct model is promoted into.
+            provide: Run-wide bindings a direct model is promoted into, or
+                `None` for a program that provides none.
             path: Path of this stage, which names what it holds.
         """
         model = getattr(stage, "model", None)
         if isinstance(model, nn.Module):
             stage.model = self.topology.wrap(model.to(self.device))
-            provide[f"{path}/model"] = stage.model
+            if provide is not None:
+                provide[f"{path}/model"] = stage.model
         for index, child in enumerate(getattr(stage, "stages", ())):
             self._provision_stage(child, provide, f"{path}/{index}:{child.name}")
 
