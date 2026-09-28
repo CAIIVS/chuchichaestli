@@ -579,3 +579,39 @@ def test_a_full_precision_resume_restores_nothing():
     update.bind({None: SGD(nn.Linear(2, 1).parameters(), lr=0.1)})
     assert not update._scalers[None].is_enabled()
     update.load_state_dict(update.state_dict())
+
+
+def discriminator_step(kind, groups=("disc", "gen"), terms=("g", "d")):
+    """Return how far one update moved the discriminator.
+
+    Args:
+        kind: `Alternating` or `Simultaneous`.
+        groups: Update groups to step.
+        terms: Which of the generator and discriminator terms to sum.
+    """
+    from chuchichaestli.runtime.objective import DiscriminatorAdv, GeneratorAdv
+
+    torch.manual_seed(0)
+    gen, disc = nn.Linear(2, 2), nn.Linear(2, 1)
+    made = {
+        "g": Term("g", GeneratorAdv(inputs="x"), groups=("gen",)),
+        "d": Term("d", DiscriminatorAdv(inputs="x"), groups=("disc",)),
+    }
+    update = kind(groups)
+    update.bind(
+        {g: SGD((disc if g == "disc" else gen).parameters(), lr=1.0) for g in groups}
+    )
+    before = disc.weight.detach().clone()
+    update.apply(
+        CompositeObjective([made[t] for t in terms]),
+        [{"x": torch.randn(4, 2)}],
+        a_context(model=gen, disc=disc),
+    )
+    return disc.weight.detach() - before
+
+
+@pytest.mark.parametrize("kind", [Alternating, Simultaneous])
+def test_the_discriminator_steps_on_its_own_loss_alone(kind):
+    """The generator's loss reaches the discriminator, which must not step on it."""
+    alone = discriminator_step(Alternating, ("disc",), ("d",))
+    assert torch.allclose(discriminator_step(kind), alone)

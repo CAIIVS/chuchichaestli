@@ -645,9 +645,16 @@ class Simultaneous(Updater):
             for group in self.groups(step)
             if self._contributes(objective, group, step)
         )
+        results: dict[str | None, Loss] = {}
+        grads: dict[str | None, list[torch.Tensor | None]] = {}
         for group in groups:
             self.policy.zero_grad(self.optimizers[group])
-        results = {g: self._accumulate(objective, batches, ctx, g) for g in groups}
+            results[group] = self._accumulate(objective, batches, ctx, group)
+            grads[group] = [p.grad for p in self._params[group]]
+            for p in self._params[group]:
+                p.grad = None
         for group in groups:
+            for p, grad in zip(self._params[group], grads[group]):
+                p.grad = grad
             self._step_group(group, ctx)
         return Loss.merge(results)
