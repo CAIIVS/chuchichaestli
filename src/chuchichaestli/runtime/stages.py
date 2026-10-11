@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from dataclasses import replace
@@ -472,6 +473,7 @@ class Phase:
         self._entered = False
         self._child_ctx: Context | None = None
         self._restored: dict[str, Any] | None = None
+        self._resumed = False
 
     @classmethod
     def each_pass(
@@ -520,6 +522,7 @@ class Phase:
         self._entered = False
         self._child_ctx = None
         self._restored = None
+        self._resumed = False
         for key, value in self.provide.items():
             ctx.bind(key, value)
         ctx.progress = self._progress
@@ -531,6 +534,9 @@ class Phase:
         Args:
             ctx: Execution context for this entry.
         """
+        if self._resumed:
+            self._resumed = False
+            self._republish_finished(ctx)
         while self._index < len(self.stages):
             child = self.stages[self._index]
             if self._child_ctx is None:
@@ -556,6 +562,17 @@ class Phase:
         self._progress = self._progress.finish()
         ctx.progress = self._progress
         return Signal.DONE
+
+    def _republish_finished(self, ctx: Context) -> None:
+        """Have each finished child publish again what a resume lost.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        for index, child in enumerate(self.stages[: self._index]):
+            republish = getattr(child, "republish", None)
+            if callable(republish):
+                republish(ctx.child(index, child.name))
 
     def _close(self, child: Stage) -> None:
         """Finish with the current child and move to the next.
@@ -628,6 +645,7 @@ class Phase:
         self._child_ctx = None
         child = state.get("child")
         self._restored = child if self._index < len(self.stages) else None
+        self._resumed = True
 
 
 class Program(Phase):
@@ -1406,15 +1424,37 @@ class Train(StageLoop):
             state: Mapping as returned by `component_states`.
         """
         self.update.load_state_dict(state)
+        self._load_averages(state)
+        for group, scheduler in self._sweepwise_schedulers.items():
+            saved = state.get(f"sched/{group}")
+            if saved is not None:
+                scheduler.load_state_dict(saved)
+
+    def _load_averages(self, state: dict[str, Any]) -> None:
+        """Restore the moving and window averages from component states.
+
+        Args:
+            state: Mapping as returned by `component_states`.
+        """
         for name, averaged in self._ema.items():
             saved = state.get(f"ema/{name}")
             if saved is not None:
                 averaged.load_state_dict(saved)
         self.swa_window.load_state_dict(state)
-        for group, scheduler in self._sweepwise_schedulers.items():
-            saved = state.get(f"sched/{group}")
-            if saved is not None:
-                scheduler.load_state_dict(saved)
+
+    def republish(self, ctx: Context) -> None:
+        """Publish the averages again from the deferred component states.
+
+        Args:
+            ctx: Execution context of the finished stage.
+        """
+        if not self._deferred_states:
+            return
+        if not isinstance(self.model, str):
+            ctx.bind("model", self.model)
+        self._ema = self._build_ema(ctx)
+        self.swa_window.build(self.model_binding, {}, ctx)
+        self._load_averages(self._deferred_states)
 
     def defer_component_states(self, state: dict[str, Any]) -> None:
         """Hold the component states until `prepare` has built them again.
@@ -1567,6 +1607,7 @@ class Eval(Inference):
             raise ValueError(f"Eval({self.name!r}) was given no metric to compute.")
         self.targets = targets
         self._scored: dict[str, float] = {}
+        self._deferred_states: dict[str, Any] | None = None
 
     def prepare(self, ctx: Context) -> None:
         """Move the metrics to the device and clear what they hold.
@@ -1610,13 +1651,22 @@ class Eval(Inference):
             ctx: Execution context for this entry.
         """
         reduce_metrics(self.metrics.values(), ctx.topology)
+        self._publish_scores(ctx)
+        self._deferred_states = deepcopy(self._metric_states())
+        return super().leave(ctx)
+
+    def _publish_scores(self, ctx: Context) -> None:
+        """Compute every metric and publish each score.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
         self._scored = {}
         for key, metric in self.metrics.items():
             value = metric.compute()
             if value is not None:
                 self._scored[key] = float(value)
                 ctx.publish(f"{self.name}/{key}", self._scored[key])
-        return super().leave(ctx)
 
     def summary(self) -> dict[str, Any]:
         """Return what each metric measured, for the closing event."""
@@ -1624,13 +1674,7 @@ class Eval(Inference):
 
     def state_dict(self) -> dict[str, Any]:
         """Return the stage's resumable state, metrics included."""
-        state = super().state_dict()
-        state["metrics"] = {
-            key: metric.state_dict()
-            for key, metric in self.metrics.items()
-            if isinstance(metric, Stateful)
-        }
-        return state
+        return {**super().state_dict(), "metrics": self._metric_states()}
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         """Restore state previously returned by `state_dict`.
@@ -1639,10 +1683,49 @@ class Eval(Inference):
             state: Mapping as returned by `state_dict`.
         """
         super().load_state_dict(state)
-        for key, saved in state.get("metrics", {}).items():
+        self.load_component_states(state.get("metrics", {}))
+
+    def _metric_states(self) -> dict[str, Any]:
+        """Return what each metric has accumulated so far."""
+        return {
+            key: metric.state_dict()
+            for key, metric in self.metrics.items()
+            if isinstance(metric, Stateful)
+        }
+
+    def component_states(self) -> dict[str, Any]:
+        """Return what each metric held when the stage last finished."""
+        return dict(self._deferred_states or {})
+
+    def load_component_states(self, state: dict[str, Any]) -> None:
+        """Restore what each metric had accumulated.
+
+        Args:
+            state: Mapping as returned by `component_states`.
+        """
+        for key, saved in state.items():
             metric = self.metrics.get(key)
             if isinstance(metric, Stateful):
                 metric.load_state_dict(saved)
+
+    def defer_component_states(self, state: dict[str, Any]) -> None:
+        """Hold the component states until the stage publishes again.
+
+        Args:
+            state: Mapping as returned by `component_states`.
+        """
+        self._deferred_states = dict(state)
+
+    def republish(self, ctx: Context) -> None:
+        """Publish the scores again from the deferred component states.
+
+        Args:
+            ctx: Execution context of the finished stage.
+        """
+        if not self._deferred_states:
+            return
+        self.load_component_states(self._deferred_states)
+        self._publish_scores(ctx)
 
 
 class Predict(Inference):

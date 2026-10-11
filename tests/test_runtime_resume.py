@@ -12,8 +12,10 @@ from torch.utils.data import TensorDataset
 
 from chuchichaestli.runtime import (
     Alternating,
+    Call,
     Checkpointer,
     DataManager,
+    Eval,
     EventType,
     Jsonl,
     Phase,
@@ -25,6 +27,7 @@ from chuchichaestli.runtime import (
     Signal,
     Train,
 )
+from chuchichaestli.metrics import MSE
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.runtime.runtime import C3liRuntimeError
 from chuchichaestli.training import OptimSpec, Term
@@ -163,6 +166,34 @@ def cycles(times: int = 1) -> Program:
     return Program(
         provide={"model": model(), "side": model()},
         stages=[Repeat(times, Phase("cycle", [trainer(epochs=1), side_trainer()]))],
+    )
+
+
+def probed(seen: dict) -> Program:
+    """Build a program whose last stage reads what earlier ones published.
+
+    Args:
+        seen: Receives the score and the averaged weights it read.
+    """
+    return Program(
+        provide={"model": model(), "side": model()},
+        stages=[
+            trainer(epochs=1, ema=0.9),
+            Eval(
+                "probe",
+                data=ramp(),
+                batch_size=BATCH,
+                weights="ema",
+                metrics=[MSE()],
+            ),
+            side_trainer(),
+            Call(
+                "read",
+                fn=lambda ctx: seen.update(
+                    mse=ctx["probe/mse"], ema=ctx["model/ema"].state_dict()
+                ),
+            ),
+        ],
     )
 
 
@@ -517,3 +548,18 @@ def test_a_run_resumes_twice_before_a_stage_runs_again(tmp_path):
     assert identical(
         bindings(whole, "model", "side"), bindings(carried, "model", "side")
     )
+
+
+@pytest.mark.parametrize(("at", "stage"), [(5, 1), (9, 2)])
+def test_what_a_finished_stage_published_survives_a_resume(tmp_path, at, stage):
+    """Mid-evaluation and in a later stage, both read what came before."""
+    store = tmp_path / "run"
+    whole, carried = {}, {}
+    uninterrupted(probed(whole))
+    interrupted(probed({}), store, at=at)
+    last = sorted(p for p in store.iterdir() if p.is_dir())[-1]
+    state = json.loads((last / "manifest.json").read_text())["state"]["program"]
+    assert state["index"] == stage
+    resumed(probed(carried), store)
+    assert carried["mse"] == whole["mse"]
+    assert identical(dict(whole["ema"]), dict(carried["ema"]))
