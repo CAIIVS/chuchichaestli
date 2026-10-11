@@ -21,6 +21,7 @@ from chuchichaestli.runtime import (
     Signal,
     Train,
 )
+from chuchichaestli.runtime.data import C3liDataError
 from chuchichaestli.runtime.runtime import C3liProgramError
 from chuchichaestli.training import OptimSpec, Term
 from chuchichaestli.training.update import Ema
@@ -354,6 +355,23 @@ def test_from_source_forwards_every_option():
         ramp(8), batch_size=4, shuffle=False, drop_last=True
     )
     assert (manager.batch_size, manager.shuffle, manager.drop_last) == (4, False, True)
+
+
+@pytest.mark.parametrize(
+    ("n", "options"),
+    [(0, {"shuffle": False}), (0, {"shuffle": True}), (3, {"drop_last": True})],
+    ids=["empty", "empty-shuffled", "short"],
+)
+def test_a_loop_with_no_batches_to_draw_fails(n, options):
+    """A step budget would otherwise redraw the empty pass forever."""
+    manager = DataManager(ramp(n), batch_size=4, **options)
+    stage = Train(
+        "t", model=linear(), data=manager, loss=nn.MSELoss(), steps=10, lr=0.1
+    )
+    ctx = Context("t")
+    stage.enter(ctx)
+    with pytest.raises(C3liDataError, match="no batches"):
+        stage.execute(ctx)
 
 
 def test_effective_batch_reports_what_a_step_consumes():

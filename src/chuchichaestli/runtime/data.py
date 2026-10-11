@@ -219,7 +219,7 @@ class DataManager:
         source = self._batches if self._batches is not None else self.dataset
         order = (
             RandomSampler(source, generator=ctx.rng(f"data/epoch={epoch}"))
-            if self.shuffle
+            if self.shuffle and len(source)
             else SequentialSampler(source)
         )
         if self._batches is not None:

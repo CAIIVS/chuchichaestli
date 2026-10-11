@@ -14,6 +14,7 @@ from torch.utils.data import TensorDataset
 
 from chuchichaestli.metrics import MSE, PSNR
 from chuchichaestli.data.archive import ARCHIVES, read_archive
+from chuchichaestli.runtime.data import C3liDataError
 from chuchichaestli.runtime import (
     Phase,
     Call,
@@ -90,6 +91,15 @@ def test_eval_needs_something_to_measure():
     """A stage with no metric would publish nothing."""
     with pytest.raises(ValueError, match="no metric"):
         Eval("probe", model=linear(), data=ramp())
+
+
+def test_eval_over_no_data_fails():
+    """A pass with nothing to measure would publish nothing."""
+    stage = Eval("probe", model=linear(), data=ramp(0), metrics=[MSE()])
+    ctx = Context("probe")
+    stage.enter(ctx)
+    with pytest.raises(C3liDataError, match="no batches"):
+        stage.execute(ctx)
 
 
 def test_metric_state_rides_in_the_stage_state():

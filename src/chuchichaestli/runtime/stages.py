@@ -25,7 +25,7 @@ from chuchichaestli.data.batch import (
     samples_in_batch,
 )
 from chuchichaestli.runtime.context import Context
-from chuchichaestli.runtime.data import DataManager
+from chuchichaestli.runtime.data import C3liDataError, DataManager
 from chuchichaestli.runtime.objective import CompositeObjective, Criterion
 from chuchichaestli.runtime.update import (
     Step,
@@ -1001,8 +1001,16 @@ class StageLoop(ABC):
 
         Args:
             ctx: Execution context for this entry.
+
+        Raises:
+            C3liDataError: If the pass holds no batches.
         """
         batches = self._manager.batches_in(ctx, self._progress.epoch)
+        if not batches:
+            raise C3liDataError(
+                f"{type(self).__name__}({self.name!r}) has no batches to draw: its "
+                "data is empty, or smaller than one batch with drop_last=True."
+            )
         self._steps_in_pass = -(-batches // self.accumulate)
         self._steps_in_entry = self._expected_steps()
         self._iterator = self._manager.iter(
