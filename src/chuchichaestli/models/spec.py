@@ -12,14 +12,65 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 import torch
 
 
-__all__ = ["ModelSpec", "InitArgMixin"]
+__all__ = ["ModelSpec", "InitArgMixin", "C3liSpecError"]
 
 _INIT_ARGS = "_init_args"
 _TAG = "__c3li__"
+_PACKAGE = __name__.partition(".")[0]
+
+
+class C3liSpecError(ValueError):
+    """Raised when a spec names something it may not load."""
+
+
+def _names_of(obj: Any) -> list[str]:
+    """Return the `"module:QualName"` names that may refer to `obj`.
+
+    Args:
+        obj: Class, function or other named object.
+    """
+    module = getattr(obj, "__module__", None)
+    if module is None:
+        return []
+    names = (
+        getattr(obj, attribute, None) for attribute in ("__qualname__", "__name__")
+    )
+    return [f"{module}:{name}" for name in names if name is not None]
+
+
+@functools.cache
+def _torch_defaults() -> frozenset[Any]:
+    """Return the `torch.nn` modules and functional operations allowed by default."""
+    modules = (
+        value
+        for value in vars(torch.nn).values()
+        if isinstance(value, type) and issubclass(value, torch.nn.Module)
+    )
+    operations = (
+        value
+        for key, value in vars(torch.nn.functional).items()
+        if not key.startswith("_") and inspect.isroutine(value)
+    )
+    return frozenset((*modules, *operations))
+
+
+def _dtype(name: str) -> torch.dtype:
+    """Return the torch dtype called `name`.
+
+    Args:
+        name: Name of the dtype, without the `torch.` prefix.
+
+    Raises:
+        C3liSpecError: If `name` is not a dtype.
+    """
+    dtype = getattr(torch, name, None)
+    if not isinstance(dtype, torch.dtype):
+        raise C3liSpecError(f"The spec names {name!r} as a dtype, which it is not.")
+    return dtype
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +84,7 @@ class ModelSpec:
 
     cls: str
     kwargs: Mapping[str, Any] = field(default_factory=dict)
+    _allowed: ClassVar[set[Any]] = set()
 
     @staticmethod
     def qualname(obj: type) -> str:
@@ -73,12 +125,7 @@ class ModelSpec:
         Raises:
             TypeError: If no name imports back to `obj`, as for a lambda.
         """
-        module = getattr(obj, "__module__", None)
-        for attribute in ("__qualname__", "__name__"):
-            name = getattr(obj, attribute, None)
-            if module is None or name is None:
-                continue
-            path = f"{module}:{name}"
+        for path in _names_of(obj):
             try:
                 if ModelSpec.import_class(path) is obj:
                     return path
@@ -86,6 +133,40 @@ class ModelSpec:
                 continue
         raise TypeError(
             f"Cannot record {obj!r} in a spec: no import name resolves to it."
+        )
+
+    @classmethod
+    def allow(cls, obj: Any) -> Any:
+        """Let a spec from an untrusted file name `obj`, and return it.
+
+        Args:
+            obj: Class, function or enum to allow.
+        """
+        cls._allowed.add(obj)
+        return obj
+
+    @classmethod
+    def resolve(cls, path: str, trusted: bool = False) -> Any:
+        """Return the object an import name refers to, if a spec may name it.
+
+        Args:
+            path: Name of the form `"module:QualName"`.
+            trusted: Import any name, as for a file from a trusted source.
+
+        Raises:
+            C3liSpecError: If `path` is not allowed and the file is untrusted.
+        """
+        if trusted:
+            return cls.import_class(path)
+        module = path.partition(":")[0]
+        if module.partition(".")[0] == _PACKAGE:
+            importlib.import_module(module)
+        for obj in (*cls._allowed, *_torch_defaults()):
+            if path in _names_of(obj):
+                return obj
+        raise C3liSpecError(
+            f"The spec names {path!r}, which is not allowed. Allow it with "
+            "ModelSpec.allow(...), or pass trusted=True for a file you trust."
         )
 
     @classmethod
@@ -178,70 +259,78 @@ class ModelSpec:
         }
 
     @classmethod
-    def decode_arg(cls, value: Any) -> Any:
+    def decode_arg(cls, value: Any, trusted: bool = False) -> Any:
         """Rebuild whatever `encode_arg` reduced, nested specs included.
 
         Args:
             value: Encoded argument to restore.
+            trusted: Import any name, as for a file from a trusted source.
         """
         if isinstance(value, Mapping):
             if _TAG in value:
-                return cls._decode_tagged(value)
+                return cls._decode_tagged(value, trusted)
             if set(value) == {"cls", "kwargs"}:
-                return cls.from_dict(value).build()
-            return {k: cls.decode_arg(v) for k, v in value.items()}
+                return cls.from_dict(value).build(trusted=trusted)
+            return {k: cls.decode_arg(v, trusted) for k, v in value.items()}
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            return [cls.decode_arg(v) for v in value]
+            return [cls.decode_arg(v, trusted) for v in value]
         return value
 
     @classmethod
-    def _decode_tagged(cls, value: Mapping[str, Any]) -> Any:
+    def _decode_tagged(cls, value: Mapping[str, Any], trusted: bool) -> Any:
         """Rebuild an argument `encode_arg` tagged with its kind.
 
         Args:
             value: Tagged mapping to restore.
+            trusted: Import any name, as for a file from a trusted source.
 
         Raises:
             ValueError: If the tag names no known kind.
         """
         match value[_TAG]:
             case "import":
-                return cls.import_class(value["name"])
+                return cls.resolve(value["name"], trusted)
             case "partial":
                 return functools.partial(
-                    cls.decode_arg(value["func"]),
-                    *cls.decode_arg(value["args"]),
-                    **cls.decode_arg(value["kwargs"]),
+                    cls.decode_arg(value["func"], trusted),
+                    *cls.decode_arg(value["args"], trusted),
+                    **cls.decode_arg(value["kwargs"], trusted),
                 )
             case "tensor":
-                dtype = getattr(torch, value["dtype"])
+                dtype = _dtype(value["dtype"])
                 if dtype.is_complex:
                     parts = torch.tensor(value["data"], dtype=torch.float64)
                     parts = parts.reshape(*value["shape"], 2)
                     return torch.view_as_complex(parts).to(dtype)
                 return torch.tensor(value["data"], dtype=dtype).reshape(value["shape"])
             case "dtype":
-                return getattr(torch, value["name"])
+                return _dtype(value["name"])
             case "device":
                 return torch.device(value["name"])
             case "enum":
-                return cls.import_class(value["cls"])(cls.decode_arg(value["value"]))
+                enum = cls.resolve(value["cls"], trusted)
+                return enum(cls.decode_arg(value["value"], trusted))
             case "path":
                 return Path(value["path"])
             case "tuple":
-                return tuple(cls.decode_arg(v) for v in value["items"])
+                return tuple(cls.decode_arg(v, trusted) for v in value["items"])
             case "mapping":
-                return {cls.decode_arg(k): cls.decode_arg(v) for k, v in value["items"]}
+                return {
+                    cls.decode_arg(k, trusted): cls.decode_arg(v, trusted)
+                    for k, v in value["items"]
+                }
         raise ValueError(f"Unknown encoded argument kind {value[_TAG]!r}.")
 
-    def build(self, **overrides: Any) -> Any:
+    def build(self, *, trusted: bool = False, **overrides: Any) -> Any:
         """Construct the object this spec describes.
 
         Args:
+            trusted: Import any name, as for a file from a trusted source.
             overrides: Arguments to replace, for rebuilding a variant.
         """
-        kwargs = {key: self.decode_arg(value) for key, value in self.kwargs.items()}
-        return self.import_class(self.cls)(**{**kwargs, **overrides})
+        target = self.resolve(self.cls, trusted)
+        kwargs = {k: self.decode_arg(v, trusted) for k, v in self.kwargs.items()}
+        return target(**{**kwargs, **overrides})
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable mapping of the spec."""
@@ -275,12 +364,13 @@ class InitArgMixin:
     """Records every constructor argument, so `.spec` can rebuild the object."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        """Wrap a subclass's `__init__` so its arguments are recorded.
+        """Wrap a subclass's `__init__` so its arguments are recorded, and allow it.
 
         Args:
             kwargs: Passed to the next `__init_subclass__` in the chain.
         """
         super().__init_subclass__(**kwargs)
+        ModelSpec.allow(cls)
         init = cls.__dict__.get("__init__")
         if not inspect.isfunction(init) or getattr(init, "_records_init", False):
             return

@@ -3,10 +3,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the filesystem helpers shared by the data and runtime layers."""
 
+import subprocess
+import sys
+
 import pytest
 import torch
 
-from chuchichaestli.models.spec import InitArgMixin
+from chuchichaestli.models.adversarial.discriminator import PixelDiscriminator
+from chuchichaestli.models.spec import C3liSpecError, InitArgMixin, ModelSpec
 from chuchichaestli.utils.io import (
     READERS,
     METADATA_KEY,
@@ -137,6 +141,34 @@ def test_an_unknown_suffix_cannot_hold_a_spec_either(tmp_path):
     model = Tiny()
     with pytest.raises(ValueError, match="Cannot write '.ckpt'"):
         write_state(tmp_path / "model.ckpt", model.state_dict(), spec=model.spec)
+
+
+def test_a_file_naming_what_was_not_allowed_is_refused(tmp_path):
+    """Loading weights must not call what a crafted spec names."""
+    path = tmp_path / "model.safetensors"
+    spec = ModelSpec(cls="subprocess:run", kwargs={"args": ["true"]})
+    write_state(path, STATE, spec=spec)
+    with pytest.raises(C3liSpecError, match="subprocess:run"):
+        load_model(path)
+
+
+def test_a_library_model_loads_in_a_process_that_never_imported_it(tmp_path):
+    """Loading must not depend on the caller importing the class first."""
+    path = tmp_path / "model.safetensors"
+    model = PixelDiscriminator(dimensions=2, in_channels=1, n_channels=4)
+    write_state(path, model.state_dict(), spec=model.spec)
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from chuchichaestli.utils.io import load_model\n"
+        f"assert {type(model).__module__!r} not in sys.modules\n"
+        f"print(type(load_model(Path({str(path)!r}))).__name__)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "PixelDiscriminator"
 
 
 def test_load_model_accepts_overrides(tmp_path):

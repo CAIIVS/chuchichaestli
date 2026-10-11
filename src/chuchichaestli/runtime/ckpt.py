@@ -92,12 +92,15 @@ class Checkpoint:
         index, bindings = self.index, sorted(self.bindings)
         return f"Checkpoint({self.path.name!r}, {index=}, {bindings=})"
 
-    def build(self, name: str, strict: bool = True, **overrides: Any) -> nn.Module:
+    def build(
+        self, name: str, strict: bool = True, trusted: bool = False, **overrides: Any
+    ) -> nn.Module:
         """Rebuild a binding from its spec and load its weights into it.
 
         Args:
             name: Binding to rebuild.
             strict: Whether every key must match, as for `load_state_dict`.
+            trusted: Let the spec name anything, for a checkpoint you trust.
             overrides: Constructor arguments to replace before building.
 
         Raises:
@@ -108,7 +111,7 @@ class Checkpoint:
                 f"No model spec for binding {name!r} in {str(self.path)!r}. "
                 f"Recorded specs: {sorted(self.specs) or 'none'}."
             )
-        model = self.specs[name].build(**overrides)
+        model = self.specs[name].build(trusted=trusted, **overrides)
         model.load_state_dict(self.bindings[name], strict=strict)
         return model
 

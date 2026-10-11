@@ -213,12 +213,15 @@ def write_state(
     writer_for(path)(path, storable, spec.to_json() if spec is not None else None)
 
 
-def load_model(path: Path, strict: bool = True, **overrides: Any) -> nn.Module:
+def load_model(
+    path: Path, strict: bool = True, trusted: bool = False, **overrides: Any
+) -> nn.Module:
     """Rebuild a model from a file and load its weights.
 
     Args:
         path: File to read.
         strict: Whether every key must match, as for `load_state_dict`.
+        trusted: Let the spec name anything, for a file you trust.
         overrides: Constructor arguments to replace before building. Changing
             one that affects a tensor's shape makes the weights unloadable,
             which `strict` does not cover.
@@ -233,6 +236,6 @@ def load_model(path: Path, strict: bool = True, **overrides: Any) -> nn.Module:
             f"No model spec in {str(path)!r}; weights alone do not say which "
             "architecture built them. Save it with write_state(..., spec=...)."
         )
-    model = spec.build(**overrides)
+    model = spec.build(trusted=trusted, **overrides)
     model.load_state_dict(state, strict=strict)
     return model

@@ -4,6 +4,8 @@
 """Tests for recording how an object was constructed."""
 
 import functools
+import math
+import sys
 from enum import Enum
 from pathlib import Path
 
@@ -36,7 +38,7 @@ from chuchichaestli.models.autoencoder import (
 )
 from chuchichaestli.models.autoencoder.vqvae import VectorQuantizer
 from chuchichaestli.models.resnet import ResNet, ResNet18
-from chuchichaestli.models.spec import InitArgMixin, ModelSpec
+from chuchichaestli.models.spec import C3liSpecError, InitArgMixin, ModelSpec
 from chuchichaestli.models.unet import UNet
 
 
@@ -136,10 +138,14 @@ def test_encode_arg_leaves_json_values_unchanged(value):
     assert ModelSpec.encode_arg(value) == value
 
 
+@ModelSpec.allow
 class Mode(Enum):
     """An enum argument, for the round trip."""
 
     FAST = "fast"
+
+
+ModelSpec.allow(torch.relu)
 
 
 def same(x, y):
@@ -267,6 +273,65 @@ def test_arguments_named_like_a_spec_rebuild_as_themselves():
     """Only a nested value can be a nested spec."""
     rebuilt = ModelSpec.from_json(SpecShaped(kwargs="z").spec.to_json()).build()
     assert dict(rebuilt.spec.kwargs) == {"cls": "x", "kwargs": "z"}
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        {"cls": "subprocess:run", "kwargs": {"args": ["true"]}},
+        {"__c3li__": "import", "name": "subprocess:run"},
+        {
+            "__c3li__": "partial",
+            "func": {"__c3li__": "import", "name": "subprocess:run"},
+            "args": [["true"]],
+            "kwargs": {},
+        },
+        {"__c3li__": "enum", "cls": "subprocess:run", "value": ["true"]},
+    ],
+    ids=["spec", "import", "partial", "enum"],
+)
+def test_an_untrusted_spec_cannot_name_what_was_not_allowed(encoded):
+    """Decoding a file must not call whatever the file names."""
+    with pytest.raises(C3liSpecError, match="subprocess:run"):
+        ModelSpec.decode_arg(encoded)
+
+
+def test_a_library_module_does_not_allow_what_it_imports():
+    """Only the library's allowed objects resolve through its modules."""
+    with pytest.raises(C3liSpecError, match="torch.load"):
+        ModelSpec.decode_arg(
+            {"__c3li__": "import", "name": "chuchichaestli.utils.io:torch.load"}
+        )
+
+
+def test_a_refused_name_is_not_imported():
+    """Importing a module runs its code."""
+    sys.modules.pop("this", None)
+    with pytest.raises(C3liSpecError):
+        ModelSpec.decode_arg({"__c3li__": "import", "name": "this:s"})
+    assert "this" not in sys.modules
+
+
+def test_a_trusted_spec_may_name_anything():
+    """A file from a trusted source may name what no one allowed."""
+    encoded = {"__c3li__": "import", "name": "math:sqrt"}
+    with pytest.raises(C3liSpecError):
+        ModelSpec.decode_arg(encoded)
+    assert ModelSpec.decode_arg(encoded, trusted=True) is math.sqrt
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        {"__c3li__": "dtype", "name": "load"},
+        {"__c3li__": "tensor", "dtype": "load", "shape": [1], "data": [0]},
+    ],
+    ids=["dtype", "tensor"],
+)
+def test_a_dtype_must_name_a_dtype(encoded):
+    """Not every name in the torch namespace is a dtype."""
+    with pytest.raises(C3liSpecError, match="as a dtype"):
+        ModelSpec.decode_arg(encoded)
 
 
 def test_decode_arg_passes_plain_values_through():
