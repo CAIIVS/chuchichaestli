@@ -1227,7 +1227,7 @@ class Train(StageLoop):
         self.update.bind(optimizers, stepwise_schedulers, self._monitors)
         self._ema = self._build_ema(ctx)
         self.swa_window.build(self.model_binding, optimizers, ctx)
-        if self._deferred_states is not None:
+        if self._deferred_states:
             self.load_component_states(self._deferred_states)
 
     def core(self, batches: Sequence[BatchType], ctx: Context) -> Loss | None:
@@ -1382,7 +1382,12 @@ class Train(StageLoop):
         return super().leave(ctx)
 
     def component_states(self) -> dict[str, Any]:
-        """Return the states of the components the stage owns."""
+        """Return the states of the components the stage owns.
+
+        Until `prepare` builds them, these are the deferred states.
+        """
+        if self._objective is None:
+            return dict(self._deferred_states or {})
         state = dict(self.update.state_dict())
         state.update({f"ema/{n}": a.state_dict() for n, a in self._ema.items()})
         state.update(self.swa_window.state_dict())

@@ -16,6 +16,7 @@ from chuchichaestli.runtime import (
     DataManager,
     EventType,
     Jsonl,
+    Phase,
     Program,
     DiscriminatorAdv,
     GeneratorAdv,
@@ -138,6 +139,30 @@ def repeated(times: int = 2) -> Program:
     return Program(
         provide={"model": model()},
         stages=[Repeat(times, trainer(epochs=1), name="cycle")],
+    )
+
+
+def side_trainer() -> Train:
+    """Build a training stage for the `side` binding, to follow the first."""
+    return Train(
+        "side",
+        model="side",
+        data=DataManager(ramp(), batch_size=BATCH),
+        loss=nn.MSELoss(),
+        epochs=1,
+        optim=OptimSpec.sgd(lr=0.1).with_exponential_schedule(0.9),
+    )
+
+
+def cycles(times: int = 1) -> Program:
+    """Build a program repeating two training stages, one after the other.
+
+    Args:
+        times: How many times the pair runs.
+    """
+    return Program(
+        provide={"model": model(), "side": model()},
+        stages=[Repeat(times, Phase("cycle", [trainer(epochs=1), side_trainer()]))],
     )
 
 
@@ -462,3 +487,33 @@ def test_naming_the_same_store_twice_writes_it_once(tmp_path):
     carried = plain()
     Runtime(carried, seed=42, store=store, resume="last", hooks=[]).run()
     assert identical(weights(whole), weights(carried))
+
+
+def test_a_run_resumes_before_its_second_training_stage(tmp_path):
+    """A stage not yet entered has recorded nothing, which loads as nothing."""
+    store = tmp_path / "run"
+    whole = uninterrupted(cycles())
+    interrupted(cycles(), store, at=2)
+    carried = resumed(cycles(), store)
+    assert identical(
+        bindings(whole, "model", "side"), bindings(carried, "model", "side")
+    )
+
+
+def test_a_run_resumes_twice_before_a_stage_runs_again(tmp_path):
+    """A stage not yet entered since the first resume records what it carries."""
+    store = tmp_path / "run"
+    whole = uninterrupted(cycles(2))
+    interrupted(cycles(2), store, at=5)
+    with pytest.raises(C3liRuntimeError):
+        Runtime(
+            cycles(2),
+            seed=42,
+            store=store,
+            resume="last",
+            hooks=[Checkpointer(every=1, unit="step"), CancelAt(1)],
+        ).run()
+    carried = resumed(cycles(2), store)
+    assert identical(
+        bindings(whole, "model", "side"), bindings(carried, "model", "side")
+    )
