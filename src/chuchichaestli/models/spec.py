@@ -19,6 +19,7 @@ import torch
 __all__ = ["ModelSpec", "InitArgMixin"]
 
 _INIT_ARGS = "_init_args"
+_TAG = "__c3li__"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,31 @@ class ModelSpec:
             target = getattr(target, part)
         return target
 
+    @staticmethod
+    def import_name(obj: Any) -> str:
+        """Return a `"module:QualName"` that `import_class` resolves to `obj` itself.
+
+        Args:
+            obj: Class, function or other named object.
+
+        Raises:
+            TypeError: If no name imports back to `obj`, as for a lambda.
+        """
+        module = getattr(obj, "__module__", None)
+        for attribute in ("__qualname__", "__name__"):
+            name = getattr(obj, attribute, None)
+            if module is None or name is None:
+                continue
+            path = f"{module}:{name}"
+            try:
+                if ModelSpec.import_class(path) is obj:
+                    return path
+            except (ImportError, AttributeError):
+                continue
+        raise TypeError(
+            f"Cannot record {obj!r} in a spec: no import name resolves to it."
+        )
+
     @classmethod
     def encode_arg(cls, value: Any) -> Any:
         """Reduce a constructor argument to something JSON can hold.
@@ -70,8 +96,8 @@ class ModelSpec:
             value: Argument to reduce.
 
         Raises:
-            TypeError: If `value` is a module that records no arguments, since
-                the rebuilt model would silently differ from the saved one.
+            TypeError: If `value` is a module that records no arguments, or
+                anything else `decode_arg` could not restore.
         """
         if isinstance(value, InitArgMixin):
             return value.spec.to_dict()
@@ -80,23 +106,76 @@ class ModelSpec:
                 f"Cannot record a {type(value).__name__} argument in a spec: it "
                 "does not inherit InitArgMixin, so nothing says how to rebuild it."
             )
+        if isinstance(value, torch.Tensor):
+            return cls._encode_tensor(value)
         if isinstance(value, torch.dtype):
-            return str(value).removeprefix("torch.")
+            return {_TAG: "dtype", "name": str(value).removeprefix("torch.")}
         if isinstance(value, torch.device):
-            return str(value)
+            return {_TAG: "device", "name": str(value)}
         if isinstance(value, Enum):
-            return value.value
+            return {
+                _TAG: "enum",
+                "cls": cls.import_name(type(value)),
+                "value": cls.encode_arg(value.value),
+            }
         if isinstance(value, Path):
-            return str(value)
+            return {_TAG: "path", "path": str(value)}
         if isinstance(value, Mapping):
-            return {str(k): cls.encode_arg(v) for k, v in value.items()}
+            return cls._encode_mapping(value)
+        if isinstance(value, tuple):
+            return {_TAG: "tuple", "items": [cls.encode_arg(v) for v in value]}
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             return [cls.encode_arg(v) for v in value]
         if isinstance(value, (bool, int, float, str)) or value is None:
             return value
-        if isinstance(value, type):
-            return cls.qualname(value)
-        return repr(value)
+        if isinstance(value, functools.partial):
+            return {
+                _TAG: "partial",
+                "func": cls.encode_arg(value.func),
+                "args": [cls.encode_arg(v) for v in value.args],
+                "kwargs": cls.encode_arg(dict(value.keywords)),
+            }
+        if callable(value):
+            return {_TAG: "import", "name": cls.import_name(value)}
+        raise TypeError(
+            f"Cannot record a {type(value).__name__} argument in a spec: JSON "
+            "cannot hold it, so the rebuilt model would receive something else."
+        )
+
+    @staticmethod
+    def _encode_tensor(value: torch.Tensor) -> dict[str, Any]:
+        """Reduce a tensor to its dtype, shape and values.
+
+        Args:
+            value: Tensor to reduce.
+        """
+        tensor = value.detach().cpu()
+        data = torch.view_as_real(tensor) if tensor.is_complex() else tensor
+        return {
+            _TAG: "tensor",
+            "dtype": str(tensor.dtype).removeprefix("torch."),
+            "shape": list(tensor.shape),
+            "data": data.tolist(),
+        }
+
+    @classmethod
+    def _encode_mapping(cls, value: Mapping) -> dict[str, Any]:
+        """Reduce a mapping, as key-value pairs if its keys are not plain strings.
+
+        Args:
+            value: Mapping to reduce.
+        """
+        plain = (
+            all(isinstance(k, str) for k in value)
+            and _TAG not in value
+            and set(value) != {"cls", "kwargs"}
+        )
+        if plain:
+            return {k: cls.encode_arg(v) for k, v in value.items()}
+        return {
+            _TAG: "mapping",
+            "items": [[cls.encode_arg(k), cls.encode_arg(v)] for k, v in value.items()],
+        }
 
     @classmethod
     def decode_arg(cls, value: Any) -> Any:
@@ -106,12 +185,54 @@ class ModelSpec:
             value: Encoded argument to restore.
         """
         if isinstance(value, Mapping):
+            if _TAG in value:
+                return cls._decode_tagged(value)
             if set(value) == {"cls", "kwargs"}:
                 return cls.from_dict(value).build()
             return {k: cls.decode_arg(v) for k, v in value.items()}
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             return [cls.decode_arg(v) for v in value]
         return value
+
+    @classmethod
+    def _decode_tagged(cls, value: Mapping[str, Any]) -> Any:
+        """Rebuild an argument `encode_arg` tagged with its kind.
+
+        Args:
+            value: Tagged mapping to restore.
+
+        Raises:
+            ValueError: If the tag names no known kind.
+        """
+        match value[_TAG]:
+            case "import":
+                return cls.import_class(value["name"])
+            case "partial":
+                return functools.partial(
+                    cls.decode_arg(value["func"]),
+                    *cls.decode_arg(value["args"]),
+                    **cls.decode_arg(value["kwargs"]),
+                )
+            case "tensor":
+                dtype = getattr(torch, value["dtype"])
+                if dtype.is_complex:
+                    parts = torch.tensor(value["data"], dtype=torch.float64)
+                    parts = parts.reshape(*value["shape"], 2)
+                    return torch.view_as_complex(parts).to(dtype)
+                return torch.tensor(value["data"], dtype=dtype).reshape(value["shape"])
+            case "dtype":
+                return getattr(torch, value["name"])
+            case "device":
+                return torch.device(value["name"])
+            case "enum":
+                return cls.import_class(value["cls"])(cls.decode_arg(value["value"]))
+            case "path":
+                return Path(value["path"])
+            case "tuple":
+                return tuple(cls.decode_arg(v) for v in value["items"])
+            case "mapping":
+                return {cls.decode_arg(k): cls.decode_arg(v) for k, v in value["items"]}
+        raise ValueError(f"Unknown encoded argument kind {value[_TAG]!r}.")
 
     def build(self, **overrides: Any) -> Any:
         """Construct the object this spec describes.
@@ -124,7 +245,8 @@ class ModelSpec:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable mapping of the spec."""
-        return {"cls": self.cls, "kwargs": self.encode_arg(dict(self.kwargs))}
+        kwargs = {key: self.encode_arg(value) for key, value in self.kwargs.items()}
+        return {"cls": self.cls, "kwargs": kwargs}
 
     def to_json(self) -> str:
         """Return the spec as one JSON string, for file metadata."""

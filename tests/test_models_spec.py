@@ -3,8 +3,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for recording how an object was constructed."""
 
+import functools
+from enum import Enum
+from pathlib import Path
+
 import pytest
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from chuchichaestli.utils.functools import partialclass
@@ -125,20 +130,66 @@ def test_import_class_rejects_a_name_that_is_not_importable():
         ModelSpec.import_class("torch.nn.Linear")
 
 
+@pytest.mark.parametrize("value", [[1, 2, 3], {"a": [1, 2]}, None, True, 1.5, "silu"])
+def test_encode_arg_leaves_json_values_unchanged(value):
+    """Plain JSON stays readable in the stored spec."""
+    assert ModelSpec.encode_arg(value) == value
+
+
+class Mode(Enum):
+    """An enum argument, for the round trip."""
+
+    FAST = "fast"
+
+
+def same(x, y):
+    """Return whether a rebuilt argument equals the original, type included.
+
+    Args:
+        x: Original argument.
+        y: Rebuilt argument.
+    """
+    if type(x) is not type(y):
+        return False
+    if isinstance(x, torch.Tensor):
+        return x.dtype == y.dtype and x.shape == y.shape and torch.equal(x, y)
+    if isinstance(x, functools.partial):
+        return x.func is y.func and same(x.args, y.args) and x.keywords == y.keywords
+    if isinstance(x, dict):
+        return x.keys() == y.keys() and all(same(x[k], y[k]) for k in x)
+    if isinstance(x, (list, tuple)):
+        return len(x) == len(y) and all(same(a, b) for a, b in zip(x, y))
+    return x == y
+
+
 @pytest.mark.parametrize(
-    ("value", "expected"),
+    "value",
     [
-        (torch.float32, "float32"),
-        (torch.device("cpu"), "cpu"),
-        ((1, 2, 3), [1, 2, 3]),
-        ({"a": (1, 2)}, {"a": [1, 2]}),
-        (None, None),
-        (True, True),
+        torch.float16,
+        torch.device("cpu"),
+        (1, (2, 3)),
+        {"a": (1, 2)},
+        {1: "a", (2, 3): "b"},
+        {"cls": 1, "kwargs": 2},
+        {"__c3li__": "tensor"},
+        Path("runs/a"),
+        Mode.FAST,
+        nn.GELU,
+        F.gelu,
+        torch.relu,
+        functools.partial(F.leaky_relu, negative_slope=0.1),
+        torch.arange(6, dtype=torch.float32).reshape(2, 3),
+        torch.tensor([1.5, -2.0], dtype=torch.bfloat16),
+        torch.tensor([1 + 2j, 3 - 4j], dtype=torch.complex64),
+        torch.zeros(0, 3, dtype=torch.int64),
+        torch.tensor(True),
     ],
+    ids=repr,
 )
-def test_encode_arg_reduces_arguments_to_json(value, expected):
-    """Constructor arguments hold torch types that JSON cannot."""
-    assert ModelSpec.encode_arg(value) == expected
+def test_an_argument_rebuilds_as_itself(value):
+    """The rebuilt model receives the argument the original was given."""
+    spec = ModelSpec.from_json(Tiny(payload=value).spec.to_json())
+    assert same(spec.build().spec.kwargs["payload"], value)
 
 
 class Wrapper(InitArgMixin, nn.Module):
@@ -177,6 +228,45 @@ def test_a_module_that_records_nothing_is_refused():
     """A repr would serialize fine and then rebuild into the wrong thing."""
     with pytest.raises(TypeError, match="does not inherit InitArgMixin"):
         Wrapper(nn.Linear(4, 4)).spec.to_dict()
+
+
+def closure(scale):
+    """Return a function only reachable through this call.
+
+    Args:
+        scale: Factor the returned function multiplies by.
+    """
+
+    def scaled(x):
+        return scale * x
+
+    return scaled
+
+
+@pytest.mark.parametrize("value", [lambda x: x, closure(2), object(), b"raw"])
+def test_an_argument_with_no_faithful_encoding_is_refused(value):
+    """A stand-in would rebuild into something other than the original."""
+    with pytest.raises(TypeError, match="Cannot record"):
+        Tiny(payload=value).spec.to_dict()
+
+
+class SpecShaped(InitArgMixin, nn.Module):
+    """A model whose arguments share the names of a spec's fields."""
+
+    def __init__(self, cls: str = "x", kwargs: str = "y"):
+        """Constructor.
+
+        Args:
+            cls: Arbitrary string.
+            kwargs: Arbitrary string.
+        """
+        super().__init__()
+
+
+def test_arguments_named_like_a_spec_rebuild_as_themselves():
+    """Only a nested value can be a nested spec."""
+    rebuilt = ModelSpec.from_json(SpecShaped(kwargs="z").spec.to_json()).build()
+    assert dict(rebuilt.spec.kwargs) == {"cls": "x", "kwargs": "z"}
 
 
 def test_decode_arg_passes_plain_values_through():
