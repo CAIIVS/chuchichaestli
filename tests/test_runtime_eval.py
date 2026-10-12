@@ -20,6 +20,7 @@ from chuchichaestli.runtime import (
     Call,
     Context,
     Eval,
+    ImageExport,
     Predict,
     Program,
     Runtime,
@@ -230,8 +231,120 @@ def test_predict_streams_every_format_that_can_append(suffix, tmp_path):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         Runtime(stage, hooks=(), device="cpu").run()
-    assert stage._writer is None
+    assert not stage._writers
     assert len(torch.cat(list(read_archive(archive, "data")))) == 8
+
+
+def paired(n: int = 8) -> TensorDataset:
+    """Build inputs with a distinct target each, so a misaligned pair shows.
+
+    Args:
+        n: Number of samples.
+    """
+    x = torch.arange(n * 3, dtype=torch.float32).reshape(n, 3)
+    return TensorDataset(x, x[:, :1] * 2)
+
+
+def published_pairs(stage: Predict) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Run a stage and return the pairs it published, row by row.
+
+    Args:
+        stage: The `Predict` stage to run.
+    """
+    store = {}
+    reader = Call("read", fn=lambda ctx: store.update(pairs=ctx[f"{stage.name}/pairs"]))
+    Runtime(Program(stages=[stage, reader]), seed=0, hooks=(), device="cpu").run()
+    return [store["pairs"][index] for index in range(len(store["pairs"]))]
+
+
+@pytest.mark.parametrize("suffix", sorted(ARCHIVES))
+def test_archived_predictions_pair_with_their_targets(suffix, tmp_path):
+    """The pairs read from disk match those kept in memory, row by row."""
+    in_memory = published_pairs(
+        Predict("out", model=linear(), data=paired(), batch_size=3, targets="y")
+    )
+    stage = Predict(
+        "out",
+        model=linear(),
+        data=paired(),
+        batch_size=3,
+        targets="y",
+        archive=tmp_path / f"out{suffix}",
+    )
+    on_disk = published_pairs(stage)
+    assert not stage._truths
+    assert (tmp_path / f"out.targets{suffix}").exists()
+    assert len(on_disk) == len(in_memory) == 8
+    for (y, truth), (y_in_memory, truth_in_memory) in zip(on_disk, in_memory):
+        assert torch.allclose(y, y_in_memory)
+        assert torch.equal(truth, truth_in_memory)
+
+
+def test_archived_predictions_pair_with_a_reference(tmp_path):
+    """A reference is already bound, so only the predictions are read back."""
+    reference = torch.rand(8, 1)
+    pairs = published_pairs(
+        Predict(
+            "out",
+            model=linear(),
+            data=paired(),
+            batch_size=4,
+            reference=reference,
+            archive=tmp_path / "out.h5",
+        )
+    )
+    assert not (tmp_path / "out.targets.h5").exists()
+    assert torch.equal(torch.stack([truth for _, truth in pairs]), reference)
+
+
+def test_archived_targets_keep_an_integer_dtype(tmp_path):
+    """Class labels must not come back as floats."""
+    labels = torch.arange(4)
+    pairs = published_pairs(
+        Predict(
+            "out",
+            model=linear(),
+            data=TensorDataset(torch.rand(4, 3), labels),
+            batch_size=2,
+            targets="y",
+            archive=tmp_path / "out.h5",
+        )
+    )
+    assert {truth.dtype for _, truth in pairs} == {torch.int64}
+    assert sorted(int(truth) for _, truth in pairs) == labels.tolist()
+
+
+def test_pairs_from_an_archive_need_its_shards_joined(tmp_path):
+    """A rank's own shard would be sharded again by whatever reads the pairs."""
+    with pytest.raises(ValueError, match="merge=True"):
+        Predict(
+            "out",
+            data=paired(),
+            targets="y",
+            archive=tmp_path / "out.h5",
+            merge=False,
+        )
+
+
+def test_archived_pairs_reach_an_image_export(tmp_path):
+    """The start-of-run check trusts that the pairs will be published."""
+    pytest.importorskip("matplotlib")
+    data = TensorDataset(torch.rand(4, 1, 4, 4), torch.rand(4, 1, 4, 4))
+    program = Program(
+        provide={"model": nn.Conv2d(1, 1, 1)},
+        stages=[
+            Predict(
+                "predict",
+                data=data,
+                batch_size=2,
+                targets="y",
+                archive=tmp_path / "out.h5",
+            ),
+            ImageExport("plot", path=tmp_path / "pairs.png"),
+        ],
+    )
+    Runtime(program, hooks=(), device="cpu").run()
+    assert list(tmp_path.glob("pairs*.png"))
 
 
 class TwoArgs(nn.Module):

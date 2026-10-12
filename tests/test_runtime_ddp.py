@@ -12,6 +12,7 @@ from torch import nn
 from torch.utils.data import TensorDataset
 
 from chuchichaestli.runtime import (
+    Call,
     Checkpointer,
     Eval,
     Predict,
@@ -432,6 +433,59 @@ def _predicts(rank, world, results, port, archive, merge):
         results[rank] = str(sampler._written)
     finally:
         topology.close()
+
+
+def _predicts_pairs(rank, world, results, port, archive):
+    """Predict with targets on every rank and report the pairs this one reads.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+        archive: File the predictions are written to.
+    """
+    topology = join_group(rank, world, port)
+    try:
+        first_input = nn.Linear(3, 1, bias=False)
+        with torch.no_grad():
+            first_input.weight.copy_(torch.tensor([[1.0, 0.0, 0.0]]))
+        store = {}
+        program = Program(
+            stages=[
+                Predict(
+                    "sample",
+                    model=first_input,
+                    data=ramp(8),
+                    batch_size=2,
+                    targets="y",
+                    archive=archive,
+                ),
+                Call("read", fn=lambda ctx: store.update(pairs=ctx["sample/pairs"])),
+            ]
+        )
+        Runtime(program, seed=42, topology=topology, hooks=[]).run()
+        pairs = store["pairs"]
+        results[rank] = [
+            (pairs[index][0].tolist(), pairs[index][1].tolist())
+            for index in range(len(pairs))
+        ]
+    finally:
+        topology.close()
+
+
+def test_archived_pairs_stay_aligned_across_ranks(tmp_path):
+    """Each shard's predictions and targets are joined in the same rank order."""
+    archive = tmp_path / "out.h5"
+    reported = under_ddp(_predicts_pairs, free_port(), str(archive))
+    assert sorted(p.name for p in tmp_path.glob("*.h5")) == [
+        "out.h5",
+        "out.targets.h5",
+    ]
+    for rows in reported.values():
+        assert len(rows) == 8
+        assert all(y == truth for y, truth in rows)
+    assert sorted(truth for _, truth in reported[0]) == ramp(8).tensors[1].tolist()
 
 
 def test_the_shards_are_joined_into_one_file(tmp_path):

@@ -15,8 +15,13 @@ from torch import nn
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.optimizer import ParamsT
-from torch.utils.data import Dataset, TensorDataset
-from chuchichaestli.data.archive import Archive, archive_for, merge_archives
+from torch.utils.data import Dataset, StackDataset, TensorDataset
+from chuchichaestli.data.archive import (
+    Archive,
+    archive_for,
+    merge_archives,
+    open_archive,
+)
 from chuchichaestli.data.batch import (
     BatchType,
     input_in_batch,
@@ -1784,13 +1789,19 @@ class Predict(Inference):
             kwargs: Passed to `Inference`.
 
         Raises:
-            ValueError: If both a target key and a reference are given,
-                since then it is unclear which the output pairs with.
+            ValueError: If both a target key and a reference are given, or if
+                pairs are asked of an archive whose shards stay apart.
         """
         if targets is not None and reference is not None:
             raise ValueError(
                 "A prediction pairs with a target read per batch or with a "
                 "reference set, not both."
+            )
+        pairs = targets is not None or reference is not None
+        if archive is not None and pairs and not merge:
+            raise ValueError(
+                "Pairs read from an archive need the shards joined into one "
+                "file; pass merge=True, or drop targets and reference."
             )
         super().__init__(name, **kwargs)
         self.archive = Path(archive) if archive is not None else None
@@ -1802,12 +1813,21 @@ class Predict(Inference):
         self.draw = draw
         self.targets = targets
         self.reference = reference
-        self._writer: Archive | None = None
+        self._writers: dict[Path, Archive] = {}
         self._written: Path | None = None
         self._predictions: list[torch.Tensor] = []
         self._truths: list[torch.Tensor] = []
-        if targets is not None or reference is not None:
+        if pairs:
             self.provides += (f"{self.name}/pairs",)
+
+    @property
+    def targets_archive(self) -> Path | None:
+        """Return the file the ground truth is written to, or `None`."""
+        if self.archive is None or self.targets is None:
+            return None
+        return self.archive.with_name(
+            f"{self.archive.stem}.targets{self.archive.suffix}"
+        )
 
     def prepare(self, ctx: Context) -> None:
         """Open the archive, or clear what an earlier entry kept.
@@ -1830,17 +1850,22 @@ class Predict(Inference):
                 )
         self._predictions = []
         self._truths = []
-        self._writer = None
+        self._writers = {}
         if self.archive is None:
             return
-        self._written = self.shard_path(
-            None if ctx.topology.world_size == 1 else ctx.topology.rank
-        )
-        self._written.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = archive_for(self._written, self.key)
+        rank = None if ctx.topology.world_size == 1 else ctx.topology.rank
+        for archive in (self.archive, self.targets_archive):
+            if archive is None:
+                continue
+            shard = self.shard_path(rank, archive)
+            shard.parent.mkdir(parents=True, exist_ok=True)
+            self._writers[archive] = archive_for(shard, self.key)
+        self._written = self.shard_path(rank)
 
-    def shard_path(self, rank: int | None = None) -> Path | None:
-        """Return the file one process writes its predictions to.
+    def shard_path(
+        self, rank: int | None = None, archive: Path | None = None
+    ) -> Path | None:
+        """Return the file one process writes its share of an archive to.
 
         Ranks hold different predictions, so each writes its own file rather
         than one of them writing the fraction it happened to see. A run in a
@@ -1848,32 +1873,54 @@ class Predict(Inference):
 
         Args:
             rank: Which process, or `None` for a run in one process.
+            archive: File the shard belongs to; the predictions' by default.
         """
-        if self.archive is None or rank is None:
-            return self.archive
-        return self.archive.with_name(
-            f"{self.archive.stem}.rank{rank}{self.archive.suffix}"
-        )
+        archive = self.archive if archive is None else archive
+        if archive is None or rank is None:
+            return archive
+        return archive.with_name(f"{archive.stem}.rank{rank}{archive.suffix}")
 
-    def _gather_shards(self, ctx: Context) -> Path | None:
-        """Join every process's shard into the file that was asked for.
+    def _gather_shards(self, ctx: Context, archive: Path) -> Path:
+        """Join every process's shard of an archive into the file asked for.
 
         The shards are read in rank order and removed once they are in, so a
         distributed run leaves behind the single file a local one would.
 
         Args:
             ctx: Execution context for this entry.
+            archive: File the shards belong to.
         """
-        if ctx.topology.world_size == 1 or not self.merge:
-            return self._written
+        if ctx.topology.world_size == 1:
+            return archive
+        if not self.merge:
+            return self.shard_path(ctx.topology.rank, archive)
         ctx.topology.barrier()
-        shards = [self.shard_path(rank) for rank in range(ctx.topology.world_size)]
+        shards = [
+            self.shard_path(rank, archive) for rank in range(ctx.topology.world_size)
+        ]
         if ctx.topology.is_main:
-            merge_archives(shards, self.archive, self.key)
+            merge_archives(shards, archive, self.key, dtype=None)
             for shard in shards:
                 shard.unlink(missing_ok=True)
         ctx.topology.barrier()
-        return self.archive
+        return archive
+
+    def _record(
+        self, archive: Path | None, batch: torch.Tensor, in_memory: list[torch.Tensor]
+    ) -> None:
+        """Write a batch to an archive, or keep it when the stage writes none.
+
+        Args:
+            archive: File the batch belongs to, or `None`.
+            batch: Batch to record.
+            in_memory: Where the batch is kept without an archive.
+        """
+        batch = batch.detach().cpu().clone()
+        writer = self._writers.get(archive)
+        if writer is None:
+            in_memory.append(batch)
+            return
+        writer.write(batch)
 
     @property
     def predictions(self) -> torch.Tensor | None:
@@ -1897,7 +1944,7 @@ class Predict(Inference):
                 batch, *self.input_names, self.targets, reader=type(self).__name__
             )
             inputs = read[:-1]
-            self._truths.append(read[-1])
+            self._record(self.targets_archive, read[-1], self._truths)
         if self.draw is None:
             return model(*inputs)
         return self.draw(model, inputs, ctx)
@@ -1912,12 +1959,9 @@ class Predict(Inference):
         model = self.resolved_model(ctx)
         with torch.inference_mode():
             for batch in batches:
-                y = self.predict(model, batch, ctx)
-                y = y.detach().cpu().clone()
-                if self._writer is not None:
-                    self._writer.write(y)
-                elif self.archive is None:
-                    self._predictions.append(y)
+                self._record(
+                    self.archive, self.predict(model, batch, ctx), self._predictions
+                )
         return None
 
     def leave(self, ctx: Context) -> Signal:
@@ -1926,11 +1970,11 @@ class Predict(Inference):
         Args:
             ctx: Execution context for this entry.
         """
-        if self._writer is not None:
-            self._writer.close()
-            self._writer = None
+        for writer in self._writers.values():
+            writer.close()
+        self._writers = {}
         if self._written is not None:
-            self._written = self._gather_shards(ctx)
+            self._written = self._gather_shards(ctx, self.archive)
             ctx.publish(f"{self.name}/archive", self._written)
         else:
             y = self.predictions
@@ -1948,8 +1992,13 @@ class Predict(Inference):
         Raises:
             ValueError: If there are not as many references as predictions.
         """
-        generated = self.predictions
-        paired = self._paired(ctx)
+        if self.targets is None and self.reference is None:
+            return
+        if self._written is None:
+            generated, paired = self.predictions, self._paired(ctx)
+        else:
+            generated = open_archive(self._written, self.key, dtype=None)
+            paired = self._archived_truths(ctx)
         if generated is None or paired is None:
             return
         if len(paired) != len(generated):
@@ -1957,7 +2006,21 @@ class Predict(Inference):
                 f"{type(self).__name__}({self.name!r}) generated "
                 f"{len(generated)} but has {len(paired)} to compare them with."
             )
-        ctx.publish(f"{self.name}/pairs", TensorDataset(generated, paired))
+        if self._written is None:
+            ctx.publish(f"{self.name}/pairs", TensorDataset(generated, paired))
+        else:
+            ctx.publish(f"{self.name}/pairs", StackDataset(generated, paired))
+
+    def _archived_truths(self, ctx: Context) -> Dataset | torch.Tensor | None:
+        """Return what archived predictions are published alongside, if anything.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        archive = self.targets_archive
+        if archive is None:
+            return self._paired(ctx)
+        return open_archive(self._gather_shards(ctx, archive), self.key, dtype=None)
 
     def _paired(self, ctx: Context) -> torch.Tensor | None:
         """Return what the predictions are published alongside, if anything.
