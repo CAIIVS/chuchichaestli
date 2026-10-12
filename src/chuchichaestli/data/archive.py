@@ -17,14 +17,16 @@ import h5py
 import numpy as np
 from numpy.lib import format as npy_format
 import torch
+from safetensors import safe_open
 from torch.utils.data import Dataset
+from chuchichaestli.data.cache import C_DTYPES
 from chuchichaestli.data.hdf5 import HDF5Dataset
 from chuchichaestli.data.numpy import NumpyDataset
 from chuchichaestli.data.safetensors import SafetensorsDataset
 from chuchichaestli.data.save import save_dataset
 from chuchichaestli.utils.io import staged
 from chuchichaestli.utils.registry import require
-from chuchichaestli.utils.tensors import as_array
+from chuchichaestli.utils.tensors import as_array, npy_to_torch_dtype
 
 
 __all__ = [
@@ -38,6 +40,7 @@ __all__ = [
     "DATASETS",
     "archive_for",
     "open_archive",
+    "stored_dtype",
     "read_archive",
     "merge_archives",
 ]
@@ -414,10 +417,47 @@ DATASETS: dict[str, tuple[type, str]] = {
 }
 
 
+def stored_dtype(path: str | Path, key: str = "data") -> torch.dtype | None:
+    """Return the dtype an archive holds its batches as, read from its header.
+
+    Args:
+        path: File to inspect.
+        key: Name the batches were stored under.
+
+    Raises:
+        ValueError: If nothing can read the format the suffix names.
+    """
+    path = Path(path)
+    if path.suffix in HDF5Dataset.FILE_EXTENSIONS:
+        with h5py.File(path, "r") as handle:
+            return npy_to_torch_dtype(handle[key].dtype)
+    if path.suffix in SafetensorsDataset.FILE_EXTENSIONS:
+        with safe_open(str(path), framework="pt") as handle:
+            code = handle.get_slice(key).get_dtype()
+        names = {code: name for name, code in SAFETENSORS_DTYPES.items()}
+        return npy_to_torch_dtype(names.get(code))
+    if path.suffix == ".npz":
+        with np.load(path) as handle:
+            return npy_to_torch_dtype(handle[key].dtype)
+    if path.suffix in NumpyDataset.FILE_EXTENSIONS:
+        return npy_to_torch_dtype(np.load(path, mmap_mode="r").dtype)
+    require(path.suffix, DATASETS, "archive format")
+    return None
+
+
+def _readable_dtype(dtype: torch.dtype | None) -> torch.dtype:
+    """Return the dtype an archive stored as `dtype` can be read back as.
+
+    Args:
+        dtype: Type the batches were stored as, or `None` if unknown.
+    """
+    return dtype if dtype in C_DTYPES else torch.float32
+
+
 def open_archive(
     sources: str | Path | Sequence[str | Path],
     key: str = "data",
-    dtype: torch.dtype = torch.float32,
+    dtype: torch.dtype | None = torch.float32,
 ) -> Dataset:
     """Return the dataset that reads the format a suffix names.
 
@@ -427,8 +467,8 @@ def open_archive(
     Args:
         sources: File or files to read.
         key: Name the batches were stored under.
-        dtype: Type the samples come back as. A dataset names its own rather
-            than inheriting the file's, so a merge states it too.
+        dtype: Type the samples come back as, or `None` for the one the
+            first file stores.
 
     Raises:
         ValueError: If nothing can read the format the suffix names.
@@ -437,6 +477,8 @@ def open_archive(
         sources = [sources]
     paths = [Path(source) for source in sources]
     dataset, selector = require(paths[0].suffix, DATASETS, "archive format")
+    if dtype is None:
+        dtype = _readable_dtype(stored_dtype(paths[0], key))
     return dataset(
         paths, cache=False, dtype=dtype, return_as="tuple", **{selector: key}
     )
@@ -446,7 +488,7 @@ def read_archive(
     path: str | Path | Sequence[str | Path],
     key: str = "data",
     chunk: int = 1024,
-    dtype: torch.dtype = torch.float32,
+    dtype: torch.dtype | None = torch.float32,
 ) -> Iterator[torch.Tensor]:
     """Yield what an archive holds, a chunk of rows at a time.
 
@@ -454,7 +496,7 @@ def read_archive(
         path: File or files to read.
         key: Name the batches were stored under.
         chunk: Rows to read at once, so a large archive need not be held whole.
-        dtype: Type the samples come back as.
+        dtype: Type the samples come back as, or `None` for the stored one.
     """
     dataset = open_archive(path, key, dtype)
     for start in range(0, len(dataset), chunk):
@@ -467,7 +509,7 @@ def merge_archives(
     target: str | Path,
     key: str = "data",
     chunk: int = 1024,
-    dtype: torch.dtype = torch.float32,
+    dtype: torch.dtype | None = torch.float32,
 ) -> Path:
     """Join several archives into one, in the order they are given.
 
@@ -476,7 +518,7 @@ def merge_archives(
         target: File to write.
         key: Name the batches are stored under.
         chunk: Rows read at once, so a large archive need not be held whole.
-        dtype: Type the samples are written as.
+        dtype: Type the samples are written as, or `None` for the stored one.
     """
     with archive_for(target, key, warn=False) as archive:
         for batch in read_archive(sources, key, chunk, dtype):

@@ -17,7 +17,12 @@ from chuchichaestli.data import (
     archive_for,
 )
 from chuchichaestli.data.archive import NpyArchive, SafetensorsArchive
-from chuchichaestli.data.archive import DATASETS, merge_archives, read_archive
+from chuchichaestli.data.archive import (
+    DATASETS,
+    merge_archives,
+    read_archive,
+    stored_dtype,
+)
 
 
 def test_hdf5_appends_as_it_goes(tmp_path):
@@ -161,6 +166,44 @@ def test_every_format_round_trips_what_was_written(suffix, dtype, tmp_path):
     stored = torch.cat(list(read_archive(path, "data", dtype=dtype)))
     assert stored.dtype == source.dtype
     assert torch.equal(stored, source)
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("suffix", sorted(DATASETS))
+def test_an_archive_reads_back_as_the_type_it_stores(suffix, dtype, tmp_path):
+    """With no type asked for, the file's own is used.
+
+    Args:
+        suffix: Extension under test.
+        dtype: Type the samples are written as.
+        tmp_path: Directory pytest gives the test.
+    """
+    source = (torch.rand(6, 3) * 10).to(dtype)
+    path = tmp_path / f"out{suffix}"
+    with archive_for(path, "data", warn=False) as archive:
+        archive.write(source)
+    assert stored_dtype(path, "data") == dtype
+    rows = torch.cat(list(read_archive(path, "data", dtype=None)))
+    assert rows.dtype == dtype
+    assert torch.equal(rows, source)
+
+
+@pytest.mark.parametrize("suffix", [".h5", ".npy", ".safetensors"])
+def test_a_type_the_reader_lacks_comes_back_as_float32(suffix, tmp_path):
+    """Half precision widens without changing a value.
+
+    Args:
+        suffix: Extension under test.
+        tmp_path: Directory pytest gives the test.
+    """
+    source = torch.rand(4, 2).half()
+    path = tmp_path / f"out{suffix}"
+    with archive_for(path, "data", warn=False) as archive:
+        archive.write(source)
+    assert stored_dtype(path, "data") == torch.float16
+    rows = torch.cat(list(read_archive(path, "data", dtype=None)))
+    assert rows.dtype == torch.float32
+    assert torch.equal(rows, source.float())
 
 
 @pytest.mark.parametrize("suffix", sorted(DATASETS))
