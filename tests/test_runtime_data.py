@@ -305,6 +305,19 @@ def test_every_rank_draws_the_same_number_however_short_the_plan(batches, world)
     assert counts != {0}
 
 
+@pytest.mark.parametrize("world", [1, 2, 3, 4, 8])
+@pytest.mark.parametrize("samples", [1, 2, 3, 5, 7, 8])
+def test_the_shares_without_their_padding_hold_each_batch_once(samples, world):
+    """What a rank counts must add up to the plan, with nothing twice."""
+    stream = DataManager(Counting(samples), batch_size=1)
+    originals = []
+    for rank in range(world):
+        context = Context("program/0:train", 7, topology=Ranks(rank, world))
+        share = stream.sharded_plan(context)
+        originals += share[: len(share) - stream.padding_in(context)]
+    assert sorted(originals) == sorted(stream.plan(ctx()))
+
+
 @pytest.mark.parametrize("world", [2, 3, 4, 8])
 @pytest.mark.parametrize("batches", [1, 2, 3, 5, 7])
 def test_padding_repeats_batches_rather_than_dropping_them(batches, world):

@@ -955,6 +955,8 @@ class StageLoop(ABC):
         self._manager: DataManager | None = None
         self._world_size = 1
         self._iterator: Iterator[BatchType] | None = None
+        self._unique_batches = 0
+        self._is_repeat: list[bool] = []
 
     def __repr__(self) -> str:
         """Return a short description of the stage."""
@@ -1019,9 +1021,14 @@ class StageLoop(ABC):
         """
         if self._iterator is None:
             self._draw_sweep(ctx)
-        batches = [batch_to_device(b, ctx.device) for b in self._take()]
+        batches = self._take()
         if not batches:
             return self._next_sweep(ctx)
+        self._is_repeat = [
+            index >= self._unique_batches for index in range(len(batches))
+        ]
+        self._unique_batches = max(0, self._unique_batches - len(batches))
+        batches = [batch_to_device(b, ctx.device) for b in batches]
         loss = self.core(batches, ctx)
         samples = sum(samples_in_batch(batch) for batch in batches)
         self.total_steps += 1
@@ -1113,11 +1120,10 @@ class StageLoop(ABC):
             )
         self._steps_in_pass = -(-batches // self.accumulate)
         self._steps_in_entry = self._expected_steps()
-        self._iterator = self._manager.iter(
-            ctx,
-            epoch=self._progress.epoch,
-            seek=self._progress.step * self.accumulate,
-        )
+        seek = self._progress.step * self.accumulate
+        padding = self._manager.padding_in(ctx, self._progress.epoch)
+        self._unique_batches = max(0, batches - padding - seek)
+        self._iterator = self._manager.iter(ctx, epoch=self._progress.epoch, seek=seek)
         ctx.progress = self._progress
         ctx.emit(EventType.EPOCH_BEGAN, epoch=self._progress.epoch)
 
@@ -1736,7 +1742,7 @@ class Eval(Inference):
         """
         model = self.resolved_model(ctx)
         with torch.inference_mode():
-            for batch in batches:
+            for index, batch in enumerate(batches):
                 read = unpack_batch(
                     batch,
                     *self.input_names,
@@ -1745,6 +1751,8 @@ class Eval(Inference):
                 )
                 targets = read[-1]
                 prediction = read[0] if model is None else model(*read[:-1])
+                if self._is_repeat[index]:
+                    continue
                 for metric in self.metrics.values():
                     metric.update(targets, prediction)
         return None
@@ -2022,22 +2030,29 @@ class Predict(Inference):
             return None
         return torch.cat(self._predictions)
 
-    def predict(self, model: nn.Module, batch: BatchType, ctx: Context) -> torch.Tensor:
-        """Return what this stage makes of one batch.
+    def _read(self, batch: BatchType) -> tuple[tuple[Any, ...], Any]:
+        """Return what the model is called with for one batch, and its truth.
+
+        Args:
+            batch: One micro-batch of the stage's data.
+        """
+        if self.targets is None:
+            return self.read_inputs(batch), None
+        read = unpack_batch(
+            batch, *self.input_names, self.targets, reader=type(self).__name__
+        )
+        return read[:-1], read[-1]
+
+    def predict(
+        self, model: nn.Module, inputs: tuple[Any, ...], ctx: Context
+    ) -> torch.Tensor:
+        """Return what this stage makes of one batch's inputs.
 
         Args:
             model: The model this stage reads.
-            batch: One micro-batch of the stage's data.
+            inputs: What the model is called with.
             ctx: Execution context for this entry.
         """
-        if self.targets is None:
-            inputs = self.read_inputs(batch)
-        else:
-            read = unpack_batch(
-                batch, *self.input_names, self.targets, reader=type(self).__name__
-            )
-            inputs = read[:-1]
-            self._record(self.targets_archive, read[-1], self._truths)
         if self.draw is None:
             return model(*inputs)
         return self.draw(model, inputs, ctx)
@@ -2051,10 +2066,14 @@ class Predict(Inference):
         """
         model = self.resolved_model(ctx)
         with torch.inference_mode():
-            for batch in batches:
-                self._record(
-                    self.archive, self.predict(model, batch, ctx), self._predictions
-                )
+            for index, batch in enumerate(batches):
+                inputs, truth = self._read(batch)
+                y = self.predict(model, inputs, ctx)
+                if self._is_repeat[index]:
+                    continue
+                self._record(self.archive, y, self._predictions)
+                if truth is not None:
+                    self._record(self.targets_archive, truth, self._truths)
         return None
 
     def leave(self, ctx: Context) -> Signal:

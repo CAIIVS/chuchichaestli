@@ -265,6 +265,20 @@ class DataManager:
         """
         return len(self.sharded_plan(ctx, epoch))
 
+    def padding_in(self, ctx: Context, epoch: int = 0) -> int:
+        """Return how many batches ending this process's share repeat others.
+
+        Args:
+            ctx: Context the order derives from.
+            epoch: Which pass over the dataset.
+        """
+        world_size, rank = ctx.topology.world_size, ctx.topology.rank
+        plan = self.plan(ctx, epoch)
+        if world_size == 1 or not plan:
+            return 0
+        per_rank = math.ceil(len(plan) / world_size)
+        return per_rank - len(range(rank, len(plan), world_size))
+
     def iter(self, ctx: Context, epoch: int = 0, seek: int = 0) -> Iterator[BatchType]:
         """Iterate this process's batches for one epoch.
 

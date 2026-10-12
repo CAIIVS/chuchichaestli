@@ -312,7 +312,7 @@ def _shards(rank, world, results, port, samples):
         topology.close()
 
 
-def _evaluates(rank, world, results, port):
+def _evaluates(rank, world, results, port, samples=8):
     """Evaluate across ranks and report what each one published.
 
     Args:
@@ -320,10 +320,13 @@ def _evaluates(rank, world, results, port):
         world: Number of processes taking part.
         results: Shared mapping the ranks report into.
         port: Rendezvous port.
+        samples: Size of the dataset evaluated.
     """
     topology = join_group(rank, world, port)
     try:
-        probe = Eval("probe", model=model(), data=ramp(), batch_size=2, metrics=[MSE()])
+        probe = Eval(
+            "probe", model=model(), data=ramp(samples), batch_size=2, metrics=[MSE()]
+        )
         program = Program(stages=[probe])
         Runtime(program, seed=42, topology=topology, hooks=[]).run()
         metric = probe.metrics["mse"]
@@ -348,6 +351,15 @@ def test_a_reduced_metric_saw_the_whole_dataset():
     alone = Eval("probe", model=model(), data=ramp(), batch_size=2, metrics=[MSE()])
     Runtime(Program(stages=[alone]), seed=42, hooks=[]).run()
     assert reported[0][1] == float(alone.metrics["mse"].n_observations)
+    assert reported[0][0] == pytest.approx(float(alone.metrics["mse"].compute()))
+
+
+def test_a_reduced_metric_scores_a_repeated_batch_once():
+    """Nine samples in batches of two pad one rank's share with a repeat."""
+    reported = under_ddp(_evaluates, free_port(), 9)
+    alone = Eval("probe", model=model(), data=ramp(9), batch_size=2, metrics=[MSE()])
+    Runtime(Program(stages=[alone]), seed=42, hooks=[]).run()
+    assert reported[0][1] == float(alone.metrics["mse"].n_observations) == 9.0
     assert reported[0][0] == pytest.approx(float(alone.metrics["mse"].compute()))
 
 
@@ -436,7 +448,7 @@ def _predicts(rank, world, results, port, archive, merge):
         topology.close()
 
 
-def _predicts_pairs(rank, world, results, port, archive):
+def _predicts_pairs(rank, world, results, port, archive, samples=8):
     """Predict with targets on every rank and report the pairs this one reads.
 
     Args:
@@ -445,6 +457,7 @@ def _predicts_pairs(rank, world, results, port, archive):
         results: Shared mapping the ranks report into.
         port: Rendezvous port.
         archive: File the predictions are written to.
+        samples: Size of the dataset predicted.
     """
     topology = join_group(rank, world, port)
     try:
@@ -457,7 +470,7 @@ def _predicts_pairs(rank, world, results, port, archive):
                 Predict(
                     "sample",
                     model=first_input,
-                    data=ramp(8),
+                    data=ramp(samples),
                     batch_size=2,
                     targets="y",
                     archive=archive,
@@ -487,6 +500,16 @@ def test_archived_pairs_stay_aligned_across_ranks(tmp_path):
         assert len(rows) == 8
         assert all(y == truth for y, truth in rows)
     assert sorted(truth for _, truth in reported[0]) == ramp(8).tensors[1].tolist()
+
+
+def test_archived_pairs_hold_each_sample_once(tmp_path):
+    """A batch repeated to even out the shares must not land in the archive."""
+    archive = tmp_path / "out.h5"
+    reported = under_ddp(_predicts_pairs, free_port(), str(archive), 9)
+    for rows in reported.values():
+        assert len(rows) == 9
+        assert all(y == truth for y, truth in rows)
+    assert sorted(truth for _, truth in reported[0]) == ramp(9).tensors[1].tolist()
 
 
 def _archive_exports(rank, world, results, port, path):
