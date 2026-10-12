@@ -4,6 +4,7 @@
 """Tests for recording how an object was constructed."""
 
 import functools
+import json
 import math
 import sys
 from enum import Enum
@@ -332,6 +333,24 @@ def test_a_dtype_must_name_a_dtype(encoded):
     """Not every name in the torch namespace is a dtype."""
     with pytest.raises(C3liSpecError, match="as a dtype"):
         ModelSpec.decode_arg(encoded)
+
+
+def test_a_spec_longer_than_the_limit_is_not_parsed(monkeypatch):
+    """Parsing is what costs memory, so the length is checked first."""
+    text = Tiny().spec.to_json()
+    monkeypatch.setattr(ModelSpec, "json_limit", len(text) - 1)
+    calls = []
+    monkeypatch.setattr(json, "loads", lambda text, **kwargs: calls.append(text))
+    with pytest.raises(C3liSpecError, match="json_limit"):
+        ModelSpec.from_json(text)
+    assert not calls
+
+
+def test_a_spec_longer_than_the_limit_is_not_written(monkeypatch):
+    """A file written past the limit could not be read back."""
+    monkeypatch.setattr(ModelSpec, "json_limit", 1000)
+    with pytest.raises(TypeError, match="json_limit"):
+        Tiny(payload=torch.zeros(1000)).spec.to_json()
 
 
 def test_decode_arg_passes_plain_values_through():

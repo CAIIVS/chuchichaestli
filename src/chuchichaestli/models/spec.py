@@ -80,10 +80,12 @@ class ModelSpec:
     Attributes:
         cls: Importable name of the class, as `"module:QualName"`.
         kwargs: Every constructor argument, defaults included.
+        json_limit: Most characters a spec is written as or read from.
     """
 
     cls: str
     kwargs: Mapping[str, Any] = field(default_factory=dict)
+    json_limit: ClassVar[int] = 16 << 20
     _allowed: ClassVar[set[Any]] = set()
 
     @staticmethod
@@ -338,8 +340,19 @@ class ModelSpec:
         return {"cls": self.cls, "kwargs": kwargs}
 
     def to_json(self) -> str:
-        """Return the spec as one JSON string, for file metadata."""
-        return json.dumps(self.to_dict(), sort_keys=True)
+        """Return the spec as one JSON string, for file metadata.
+
+        Raises:
+            TypeError: If the string is longer than `json_limit`.
+        """
+        text = json.dumps(self.to_dict(), sort_keys=True)
+        if len(text) > self.json_limit:
+            raise TypeError(
+                f"Cannot record a spec of {len(text)} characters, above "
+                f"ModelSpec.json_limit of {self.json_limit}. Register a large "
+                "tensor argument as a buffer instead."
+            )
+        return text
 
     @classmethod
     def from_dict(cls, state: Mapping[str, Any]) -> ModelSpec:
@@ -356,7 +369,15 @@ class ModelSpec:
 
         Args:
             text: String as returned by `to_json`.
+
+        Raises:
+            C3liSpecError: If `text` is longer than `json_limit`.
         """
+        if len(text) > cls.json_limit:
+            raise C3liSpecError(
+                f"The spec is {len(text)} characters, above ModelSpec.json_limit "
+                f"of {cls.json_limit}. Raise the limit for a file you trust."
+            )
         return cls.from_dict(json.loads(text))
 
 

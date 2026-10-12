@@ -25,7 +25,7 @@ from chuchichaestli.runtime import (
     stage_signature,
     merge_tree,
 )
-from chuchichaestli.models.spec import InitArgMixin
+from chuchichaestli.models.spec import InitArgMixin, ModelSpec
 from chuchichaestli.runtime.stages import StageBlock
 from chuchichaestli.runtime.ckpt import SCHEMA_VERSION
 from chuchichaestli.runtime.serialize import writable_spec
@@ -470,6 +470,13 @@ def test_a_spec_is_only_offered_for_models_that_record_one():
     assert writable_spec(Tiny()) is not None
     assert writable_spec(nn.Linear(2, 2)) is None
     assert writable_spec(torch.optim.Adam(nn.Linear(2, 2).parameters())) is None
+
+
+def test_a_spec_past_the_limit_is_left_out_with_a_warning(monkeypatch):
+    """The weights are still written; only the spec is dropped."""
+    monkeypatch.setattr(ModelSpec, "json_limit", 10)
+    with pytest.warns(UserWarning, match="json_limit"):
+        assert writable_spec(Tiny()) is None
 
 
 def test_a_model_binding_records_its_spec(tmp_path):

@@ -195,7 +195,7 @@ def writable_spec(value: Any) -> ModelSpec | None:
     if not isinstance(spec, ModelSpec):
         return None
     try:
-        spec.to_dict()
+        spec.to_json()
     except TypeError as exc:
         warnings.warn(
             f"Not recording a model spec: {exc}",

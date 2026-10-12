@@ -171,6 +171,17 @@ def test_a_library_model_loads_in_a_process_that_never_imported_it(tmp_path):
     assert result.stdout.strip() == "PixelDiscriminator"
 
 
+@pytest.mark.parametrize("suffix", sorted(WRITERS))
+def test_a_spec_past_the_limit_is_refused(tmp_path, suffix, monkeypatch):
+    """Every format is bounded, the torch archive included."""
+    path = tmp_path / f"model{suffix}"
+    model = Tiny()
+    write_state(path, model.state_dict(), spec=model.spec)
+    monkeypatch.setattr(ModelSpec, "json_limit", 10)
+    with pytest.raises(C3liSpecError, match="json_limit"):
+        load_model(path)
+
+
 def test_load_model_accepts_overrides(tmp_path):
     """Swapping a parameter-free choice should not need the spec edited by hand."""
     path = tmp_path / "model.safetensors"
