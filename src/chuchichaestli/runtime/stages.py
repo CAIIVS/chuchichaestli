@@ -372,6 +372,8 @@ class ImageExport(Exporter):
     """Plot a binding's images, one file each, from rank 0 only.
 
     Reads what `save_images` accepts, a `Predict` stage's pairs included.
+    Under several processes, pairs kept in memory are plotted from rank 0's
+    share alone.
 
     Attributes:
         kwargs: Arguments `save_images` is called with.
