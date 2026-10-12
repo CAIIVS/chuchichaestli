@@ -91,7 +91,7 @@ class SchedulerSpec:
     Attributes:
         cls: Registered name, or `"module:QualName"` for one of your own.
         kwargs: Arguments the scheduler is built with.
-        interval: Whether the runtime steps it per optimizer step or per
+        interval: Whether the runner steps it per optimizer step or per
             epoch.
         monitor: Binding a plateau schedule reads, e.g. `"probe/psnr"`.
     """
@@ -299,7 +299,7 @@ class OptimSpec:
 
         Args:
             schedule: Registered name, or `"module:QualName"`.
-            interval: Whether the runtime steps it per step or per epoch.
+            interval: Whether the runner steps it per step or per epoch.
             monitor: Binding a plateau schedule reads.
             kwargs: Arguments the scheduler is built with.
         """
@@ -318,7 +318,7 @@ class OptimSpec:
         Args:
             t_max: Steps or epochs over which the rate reaches `eta_min`.
             eta_min: Rate at the end of the schedule.
-            interval: Whether the runtime steps it per step or per epoch.
+            interval: Whether the runner steps it per step or per epoch.
         """
         return self.with_schedule(
             "cosine", interval=interval, T_max=t_max, eta_min=eta_min
@@ -337,7 +337,7 @@ class OptimSpec:
             t_0: Steps or epochs until the first restart.
             t_mult: Factor the period grows by after each restart.
             eta_min: Rate at the end of each period.
-            interval: Whether the runtime steps it per step or per epoch.
+            interval: Whether the runner steps it per step or per epoch.
         """
         return self.with_schedule(
             "cosine_warm_restarts",
@@ -355,7 +355,7 @@ class OptimSpec:
         Args:
             step_size: Steps or epochs between drops.
             gamma: Factor the rate is multiplied by at each drop.
-            interval: Whether the runtime steps it per step or per epoch.
+            interval: Whether the runner steps it per step or per epoch.
         """
         return self.with_schedule(
             "step", interval=interval, step_size=step_size, gamma=gamma
@@ -372,7 +372,7 @@ class OptimSpec:
         Args:
             milestones: Steps or epochs at which the rate drops.
             gamma: Factor the rate is multiplied by at each drop.
-            interval: Whether the runtime steps it per step or per epoch.
+            interval: Whether the runner steps it per step or per epoch.
         """
         return self.with_schedule(
             "multistep", interval=interval, milestones=list(milestones), gamma=gamma
@@ -385,7 +385,7 @@ class OptimSpec:
 
         Args:
             gamma: Factor the rate is multiplied by each time.
-            interval: Whether the runtime steps it per step or per epoch.
+            interval: Whether the runner steps it per step or per epoch.
         """
         return self.with_schedule("exponential", interval=interval, gamma=gamma)
 
@@ -402,7 +402,7 @@ class OptimSpec:
             start_factor: Fraction of the rate to begin at.
             end_factor: Fraction of the rate to end at.
             total_iters: Steps or epochs the line spans.
-            interval: Whether the runtime steps it per step or per epoch.
+            interval: Whether the runner steps it per step or per epoch.
         """
         return self.with_schedule(
             "linear",
@@ -425,7 +425,7 @@ class OptimSpec:
             max_lr: Rate at the peak.
             total_steps: Steps the cycle spans.
             pct_start: Fraction of the cycle spent warming up.
-            interval: Whether the runtime steps it per step or per epoch.
+            interval: Whether the runner steps it per step or per epoch.
         """
         return self.with_schedule(
             "onecycle",
@@ -450,7 +450,7 @@ class OptimSpec:
             mode: `"min"` when lower is better, `"max"` when higher is.
             factor: Factor the rate is multiplied by on a plateau.
             patience: Readings without improvement before dropping.
-            interval: Whether the runtime steps it per step or per epoch.
+            interval: Whether the runner steps it per step or per epoch.
         """
         return self.with_schedule(
             "plateau",

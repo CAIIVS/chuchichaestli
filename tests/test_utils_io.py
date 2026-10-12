@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Tests for the filesystem helpers shared by the data and runtime layers."""
+"""Tests for the filesystem helpers shared by the data and programs layers."""
 
 import subprocess
 import sys

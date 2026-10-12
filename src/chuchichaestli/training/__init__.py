@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Training components: optimizers, schedules, updates and objectives.
 
-Imports nothing from `chuchichaestli.runtime`; the dependency runs the other
+Imports nothing from `chuchichaestli.programs`; the dependency runs the other
 way.
 """
 

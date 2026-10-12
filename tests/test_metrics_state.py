@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from chuchichaestli.metrics import MSE, PSNR, SSIM
-from chuchichaestli.runtime import Stateful
+from chuchichaestli.programs import Stateful
 
 
 def pair(seed: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
@@ -26,7 +26,7 @@ def pair(seed: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
 
 @pytest.mark.parametrize("metric_cls", [MSE, PSNR, SSIM])
 def test_a_metric_is_stateful(metric_cls):
-    """Every metric satisfies the protocol the runtime checkpoints through.
+    """Every metric satisfies the protocol the runner checkpoints through.
 
     Args:
         metric_cls: The metric under test.

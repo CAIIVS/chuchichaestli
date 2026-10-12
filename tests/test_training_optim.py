@@ -82,7 +82,7 @@ def test_onecycle_defaults_to_stepping_per_step():
 
 
 def test_a_plateau_schedule_carries_what_it_monitors():
-    """The metric is the runtime's to supply, not the scheduler's argument."""
+    """The metric is the runner's to supply, not the scheduler's argument."""
     spec = OptimSpec.adamw().with_plateau_schedule(monitor="probe/psnr", patience=3)
     assert spec.scheduler.monitor == "probe/psnr"
     assert "monitor" not in spec.scheduler.kwargs
