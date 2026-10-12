@@ -12,6 +12,7 @@ from torch import nn
 from torch.utils.data import TensorDataset
 
 from chuchichaestli.runtime import (
+    ArchiveExport,
     Call,
     Checkpointer,
     Eval,
@@ -486,6 +487,38 @@ def test_archived_pairs_stay_aligned_across_ranks(tmp_path):
         assert len(rows) == 8
         assert all(y == truth for y, truth in rows)
     assert sorted(truth for _, truth in reported[0]) == ramp(8).tensors[1].tolist()
+
+
+def _archive_exports(rank, world, results, port, path):
+    """Export a binding on every rank and report how the run ended.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+        path: File the export would land on.
+    """
+    topology = join_group(rank, world, port)
+    try:
+        program = Program(
+            stages=[ArchiveExport("save", path=path, source="samples")],
+            provide={"samples": torch.zeros(4, 2)},
+        )
+        try:
+            Runtime(program, seed=42, topology=topology, hooks=[]).run()
+            results[rank] = "finished"
+        except Exception as failure:
+            results[rank] = f"raised: {failure}"
+    finally:
+        topology.close()
+
+
+def test_an_archive_export_refuses_a_run_of_several_processes(tmp_path):
+    """Rank 0 alone would write only its own share of a prediction."""
+    reported = under_ddp(_archive_exports, free_port(), str(tmp_path / "out.h5"))
+    assert all("Predict(archive=...)" in outcome for outcome in reported.values())
+    assert not list(tmp_path.glob("*.h5"))
 
 
 def test_the_shards_are_joined_into_one_file(tmp_path):

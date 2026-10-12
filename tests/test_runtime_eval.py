@@ -13,9 +13,10 @@ from torch import nn
 from torch.utils.data import TensorDataset
 
 from chuchichaestli.metrics import MSE, PSNR
-from chuchichaestli.data.archive import ARCHIVES, read_archive
+from chuchichaestli.data.archive import ARCHIVES, DATASETS, read_archive, targets_path
 from chuchichaestli.runtime.data import C3liDataError
 from chuchichaestli.runtime import (
+    ArchiveExport,
     Phase,
     Call,
     Context,
@@ -345,6 +346,80 @@ def test_archived_pairs_reach_an_image_export(tmp_path):
     )
     Runtime(program, hooks=(), device="cpu").run()
     assert list(tmp_path.glob("pairs*.png"))
+
+
+def read_back(path) -> torch.Tensor:
+    """Return every sample an archive holds, as the type it stores.
+
+    Args:
+        path: File to read.
+    """
+    return torch.cat(list(read_archive(path, "data", dtype=None)))
+
+
+@pytest.mark.parametrize("suffix", sorted(DATASETS))
+def test_archive_export_copies_predictions_kept_in_memory(suffix, tmp_path):
+    """The predictions stay published, and a copy lands on disk."""
+    stage = Predict("out", model=linear(), data=paired(), batch_size=3)
+    path = tmp_path / f"out{suffix}"
+    program = Program(
+        stages=[stage, ArchiveExport("save", path=path, source="out/predictions")]
+    )
+    Runtime(program, seed=0, hooks=(), device="cpu").run()
+    assert stage.predictions is not None
+    assert torch.equal(read_back(path), stage.predictions)
+
+
+def test_archive_export_lays_pairs_out_as_predict_archives_them(tmp_path):
+    """An exported pair reads back as one `Predict` archived itself."""
+
+    def predicting(archive=None):
+        return Predict(
+            "out",
+            model=linear(),
+            data=paired(),
+            batch_size=3,
+            targets="y",
+            archive=archive,
+        )
+
+    by_predict = tmp_path / "by_predict.h5"
+    by_export = tmp_path / "by_export.h5"
+    Runtime(Program(stages=[predicting(by_predict)]), seed=0, hooks=()).run()
+    program = Program(
+        stages=[
+            predicting(),
+            ArchiveExport("save", path=by_export, source="out/pairs"),
+        ]
+    )
+    Runtime(program, seed=0, hooks=()).run()
+    assert torch.equal(read_back(by_export), read_back(by_predict))
+    assert torch.equal(
+        read_back(targets_path(by_export)), read_back(targets_path(by_predict))
+    )
+
+
+def test_archive_export_names_the_formats_it_writes(tmp_path):
+    """A suffix no archive format writes is refused before anything lands."""
+    program = Program(
+        stages=[ArchiveExport("save", path=tmp_path / "out.txt", source="samples")],
+        provide={"samples": torch.zeros(2, 3)},
+    )
+    with pytest.raises(ValueError, match="archive format"):
+        Runtime(program, hooks=()).run()
+    assert not list(tmp_path.iterdir())
+
+
+def test_archive_export_writes_a_sample_and_its_truth_at_most(tmp_path):
+    """A third column has no file of its own to land in."""
+    triples = TensorDataset(torch.zeros(2, 1), torch.zeros(2, 1), torch.zeros(2, 1))
+    program = Program(
+        stages=[ArchiveExport("save", path=tmp_path / "out.h5", source="triples")],
+        provide={"triples": triples},
+    )
+    with pytest.raises(ValueError, match="holds 3"):
+        Runtime(program, hooks=()).run()
+    assert not list(tmp_path.glob("*.h5"))
 
 
 class TwoArgs(nn.Module):

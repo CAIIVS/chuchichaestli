@@ -41,6 +41,7 @@ __all__ = [
     "archive_for",
     "open_archive",
     "stored_dtype",
+    "targets_path",
     "read_archive",
     "merge_archives",
 ]
@@ -415,6 +416,16 @@ DATASETS: dict[str, tuple[type, str]] = {
     **dict.fromkeys(SafetensorsDataset.FILE_EXTENSIONS, (SafetensorsDataset, "keys")),
     **dict.fromkeys(NumpyDataset.FILE_EXTENSIONS, (NumpyDataset, "keys")),
 }
+
+
+def targets_path(path: str | Path) -> Path:
+    """Return the file the truths paired with an archive's samples are stored in.
+
+    Args:
+        path: File the samples are stored in.
+    """
+    path = Path(path)
+    return path.with_name(f"{path.stem}.targets{path.suffix}")
 
 
 def stored_dtype(path: str | Path, key: str = "data") -> torch.dtype | None:

@@ -21,6 +21,7 @@ from chuchichaestli.data.archive import (
     archive_for,
     merge_archives,
     open_archive,
+    targets_path,
 )
 from chuchichaestli.data.batch import (
     BatchType,
@@ -29,6 +30,7 @@ from chuchichaestli.data.batch import (
     batch_to_device,
     samples_in_batch,
 )
+from chuchichaestli.data.save import SAVERS, save_dataset
 from chuchichaestli.runtime.context import Context
 from chuchichaestli.runtime.data import C3liDataError, DataManager
 from chuchichaestli.runtime.objective import CompositeObjective, Criterion
@@ -422,6 +424,97 @@ class ImageExport(Exporter):
         from chuchichaestli.utils.visualization.images import save_images
 
         save_images(artifact, target, **self.kwargs)
+
+
+class ArchiveExport(Exporter):
+    """Write a binding's samples to an archive, from rank 0 only.
+
+    Reads a tensor, or a dataset of samples or of pairs; the truths of a pair
+    land at `targets_path`, beside the samples, as `Predict` writes them.
+
+    Attributes:
+        key: Name the samples are stored under.
+    """
+
+    single_file: bool = False
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        path: str | Path,
+        source: str = "predict/predictions",
+        key: str = "data",
+    ):
+        """Constructor.
+
+        Args:
+            name: Identifies the stage within its parent.
+            path: File to write; the suffix picks the format. An `{epoch}`,
+                `{step}`, `{advance}` or `{name}` field numbers the exports.
+            source: Binding name of the samples to write.
+            key: Name the samples are stored under.
+        """
+        super().__init__(name, path=path, source=source)
+        self.key = key
+
+    def check(self, target: Path) -> None:
+        """Reject a suffix no archive format writes.
+
+        Args:
+            target: File the export lands on.
+
+        Raises:
+            ValueError: If the suffix names no archive format.
+        """
+        require(target.suffix, SAVERS, "archive format")
+
+    def core(self, ctx: Context) -> None:
+        """Write the source binding, in a run of one process.
+
+        Args:
+            ctx: Execution context for this entry.
+
+        Raises:
+            ValueError: If the run spans several processes, each holding its
+                own share of a prediction.
+        """
+        if ctx.topology.world_size > 1:
+            raise ValueError(
+                f"ArchiveExport({self.name!r}) would write rank 0's share of "
+                f"{self.source!r} alone; archive where the samples are made "
+                "instead, as with Predict(archive=...)."
+            )
+        super().core(ctx)
+
+    def write(self, target: Path, artifact: Any, ctx: Context) -> None:
+        """Write the samples, and the truths paired with them if any.
+
+        Args:
+            target: File the samples land on.
+            artifact: A tensor, or a dataset of samples or of pairs.
+            ctx: Execution context for this entry.
+
+        Raises:
+            ValueError: If a row holds more than a sample and its truth.
+        """
+        if isinstance(artifact, torch.Tensor):
+            columns = [artifact]
+        else:
+            rows = [artifact[index] for index in range(len(artifact))]
+            if isinstance(rows[0], (tuple, list)):
+                columns = [torch.stack(column) for column in zip(*rows)]
+            else:
+                columns = [torch.stack(rows)]
+        if len(columns) > 2:
+            raise ValueError(
+                f"ArchiveExport({self.name!r}) writes a sample and its truth, "
+                f"but each row of {self.source!r} holds {len(columns)}."
+            )
+        files = (target, targets_path(target))[: len(columns)]
+        with staged(*files) as scratches:
+            for scratch, column in zip(scratches, columns):
+                save_dataset(scratch, column.detach().cpu(), key=self.key)
 
 
 class Barrier(StageBlock):
@@ -1825,9 +1918,7 @@ class Predict(Inference):
         """Return the file the ground truth is written to, or `None`."""
         if self.archive is None or self.targets is None:
             return None
-        return self.archive.with_name(
-            f"{self.archive.stem}.targets{self.archive.suffix}"
-        )
+        return targets_path(self.archive)
 
     def prepare(self, ctx: Context) -> None:
         """Open the archive, or clear what an earlier entry kept.
