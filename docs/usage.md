@@ -211,6 +211,12 @@ The [training][chuchichaestli.training] module provides utilities for fitting
 models. [`OptimSpec`][chuchichaestli.training.optim.OptimSpec] describes how
 to construct optimizer and schedulers, so a training loop can use them once it
 knows which parameters it owns.
+`with_warmup` runs any schedule ahead of the attached one, e.g.
+`OptimSpec.adamw(lr=1e-3).with_cosine_schedule(90).with_warmup("linear", 10, start_factor=0.01)`.
+A plateau schedule can follow a warmup too, which torch's `SequentialLR` does
+not allow. For more than two schedules,
+[`SequentialSchedulerSpec`][chuchichaestli.training.optim.SequentialSchedulerSpec]
+runs any number of them, each counting from zero when it takes over.
 [`Term`][chuchichaestli.training.objective.Term] is one named, weighted
 contribution to a composite objective, and
 [`Loss`][chuchichaestli.training.objective.Loss] carries a total computation

@@ -1017,6 +1017,62 @@ def test_a_pass_count_survives_a_resume():
     assert revived.total_passes == 2
 
 
+class Rates:
+    """Records the learning rate of a training stage as each pass ends."""
+
+    def __init__(self, stage: Train):
+        """Constructor.
+
+        Args:
+            stage: The stage whose rate is recorded.
+        """
+        self.stage = stage
+        self.seen: list[float] = []
+
+    def on(self, event):
+        """Record the rate when a training pass ends.
+
+        Args:
+            event: What the runner just did.
+        """
+        if event.type is EventType.EPOCH_ENDED and event.payload.get("trains", True):
+            optimizer = self.stage.update.optimizers[None]
+            self.seen.append(round(optimizer.param_groups[0]["lr"], 6))
+        return Signal.GO
+
+
+def test_a_plateau_schedule_after_a_warmup_reads_nothing_during_it():
+    """The value is first published once the warmup has handed over."""
+    visits: list[int] = []
+
+    def probe(ctx):
+        visits.append(len(visits) + 1)
+        return {"probe/mse": 1.0} if len(visits) > 2 else None
+
+    fit = Train(
+        "fit",
+        model=linear(),
+        data=ramp(4),
+        batch_size=2,
+        loss=nn.MSELoss(),
+        optim=OptimSpec.sgd(lr=1e-3)
+        .with_plateau_schedule("probe/mse", factor=0.5, patience=0)
+        .with_warmup("linear", 2, start_factor=0.5),
+    )
+    fit.epochs = 1
+    program = Program([Repeat(6, Phase("epoch", [Call("probe", fn=probe), fit]))])
+    watching = Rates(fit)
+    Runner(program, hooks=[watching], device="cpu").run()
+    assert [round(r / 1e-3, 4) for r in watching.seen] == [
+        0.75,
+        1.0,
+        1.0,
+        0.5,
+        0.25,
+        0.125,
+    ]
+
+
 def test_a_closure_step_hands_a_plateau_schedule_its_value():
     """L-BFGS steps itself, and its schedule must still read what it monitors."""
     fit = Train(

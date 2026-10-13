@@ -19,7 +19,7 @@ from chuchichaestli.programs.context import Context
 from chuchichaestli.programs.events import C3liRunError
 from chuchichaestli.programs.traits import Objective
 from chuchichaestli.training.objective import Loss
-from chuchichaestli.training.optim import OptimSpec
+from chuchichaestli.training.optim import OptimSpec, SequentialScheduler
 from chuchichaestli.training.update import Swa, UpdatePolicy, average_targets
 
 
@@ -514,7 +514,11 @@ def step_schedule(scheduler: LRScheduler, monitor: str | None, ctx: Context) -> 
         C3liRunError: If a plateau schedule's monitored binding does not
             resolve, which would otherwise hold its rate for the whole run.
     """
-    if not isinstance(scheduler, ReduceLROnPlateau):
+    if isinstance(scheduler, SequentialScheduler):
+        reads = scheduler.reads_value
+    else:
+        reads = isinstance(scheduler, ReduceLROnPlateau)
+    if not reads:
         scheduler.step()
         return
     value = ctx.get(monitor) if monitor else None

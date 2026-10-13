@@ -72,12 +72,15 @@ def model() -> nn.Module:
     )
 
 
-def trainer(epochs: int = 2, workers: int = 0, **kwargs) -> Train:
+def trainer(
+    epochs: int = 2, workers: int = 0, optim: OptimSpec | None = None, **kwargs
+) -> Train:
     """Build the stage under test.
 
     Args:
         epochs: Passes over the data to make.
         workers: Dataloader worker processes.
+        optim: Optimizer and schedule; an exponential decay by default.
         kwargs: Passed on to `Train`.
     """
     return Train(
@@ -85,7 +88,7 @@ def trainer(epochs: int = 2, workers: int = 0, **kwargs) -> Train:
         data=DataManager(ramp(), batch_size=BATCH, num_workers=workers),
         loss=nn.MSELoss(),
         epochs=epochs,
-        optim=OptimSpec.sgd(lr=0.1).with_exponential_schedule(0.9),
+        optim=optim or OptimSpec.sgd(lr=0.1).with_exponential_schedule(0.9),
         **kwargs,
     )
 
@@ -382,6 +385,22 @@ def test_the_optimizer_and_schedule_come_back_too(tmp_path):
     whole = uninterrupted(plain())
     interrupted(plain(), store, at=5)
     carried = resumed(plain(), store)
+    assert optimizer_state(whole) == optimizer_state(carried)
+
+
+@pytest.mark.parametrize("at", [2, 3, 5])
+def test_a_warmup_resumes_on_either_side_of_its_handover(tmp_path, at):
+    """Inside the warmup, on its last step, and in the schedule after it."""
+    optim = (
+        OptimSpec.sgd(lr=0.1)
+        .with_exponential_schedule(0.9, interval="step")
+        .with_warmup("linear", 3, start_factor=0.1)
+    )
+    store = tmp_path / "run"
+    whole = uninterrupted(plain(optim=optim))
+    interrupted(plain(optim=optim), store, at=at)
+    carried = resumed(plain(optim=optim), store)
+    assert identical(weights(whole), weights(carried))
     assert optimizer_state(whole) == optimizer_state(carried)
 
 

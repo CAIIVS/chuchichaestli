@@ -37,6 +37,8 @@ from chuchichaestli.training.optim import (
     OptimizerTypes,
     SchedulerSpec,
     SchedulerTypes,
+    SequentialScheduler,
+    SequentialSchedulerSpec,
     disjoint_params,
 )
 
@@ -50,6 +52,8 @@ __all__ = [
     "RECONSTRUCTION_LOSSES",
     "OptimSpec",
     "SchedulerSpec",
+    "SequentialSchedulerSpec",
+    "SequentialScheduler",
     "OptimizerTypes",
     "SchedulerTypes",
     "OPTIMIZER_MAP",
