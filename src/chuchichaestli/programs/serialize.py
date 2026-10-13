@@ -5,11 +5,11 @@
 
 from __future__ import annotations
 import warnings
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 import torch
 from chuchichaestli.models.spec import ModelSpec
-from chuchichaestli.programs.traits import Stage
+from chuchichaestli.programs.traits import Stage, Stateful
 
 
 __all__ = [
@@ -19,6 +19,8 @@ __all__ = [
     "stage_signature",
     "stages_by_path",
     "component_states",
+    "hook_keys",
+    "hook_states",
     "writable_spec",
 ]
 
@@ -183,6 +185,34 @@ def component_states(stage: Stage) -> dict[str, Any]:
         if callable(capture):
             states[path] = capture()
     return states
+
+
+def hook_keys(hooks: Sequence[Any]) -> list[str]:
+    """Return the name each hook's state is checkpointed under.
+
+    Args:
+        hooks: The runner's hooks, in order.
+    """
+    keys: list[str] = []
+    seen: dict[str, int] = {}
+    for hook in hooks:
+        name = getattr(hook, "state_key", None) or type(hook).__name__
+        keys.append(f"{name}#{seen.get(name, 0)}")
+        seen[name] = seen.get(name, 0) + 1
+    return keys
+
+
+def hook_states(hooks: Sequence[Any]) -> dict[str, Any]:
+    """Return the state of each hook that keeps one, keyed by `hook_keys`.
+
+    Args:
+        hooks: The runner's hooks, in order.
+    """
+    return {
+        key: hook.state_dict()
+        for key, hook in zip(hook_keys(hooks), hooks)
+        if isinstance(hook, Stateful)
+    }
 
 
 def writable_spec(value: Any) -> ModelSpec | None:

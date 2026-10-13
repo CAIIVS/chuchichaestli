@@ -67,6 +67,7 @@ class Checkpoint:
         program: The program's own state.
         bindings: Per-binding state, keyed by binding name.
         components: Component states of each stage, keyed by its path.
+        hooks: State of each hook that keeps one, keyed as `hook_keys` names it.
         specs: How to rebuild each binding that records a model spec.
         weights: File each model binding was written to.
         rng: Ambient RNG capture, or `None` if it was not recorded.
@@ -83,6 +84,7 @@ class Checkpoint:
     program: Stage | None = None
     bindings: Mapping[str, Any] = field(default_factory=dict)
     components: Mapping[str, Any] = field(default_factory=dict)
+    hooks: Mapping[str, Any] = field(default_factory=dict)
     specs: Mapping[str, ModelSpec] = field(default_factory=dict)
     weights: Mapping[str, Path] = field(default_factory=dict)
     rng: Mapping[str, Any] | None = None
@@ -333,6 +335,7 @@ class CheckpointStore:
         unit: str | None = None,
         at: str | None = None,
         rng: bool = True,
+        hooks: Mapping[str, Any] | None = None,
     ) -> Checkpoint | None:
         """Write one checkpoint and return it, or `None` off the main process.
 
@@ -346,6 +349,7 @@ class CheckpointStore:
             unit: What the writer was counting.
             at: Path of the stage that triggered the write.
             rng: Whether to capture the ambient RNG state as well.
+            hooks: Hook states to record, as `hook_states` returns them.
         """
         directory = self.directory_for(index, create=True)
         models = {n: v for n, v in bindings.items() if isinstance(v, nn.Module)}
@@ -355,6 +359,7 @@ class CheckpointStore:
             "program": topology.state_of(program),
             "bindings": {n: topology.state_of(v) for n, v in rest.items()},
             "components": component_states(program),
+            "hooks": dict(hooks or {}),
         }
         if rng:
             payload["rng"] = capture_rng_state()
@@ -403,6 +408,7 @@ class CheckpointStore:
             program=payload["program"],
             bindings={**payload["bindings"], **weights},
             components=payload["components"],
+            hooks=payload["hooks"],
             specs={n: s for n, s in specs.items() if s is not None},
             weights=files,
             rng=payload.get("rng"),
@@ -505,6 +511,7 @@ class CheckpointStore:
             program=payload.get("program"),
             bindings=bindings,
             components=payload.get("components") or {},
+            hooks=payload.get("hooks") or {},
             specs=specs,
             weights=files,
             rng=payload.get("rng"),

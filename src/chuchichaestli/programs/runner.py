@@ -6,13 +6,13 @@
 from __future__ import annotations
 import os
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 import torch
 from torch import nn
 from chuchichaestli.programs.ckpt import CheckpointStore
-from chuchichaestli.programs.serialize import C3liCheckpointError
+from chuchichaestli.programs.serialize import C3liCheckpointError, hook_keys
 from chuchichaestli.programs.context import Context
 from chuchichaestli.programs.events import (
     C3liRunError,
@@ -30,6 +30,7 @@ from chuchichaestli.programs.traits import (
     Hook,
     RunAwareHook,
     Stage,
+    Stateful,
     Topology,
     is_critical,
     needs_store,
@@ -396,9 +397,31 @@ class Runner:
             allow_signature_change=self.allow_signature_change,
         )
         ctx.watch_bindings(self._place)
+        self._restore_hooks(checkpoint.hooks)
         if checkpoint.rng is not None:
             restore_rng_state(dict(checkpoint.rng))
         ctx.progress = self.program.progress()
+
+    def _restore_hooks(self, states: Mapping[str, Any]) -> None:
+        """Hand each hook back the state it had when the checkpoint was taken.
+
+        A hook is matched by name rather than position, so hooks may be
+        added, dropped or reordered between the two runs.
+
+        Args:
+            states: Hook states, keyed by `hook_keys`.
+        """
+        left = dict(states)
+        for key, hook in zip(hook_keys(self.hooks), self.hooks):
+            state = left.pop(key, None)
+            if state is not None and isinstance(hook, Stateful):
+                hook.load_state_dict(state)
+        if left:
+            warnings.warn(
+                f"No hook in this run matches {sorted(left)}, so their state "
+                f"in {self.resume!r} was not restored.",
+                stacklevel=2,
+            )
 
     def _place(self, name: str, value: Any) -> None:
         """Restore a checkpoint's state into a binding that has just appeared.

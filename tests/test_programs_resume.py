@@ -15,6 +15,7 @@ from chuchichaestli.programs import (
     Call,
     Checkpointer,
     DataManager,
+    EarlyStop,
     Eval,
     EventType,
     Jsonl,
@@ -345,6 +346,73 @@ def test_the_optimizer_and_schedule_come_back_too(tmp_path):
     interrupted(plain(), store, at=5)
     carried = resumed(plain(), store)
     assert optimizer_state(whole) == optimizer_state(carried)
+
+
+def test_early_stopping_picks_up_its_patience_where_it_left_off(tmp_path):
+    """A fresh patience would let the resumed run train past the plateau."""
+
+    def watching():
+        # the step count never improves, so every step after the first waits
+        return EarlyStop("total", mode="max", patience=1000)
+
+    store = tmp_path / "run"
+    whole = watching()
+    Runner(plain(), seed=42, hooks=[whole]).run()
+    with pytest.raises(C3liRunError):
+        Runner(
+            plain(),
+            seed=42,
+            store=store,
+            hooks=[watching(), Checkpointer(every=1, unit="step"), CancelAt(5)],
+        ).run()
+    carried = watching()
+    Runner(plain(), seed=42, store=store, resume="last", hooks=[carried]).run()
+    assert whole.waited == 2 * STEPS_PER_EPOCH - 1
+    assert (carried.best, carried.waited) == (whole.best, whole.waited)
+
+
+def test_a_hook_finds_its_state_though_others_were_added(tmp_path):
+    """State follows what a hook is, not where it sits in the list."""
+    store = tmp_path / "run"
+    whole = EarlyStop("total", mode="max", patience=1000)
+    Runner(plain(), seed=42, hooks=[whole]).run()
+    with pytest.raises(C3liRunError):
+        Runner(
+            plain(),
+            seed=42,
+            store=store,
+            hooks=[
+                EarlyStop("total", mode="max", patience=1000),
+                Checkpointer(every=1, unit="step"),
+                CancelAt(5),
+            ],
+        ).run()
+    carried = EarlyStop("total", mode="max", patience=1000)
+    Runner(
+        plain(), seed=42, store=store, resume="last", hooks=[CancelAt(99), carried]
+    ).run()
+    assert (carried.best, carried.waited) == (whole.best, whole.waited)
+
+
+def test_early_stopping_on_another_value_starts_afresh(tmp_path):
+    """Another value's best would mean nothing, so it is reported instead."""
+    store = tmp_path / "run"
+    with pytest.raises(C3liRunError):
+        Runner(
+            plain(),
+            seed=42,
+            store=store,
+            hooks=[
+                EarlyStop("total", mode="max", patience=1000),
+                Checkpointer(every=1, unit="step"),
+                CancelAt(5),
+            ],
+        ).run()
+    # a flag is never a measurement, so only restored state could move `waited`
+    other = EarlyStop("trains", patience=1000)
+    with pytest.warns(UserWarning, match="EarlyStop:total#0"):
+        Runner(plain(), seed=42, store=store, resume="last", hooks=[other]).run()
+    assert other.waited == 0
 
 
 def test_a_torch_format_checkpoint_resumes_too(tmp_path):

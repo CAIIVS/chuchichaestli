@@ -22,6 +22,7 @@ from chuchichaestli.utils.ansi import (
     paint,
 )
 from chuchichaestli.programs.ckpt import CheckpointFormats, CheckpointStore
+from chuchichaestli.programs.serialize import hook_states
 from chuchichaestli.programs.events import (
     C3liRunError,
     Event,
@@ -476,6 +477,11 @@ class EarlyStop:
         """Return a short description of the hook."""
         return f"EarlyStop({self.monitor!r}, patience={self.patience})"
 
+    @property
+    def state_key(self) -> str:
+        """Name the state is checkpointed under, which follows what is watched."""
+        return f"{type(self).__name__}:{self.monitor}"
+
     def state_dict(self) -> dict[str, Any]:
         """Return the hook's resumable state."""
         return {"best": self.best, "waited": self.waited}
@@ -850,6 +856,7 @@ class Checkpointer:
             unit=self.unit,
             at=self._at_path,
             rng=self.rng,
+            hooks=hook_states(self._runner.hooks),
         )
         if checkpoint is not None and announce:
             self._ctx.emit(
