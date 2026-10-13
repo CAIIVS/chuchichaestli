@@ -536,8 +536,7 @@ class GracefulStop:
     A `scancel`, a job time limit, or a Ctrl-C otherwise kills the process
     outright, losing everything since the last checkpoint. Catching the signal
     and raising instead unwinds through every stage's `leave`, lets a
-    checkpointer write a final checkpoint, and closes the trace honestly. A
-    second signal restores the default handler and dies at once.
+    checkpointer write a final checkpoint, and closes the trace honestly.
 
     Attributes:
         critical: Set, since a muted canceller would silently stop responding.
@@ -606,16 +605,23 @@ class GracefulStop:
             event: What the runner just did.
 
         Raises:
-            C3liRunError: On the first event after a signal is caught.
-                Raising again interrupts the program immediately.
+            C3liRunError: As the program advances after a signal is caught.
+                A second signal interrupts the program immediately.
         """
         if event.type is EventType.RUN_BEGAN:
             self.caught, self._raised = None, False
             self._install()
         elif event.type is EventType.RUN_ENDED:
             self._restore()
+            if self.caught is not None and not self._raised:
+                warnings.warn(
+                    f"{self.caught} arrived during the run's last step, which "
+                    "completed rather than stopped.",
+                    stacklevel=2,
+                )
             return Signal.GO
-        if self.caught is not None and not self._raised:
+        stepped = event.type is EventType.STAGE_ADVANCED
+        if stepped and self.caught is not None and not self._raised:
             self._raised = True
             raise C3liRunError(f"cancelled by {self.caught}")
         return Signal.GO
