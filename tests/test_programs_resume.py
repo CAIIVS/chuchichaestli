@@ -15,6 +15,7 @@ from chuchichaestli.programs import (
     Alternating,
     Call,
     Checkpointer,
+    CheckpointStore,
     DataManager,
     EarlyStop,
     Eval,
@@ -414,6 +415,40 @@ def test_early_stopping_on_another_value_starts_afresh(tmp_path):
     with pytest.warns(UserWarning, match="EarlyStop:total#0"):
         Runner(plain(), seed=42, store=store, resume="last", hooks=[other]).run()
     assert other.waited == 0
+
+
+def test_a_sparser_checkpointer_keeps_its_rhythm_across_a_resume(tmp_path):
+    """Counting from zero again would shift every later checkpoint."""
+
+    def every_third(store):
+        return Checkpointer(every=3, unit="step", store=store, at_end=False)
+
+    def steps_written(store):
+        read = CheckpointStore(store)
+        return [read.load(path).progress.global_step for path in read.checkpoints()]
+
+    whole = tmp_path / "whole"
+    Runner(plain(), seed=42, hooks=[every_third(whole)]).run()
+    store, sparse = tmp_path / "run", tmp_path / "sparse"
+    with pytest.raises(C3liRunError):
+        Runner(
+            plain(),
+            seed=42,
+            store=store,
+            hooks=[
+                every_third(sparse),
+                Checkpointer(every=1, unit="step", at_end=False),
+                CancelAt(5),
+            ],
+        ).run()
+    Runner(
+        plain(),
+        seed=42,
+        store=store,
+        resume="last",
+        hooks=[every_third(sparse), Checkpointer(every=1, unit="step", at_end=False)],
+    ).run()
+    assert steps_written(sparse) == steps_written(whole) == [3, 6]
 
 
 def test_leaving_a_hook_out_of_the_resumed_run_is_not_reported(tmp_path):

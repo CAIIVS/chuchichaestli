@@ -787,6 +787,19 @@ class Checkpointer:
         """The event this hook counts."""
         return CHECKPOINT_UNIT_MAP[self.unit]
 
+    def state_dict(self) -> dict[str, Any]:
+        """Return how far the hook has counted towards its next checkpoint."""
+        return {"counted": self._counted, "due": self._due}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore state previously returned by `state_dict`.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+        """
+        self._counted = int(state.get("counted", 0))
+        self._due = bool(state.get("due", False))
+
     def attach(self, runner: Runner, ctx: Context) -> None:
         """Receive the run this hook writes checkpoints for.
 
