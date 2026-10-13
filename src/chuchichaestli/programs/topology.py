@@ -205,6 +205,14 @@ class Local:
         """
         return value
 
+    def gather(self, value: Any) -> list[Any]:
+        """Return this process's value as the only one there is.
+
+        Args:
+            value: This process's value.
+        """
+        return [value]
+
     def state_of(self, stateful: Stateful) -> dict[str, Any]:
         """Capture a component's state.
 
@@ -376,6 +384,16 @@ class Ddp:
         carrier = [value]
         dist.broadcast_object_list(carrier, src=0)
         return carrier[0]
+
+    def gather(self, value: Any) -> list[Any]:
+        """Return every process's value on every process, in rank order.
+
+        Args:
+            value: This process's value; tensors in it should be on the host.
+        """
+        gathered: list[Any] = [None] * self.world_size
+        dist.all_gather_object(gathered, value)
+        return gathered
 
     def state_of(self, stateful: Stateful) -> dict[str, Any]:
         """Capture a component's state, gathered across processes.

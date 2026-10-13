@@ -284,6 +284,14 @@ class Topology(Protocol):
         """
         ...
 
+    def gather(self, value: Any) -> list[Any]:
+        """Return every process's value on every process, in rank order.
+
+        Args:
+            value: This process's value.
+        """
+        ...
+
     def state_of(self, stateful: Stateful) -> dict[str, Any]:
         """Capture a component's state, gathered across processes.
 
