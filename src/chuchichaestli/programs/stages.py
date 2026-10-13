@@ -1150,7 +1150,7 @@ class StageLoop(ABC):
         self.finalize_sweep(ctx)
         self.total_passes += 1
         reported = {} if self.planned_passes is None else {"total": self.planned_passes}
-        ctx.emit(
+        signal = ctx.emit(
             EventType.EPOCH_ENDED,
             epoch=self._progress.epoch,
             trains=self.trains,
@@ -1162,6 +1162,8 @@ class StageLoop(ABC):
         if done or (self.epochs is None and self.steps is None):
             self._finish(ctx)
             return Signal.DONE
+        if signal.halts:
+            return signal
         self._draw_sweep(ctx)
         return Signal.GO
 

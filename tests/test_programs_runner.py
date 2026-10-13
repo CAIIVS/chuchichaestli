@@ -103,6 +103,23 @@ def test_a_hook_can_skip_a_stage():
     assert log == ["a"]
 
 
+def test_a_hook_can_end_a_stage_as_an_epoch_ends():
+    """An epoch boundary is as good a place to stop as a step."""
+    fit = Train(
+        "fit",
+        model=nn.Linear(2, 1),
+        data=TensorDataset(torch.rand(4, 2), torch.rand(4, 1)),
+        batch_size=2,
+        epochs=10,
+        loss=nn.MSELoss(),
+        optim=OptimSpec.sgd(lr=0.1),
+    )
+    hook = Record({(EventType.EPOCH_ENDED, "program/0:fit"): Signal.BREAK})
+    Runner(Program([fit]), device="cpu", hooks=[hook]).run()
+    assert fit.total_passes == 1
+    assert len(hook.paths(EventType.EPOCH_ENDED)) == 1
+
+
 def test_abort_propagates_and_still_closes_the_trace():
     """A fatal stop unwinds, but the run is still reported as ended."""
     hook = Record()
