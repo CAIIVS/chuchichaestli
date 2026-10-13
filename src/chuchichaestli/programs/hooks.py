@@ -227,7 +227,8 @@ class Jsonl:
 
     The file goes beside the run's checkpoints by default, so a trace and the
     state it describes are found together and a second run cannot overwrite
-    the first unless it was given the same store.
+    the first unless it was given the same store. Only the main process
+    writes, so a distributed run leaves a single trace.
 
     Attributes:
         name: What the file is called within the store.
@@ -276,6 +277,7 @@ class Jsonl:
         self.needs_store = self.store is None
         self._write_counter = 0
         self._handle: TextIO | None = None
+        self._on_main = True
 
     @property
     def path(self) -> Path:
@@ -291,6 +293,7 @@ class Jsonl:
         """
         if self.store is None:
             self.store = runner.store
+        self._on_main = ctx.topology.is_main
 
     def __repr__(self) -> str:
         """Return a short description of the hook."""
@@ -303,6 +306,8 @@ class Jsonl:
         Args:
             event: What the runner just did.
         """
+        if not self._on_main:
+            return Signal.GO
         if self.only is None or event.type in self.only:
             if self._handle is None:
                 self.path.parent.mkdir(parents=True, exist_ok=True)

@@ -20,6 +20,7 @@ from chuchichaestli.programs import (
     DataManager,
     Ddp,
     EventType,
+    Jsonl,
     Program,
     Runner,
     Signal,
@@ -162,6 +163,24 @@ def _checkpoints(rank, world, results, port, store):
             hooks=[Checkpointer(every=1, unit="epoch"), wrote],
         ).run()
         results[rank] = (topology.is_main, wrote.count)
+    finally:
+        topology.close()
+
+
+def _traces(rank, world, results, port, store):
+    """Train while recording a trace into a store every rank shares.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+        store: Where the trace is written.
+    """
+    topology = join_group(rank, world, port)
+    try:
+        program = Program(provide={"model": model()}, stages=[stage(topology)])
+        Runner(program, seed=42, topology=topology, store=store, hooks=[Jsonl()]).run()
     finally:
         topology.close()
 
@@ -593,6 +612,15 @@ def test_only_the_main_rank_writes_checkpoints(tmp_path):
     assert main and written > 0
     assert not follower and quiet == 0
     assert sorted(p.name for p in (store).glob("ckpt_*"))
+
+
+def test_only_the_main_rank_writes_the_trace(tmp_path):
+    """Every rank appending to one file would duplicate and interleave events."""
+    store = tmp_path / "run"
+    under_ddp(_traces, free_port(), str(store))
+    events = Jsonl.read(store / "trace.jsonl")
+    assert [e.type for e in events].count(EventType.RUN_BEGAN) == 1
+    assert events[-1].type is EventType.RUN_ENDED
 
 
 def test_a_stop_decided_on_one_rank_ends_them_all():
