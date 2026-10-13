@@ -281,7 +281,9 @@ def uninterrupted(program: Program, trace=None) -> Program:
     return program
 
 
-def interrupted(program: Program, store, at: int, trace=None) -> Program:
+def interrupted(
+    program: Program, store, at: int, trace=None, format="safetensors"
+) -> Program:
     """Run a program until it is cancelled partway through.
 
     Args:
@@ -289,8 +291,9 @@ def interrupted(program: Program, store, at: int, trace=None) -> Program:
         store: Where checkpoints and the trace are written.
         at: Optimizer step to cancel on.
         trace: Name to record the trace under, if anywhere.
+        format: File format the checkpoints are written in.
     """
-    hooks = [Checkpointer(every=1, unit="step")]
+    hooks = [Checkpointer(every=1, unit="step", format=format)]
     if trace:
         hooks.append(Jsonl(trace))
     hooks.append(CancelAt(at))
@@ -341,6 +344,16 @@ def test_the_optimizer_and_schedule_come_back_too(tmp_path):
     whole = uninterrupted(plain())
     interrupted(plain(), store, at=5)
     carried = resumed(plain(), store)
+    assert optimizer_state(whole) == optimizer_state(carried)
+
+
+def test_a_torch_format_checkpoint_resumes_too(tmp_path):
+    """The runner reads whichever format the checkpointer was told to write."""
+    store = tmp_path / "run"
+    whole = uninterrupted(plain())
+    interrupted(plain(), store, at=5, format="torch")
+    carried = resumed(plain(), store)
+    assert identical(weights(whole), weights(carried))
     assert optimizer_state(whole) == optimizer_state(carried)
 
 

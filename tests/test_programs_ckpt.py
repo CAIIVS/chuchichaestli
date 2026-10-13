@@ -308,6 +308,19 @@ def test_a_manifest_from_a_later_schema_is_refused(tmp_path):
         store.load(written.path)
 
 
+def test_a_manifest_that_does_not_name_its_state_file_still_loads(tmp_path):
+    """The shared tensor file is found by suffix when the manifest is silent."""
+    written = CheckpointStore(tmp_path, format="torch").save(
+        index=1, program=recorder([], "a"), bindings={}, topology=Local(device="cpu")
+    )
+    store = CheckpointStore(tmp_path)
+    manifest_path = written.path / store.manifest
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["state_file"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert store.load(written.path).rng is not None
+
+
 def test_best_says_what_it_still_needs(tmp_path):
     """Ranking checkpoints needs a metric no stage reports yet."""
     with pytest.raises(C3liCheckpointError, match="needs a metric"):

@@ -371,7 +371,8 @@ class CheckpointStore:
             files[name] = path
         # write states for optimizer, LR scheduler, etc.
         tensors, skeleton = unpack_tree(payload)
-        with staged(directory / f"{self.state_key}{self.suffix}") as (scratch,):
+        state_path = directory / f"{self.state_key}{self.suffix}"
+        with staged(state_path) as (scratch,):
             write_state(scratch, tensors)
         # write manifest
         progress = progress if progress is not None else Progress()
@@ -385,6 +386,7 @@ class CheckpointStore:
             "signature": signature,
             "progress": progress.to_dict(),
             "weights": {n: p.name for n, p in files.items()},
+            "state_file": state_path.name,
             "state": skeleton,
         }
         self._write_json(directory / self.manifest, manifest)
@@ -426,6 +428,22 @@ class CheckpointStore:
             candidate = f"{stem}-{index}{self.suffix}"
         return candidate
 
+    def _state_path(self, directory: Path, manifest: Mapping[str, Any]) -> Path | None:
+        """Return a checkpoint's shared tensor file, whatever format wrote it.
+
+        Args:
+            directory: The checkpoint directory.
+            manifest: Its parsed manifest, which names the file if recent enough.
+        """
+        if "state_file" in manifest:
+            path = directory / manifest["state_file"]
+            return path if path.is_file() else None
+        for suffix in CHECKPOINT_FORMAT_MAP.values():
+            path = directory / f"{self.state_key}{suffix}"
+            if path.is_file():
+                return path
+        return None
+
     def prune(self) -> list[Path]:
         """Delete the oldest checkpoints beyond `keep` and return what went."""
         if self.keep is None:
@@ -461,8 +479,8 @@ class CheckpointStore:
                 f"but this version understands at most {SCHEMA_VERSION}."
             )
         # read states for optimizer, LR scheduler, etc.
-        state_path = directory / f"{self.state_key}{self.suffix}"
-        tensors = read_state(state_path) if state_path.is_file() else {}
+        state_path = self._state_path(directory, manifest)
+        tensors = read_state(state_path) if state_path is not None else {}
         payload = merge_tree(tensors, manifest.get("state", {}))
 
         # read model states
