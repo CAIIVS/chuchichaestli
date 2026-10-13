@@ -23,7 +23,7 @@ from chuchichaestli.programs.runner import (
     Runner,
     apply_backends_settings,
 )
-from chuchichaestli.programs.stages import Call, Program, Repeat, Train
+from chuchichaestli.programs.stages import Call, Phase, Program, Repeat, Train
 from chuchichaestli.training import OptimSpec
 from chuchichaestli.programs.topology import Ddp, Local, auto_topology, default_device
 
@@ -118,6 +118,50 @@ def test_a_hook_can_end_a_stage_as_an_epoch_ends():
     Runner(Program([fit]), device="cpu", hooks=[hook]).run()
     assert fit.total_passes == 1
     assert len(hook.paths(EventType.EPOCH_ENDED)) == 1
+
+
+def test_a_break_as_a_stage_ends_leaves_the_loop_around_it():
+    """Like `break`: the rest of the pass is skipped, and what follows runs."""
+    log: list[str] = []
+    program = Program(
+        [
+            Repeat(
+                3,
+                Phase(
+                    "pass",
+                    [
+                        Call("a", fn=lambda c: log.append("a")),
+                        Call("b", fn=lambda c: log.append("b")),
+                    ],
+                ),
+            ),
+            Call("after", fn=lambda c: log.append("after")),
+        ]
+    )
+    hook = Record(
+        {(EventType.STAGE_ENDED, "program/0:repeat/0:pass/0:a"): Signal.BREAK}
+    )
+    Runner(program, hooks=[hook]).run()
+    assert log == ["a", "after"]
+
+
+def test_a_break_inside_a_training_loop_ends_only_that_loop():
+    """A stage's own steps decide when it ends, not when its parent does."""
+    log: list[str] = []
+    fit = Train(
+        "fit",
+        model=nn.Linear(2, 1),
+        data=TensorDataset(torch.rand(4, 2), torch.rand(4, 1)),
+        batch_size=2,
+        epochs=10,
+        loss=nn.MSELoss(),
+        optim=OptimSpec.sgd(lr=0.1),
+    )
+    program = Program([fit, Call("after", fn=lambda c: log.append("after"))])
+    hook = Record({(EventType.STEP_ENDED, "program/0:fit"): Signal.BREAK})
+    Runner(program, device="cpu", hooks=[hook]).run()
+    assert fit.total_steps == 1
+    assert log == ["after"]
 
 
 def test_abort_propagates_and_still_closes_the_trace():

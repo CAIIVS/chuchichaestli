@@ -5,10 +5,16 @@
 
 import pytest
 import torch
+from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import TensorDataset
 
 from chuchichaestli.programs.events import Event, EventType, Signal
+from chuchichaestli.metrics import MSE
 from chuchichaestli.programs.hooks import EarlyStop
+from chuchichaestli.programs.runner import Runner
+from chuchichaestli.programs.stages import Call, Eval, Phase, Program, Train
+from chuchichaestli.training import OptimSpec
 
 
 SERIES = {
@@ -114,3 +120,24 @@ def test_state_round_trips():
     revived = EarlyStop("m", patience=5)
     revived.load_state_dict(hook.state_dict())
     assert (revived.best, revived.waited) == (hook.best, hook.waited)
+
+
+def test_a_stalled_validation_metric_ends_training_and_moves_on():
+    """The loop of passes ends, and whatever follows training still runs."""
+    rows = TensorDataset(torch.rand(4, 2), torch.rand(4, 1))
+    fit = Train(
+        "fit", data=rows, batch_size=2, loss=nn.MSELoss(), optim=OptimSpec.sgd(lr=0.0)
+    )
+    check = Eval("check", data=rows, batch_size=2, metrics=[MSE()])
+    log: list[str] = []
+    program = Program(
+        [
+            Phase.each_pass(10, fit, check),
+            Call("after", fn=lambda c: log.append("after")),
+        ],
+        provide={"model": nn.Linear(2, 1)},
+    )
+    # nothing is learnt at a zero rate, so the metric stalls from the second pass
+    Runner(program, device="cpu", hooks=[EarlyStop("mse", patience=1)]).run()
+    assert fit.total_passes == 3
+    assert log == ["after"]

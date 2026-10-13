@@ -439,7 +439,11 @@ class Timer:
 
 
 class EarlyStop:
-    """End a stage once a monitored value stops improving."""
+    """Stop once a monitored value stops improving.
+
+    Watching a stage's steps or epochs ends that stage; watching what a stage
+    reports as it ends, e.g. a validation metric, ends the loop around it.
+    """
 
     def __init__(
         self,

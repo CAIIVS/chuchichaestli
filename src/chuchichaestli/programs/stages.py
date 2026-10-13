@@ -158,8 +158,7 @@ class StageBlock(ABC):
             ctx: Execution context for this entry.
         """
         ctx.progress = self._progress
-        ctx.emit(EventType.STAGE_ENDED, stage=type(self).__name__)
-        return Signal.GO
+        return ctx.emit(EventType.STAGE_ENDED, stage=type(self).__name__)
 
     def progress(self) -> Progress:
         """Return where the stage currently is in its own work."""
@@ -646,13 +645,16 @@ class Phase:
                 signal = lockstep(ctx.topology, lambda: child.enter(self._child_ctx))
                 restored, self._restored = self._restored, None
                 if signal.halts or signal is Signal.SKIP:
-                    self._close(child)
+                    if self._close(child) is Signal.BREAK:
+                        return self._break(ctx)
                     continue
                 if restored is not None:
                     child.load_state_dict(restored)
             signal = lockstep(ctx.topology, lambda: child.execute(self._child_ctx))
-            if signal.halts:
-                self._close(child)
+            if signal.halts and (
+                self._close(child) is Signal.BREAK or signal is Signal.BREAK
+            ):
+                return self._break(ctx)
             self._progress = self._progress.next_step()
             ctx.progress = self._progress
             if self._index >= len(self.stages):
@@ -674,16 +676,29 @@ class Phase:
             if callable(republish):
                 republish(ctx.child(index, child.name))
 
-    def _close(self, child: Stage) -> None:
-        """Finish with the current child and move to the next.
+    def _close(self, child: Stage) -> Signal:
+        """Finish with the current child, move to the next, and return its verdict.
 
         Args:
             child: The child being closed.
         """
-        child.leave(self._child_ctx)
+        ended = self._child_ctx
+        signal = lockstep(ended.topology, lambda: child.leave(ended))
         self._child_ctx = None
         self._entered = False
         self._index += 1
+        return signal
+
+    def _break(self, ctx: Context) -> Signal:
+        """Skip the children left, and pass the break on to the parent.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        self._index = len(self.stages)
+        self._progress = self._progress.next_step().finish()
+        ctx.progress = self._progress
+        return Signal.BREAK
 
     def leave(self, ctx: Context) -> Signal:
         """Close any child still open and announce that the phase is over.
@@ -695,8 +710,7 @@ class Phase:
             self.stages[self._index].leave(self._child_ctx)
             self._child_ctx = None
         ctx.progress = self._progress
-        ctx.emit(EventType.STAGE_ENDED, stage=type(self).__name__)
-        return Signal.GO
+        return ctx.emit(EventType.STAGE_ENDED, stage=type(self).__name__)
 
     def progress(self) -> Progress:
         """Return where the phase currently is in its own work."""
@@ -793,6 +807,15 @@ class Repeat(Phase):
         super().__init__(name, (stage,) * times)
         self.times = times
         self.stage = stage
+
+    def _break(self, ctx: Context) -> Signal:
+        """End the repetition here rather than passing the break on.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        super()._break(ctx)
+        return Signal.DONE
 
 
 class When(Phase):
@@ -1041,7 +1064,7 @@ class StageLoop(ABC):
         if self.steps is not None and self._progress.global_step >= self.steps:
             self._finish(ctx)
             return Signal.DONE
-        return signal
+        return Signal.DONE if signal.halts else signal
 
     def summary(self) -> dict[str, Any]:
         """Return what the stage has to report as it ends.
@@ -1059,8 +1082,9 @@ class StageLoop(ABC):
         """
         self._iterator = None
         ctx.progress = self._progress
-        ctx.emit(EventType.STAGE_ENDED, stage=type(self).__name__, **self.summary())
-        return Signal.GO
+        return ctx.emit(
+            EventType.STAGE_ENDED, stage=type(self).__name__, **self.summary()
+        )
 
     def progress(self) -> Progress:
         """Return where the stage currently is in its own work."""
@@ -1163,7 +1187,7 @@ class StageLoop(ABC):
             self._finish(ctx)
             return Signal.DONE
         if signal.halts:
-            return signal
+            return Signal.DONE
         self._draw_sweep(ctx)
         return Signal.GO
 
