@@ -8,6 +8,7 @@ import socket
 import pytest
 import torch
 from torch import nn
+from torch.utils.data import TensorDataset
 
 from chuchichaestli.programs.events import (
     C3liRunError,
@@ -22,7 +23,8 @@ from chuchichaestli.programs.runner import (
     Runner,
     apply_backends_settings,
 )
-from chuchichaestli.programs.stages import Call, Program, Repeat
+from chuchichaestli.programs.stages import Call, Program, Repeat, Train
+from chuchichaestli.training import OptimSpec
 from chuchichaestli.programs.topology import Ddp, Local, auto_topology, default_device
 
 
@@ -233,6 +235,64 @@ def test_provided_modules_are_moved_to_the_device():
     )
     Runner(program, device="cpu", hooks=[]).run()
     assert seen == [torch.device("cpu")]
+
+
+class Wrapping(Local):
+    """Records every module it is asked to wrap."""
+
+    def __init__(self):
+        """Constructor."""
+        super().__init__(device="cpu")
+        self.wrapped: list[nn.Module] = []
+
+    def wrap(self, module: nn.Module) -> nn.Module:
+        """Note the module and return it unchanged.
+
+        Args:
+            module: Module to wrap.
+        """
+        self.wrapped.append(module)
+        return module
+
+
+def test_a_repeated_stage_wraps_and_binds_its_model_once():
+    """Wrapping a wrapper would nest replicas and reduce gradients twice."""
+    model = nn.Linear(2, 1)
+    fit = Train(
+        "fit",
+        model=model,
+        data=TensorDataset(torch.rand(4, 2), torch.rand(4, 1)),
+        batch_size=2,
+        epochs=1,
+        loss=nn.MSELoss(),
+        optim=OptimSpec.sgd(lr=0.1),
+    )
+    program = Program([Repeat(2, fit)], provide={})
+    topology = Wrapping()
+    Runner(program, topology=topology, hooks=[]).run()
+    assert topology.wrapped == [model]
+    assert [k for k in program.provide if k.endswith("/model")] == [
+        "program/0:repeat/0:fit/model"
+    ]
+
+
+def test_a_module_both_provided_and_held_is_wrapped_once():
+    """The stage holds the same replica the binding does."""
+    model = nn.Linear(2, 2)
+    holder = Train(
+        "fit",
+        model=model,
+        data=TensorDataset(torch.rand(4, 2), torch.rand(4, 2)),
+        batch_size=2,
+        epochs=1,
+        loss=nn.MSELoss(),
+        optim=OptimSpec.sgd(lr=0.1),
+    )
+    program = Program([holder], provide={"model": model})
+    topology = Wrapping()
+    Runner(program, topology=topology, hooks=[]).run()
+    assert topology.wrapped == [model]
+    assert list(program.provide) == ["model"]
 
 
 def test_auto_topology_is_local_without_torchrun(monkeypatch):

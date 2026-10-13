@@ -249,31 +249,56 @@ class Runner:
         since a distributed wrapper requires a module already on its own.
         """
         provide = getattr(self.program, "provide", None)
+        provisioned: dict[int, nn.Module] = {}
         for key, value in list((provide or {}).items()):
             if isinstance(value, nn.Module):
-                provide[key] = self.topology.wrap(value.to(self.device))
-        self._provision_stage(self.program, provide, self.program.name)
+                provide[key] = self._provision_module(value, provisioned)
+        self._provision_stage(self.program, provide, self.program.name, provisioned)
+
+    def _provision_module(
+        self, module: nn.Module, provisioned: dict[int, nn.Module]
+    ) -> nn.Module:
+        """Move a module to the device and wrap it, once however often it recurs.
+
+        Args:
+            module: The module, or a wrapper this run already made of it.
+            provisioned: Wrappers made so far, keyed by the id of the module
+                and of the wrapper itself.
+        """
+        if id(module) not in provisioned:
+            wrapped = self.topology.wrap(module.to(self.device))
+            provisioned[id(module)] = provisioned[id(wrapped)] = wrapped
+        return provisioned[id(module)]
 
     def _provision_stage(
-        self, stage: Stage, provide: dict[str, Any] | None, path: str
+        self,
+        stage: Stage,
+        provide: dict[str, Any] | None,
+        path: str,
+        provisioned: dict[int, nn.Module],
     ) -> None:
         """Place a model a stage holds directly rather than as a binding.
 
-        Such a model is bound for the whole run under the stage's path.
+        Such a model is bound for the whole run under the path of the first
+        stage holding it, so a repeated stage or a shared module is bound once.
 
         Args:
             stage: The stage to provision, and whose children to walk.
             provide: Run-wide bindings a direct model is promoted into, or
                 `None` for a program that provides none.
             path: Path of this stage, which names what it holds.
+            provisioned: Wrappers made so far, as `_provision_module` keeps them.
         """
         model = getattr(stage, "model", None)
         if isinstance(model, nn.Module):
-            stage.model = self.topology.wrap(model.to(self.device))
-            if provide is not None:
+            seen = id(model) in provisioned
+            stage.model = self._provision_module(model, provisioned)
+            if provide is not None and not seen:
                 provide[f"{path}/model"] = stage.model
         for index, child in enumerate(getattr(stage, "stages", ())):
-            self._provision_stage(child, provide, f"{path}/{index}:{child.name}")
+            self._provision_stage(
+                child, provide, f"{path}/{index}:{child.name}", provisioned
+            )
 
     def run(self) -> Progress:
         """Execute the program and return where it finished.

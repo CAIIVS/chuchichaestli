@@ -22,6 +22,7 @@ from chuchichaestli.programs import (
     EventType,
     Jsonl,
     Program,
+    Repeat,
     Runner,
     Signal,
     Train,
@@ -181,6 +182,24 @@ def _traces(rank, world, results, port, store):
     try:
         program = Program(provide={"model": model()}, stages=[stage(topology)])
         Runner(program, seed=42, topology=topology, store=store, hooks=[Jsonl()]).run()
+    finally:
+        topology.close()
+
+
+def _repeats(rank, world, results, port):
+    """Repeat a stage holding its model, and report how it was wrapped.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+    """
+    topology = join_group(rank, world, port)
+    try:
+        fit = stage(topology, model=model())
+        Runner(Program([Repeat(2, fit)]), seed=42, topology=topology).run()
+        results[rank] = (type(fit.model).__name__, type(fit.model.module).__name__)
     finally:
         topology.close()
 
@@ -621,6 +640,12 @@ def test_only_the_main_rank_writes_the_trace(tmp_path):
     events = Jsonl.read(store / "trace.jsonl")
     assert [e.type for e in events].count(EventType.RUN_BEGAN) == 1
     assert events[-1].type is EventType.RUN_ENDED
+
+
+def test_a_repeated_stage_wraps_its_model_once():
+    """A replica of a replica would reduce every gradient twice."""
+    reported = under_ddp(_repeats, free_port())
+    assert set(reported.values()) == {("DistributedDataParallel", "Linear")}
 
 
 def test_a_stop_decided_on_one_rank_ends_them_all():
