@@ -4,6 +4,8 @@
 """Tests that a resumed run is indistinguishable from an uninterrupted one."""
 
 import json
+import os
+import signal
 import warnings
 
 import pytest
@@ -20,6 +22,7 @@ from chuchichaestli.programs import (
     EarlyStop,
     Eval,
     EventType,
+    GracefulStop,
     Jsonl,
     Phase,
     Program,
@@ -271,6 +274,31 @@ class CancelAt:
         return Signal.GO
 
 
+class SignalAt:
+    """Send this process a SIGTERM partway into a step."""
+
+    def __init__(self, steps: int):
+        """Constructor.
+
+        Args:
+            steps: Optimizer steps to allow before signalling.
+        """
+        self.steps = steps
+        self.seen = 0
+
+    def on(self, event):
+        """Signal once enough steps have gone by.
+
+        Args:
+            event: What the runner just did.
+        """
+        if event.type is EventType.STEP_ENDED:
+            self.seen += 1
+            if self.seen == self.steps:
+                os.kill(os.getpid(), signal.SIGTERM)
+        return Signal.GO
+
+
 def uninterrupted(program: Program, trace=None) -> Program:
     """Run a program from start to finish.
 
@@ -285,7 +313,12 @@ def uninterrupted(program: Program, trace=None) -> Program:
 
 
 def interrupted(
-    program: Program, store, at: int, trace=None, format="safetensors"
+    program: Program,
+    store,
+    at: int,
+    trace=None,
+    format="safetensors",
+    graceful=False,
 ) -> Program:
     """Run a program until it is cancelled partway through.
 
@@ -295,11 +328,13 @@ def interrupted(
         at: Optimizer step to cancel on.
         trace: Name to record the trace under, if anywhere.
         format: File format the checkpoints are written in.
+        graceful: Stop as a signal would, once the step is whole, rather than
+            failing partway into it.
     """
     hooks = [Checkpointer(every=1, unit="step", format=format)]
     if trace:
         hooks.append(Jsonl(trace))
-    hooks.append(CancelAt(at))
+    hooks += [GracefulStop(), SignalAt(at)] if graceful else [CancelAt(at)]
     with pytest.raises(C3liRunError):
         Runner(program, seed=42, store=store, hooks=hooks).run()
     return program
@@ -461,6 +496,32 @@ def test_leaving_a_hook_out_of_the_resumed_run_is_not_reported(tmp_path):
     assert not [w for w in caught if "No hook in this run" in str(w.message)]
 
 
+def test_a_run_failing_partway_into_a_step_keeps_its_last_clean_checkpoint(
+    tmp_path,
+):
+    """A final write there would replace it with a state no resume can trust."""
+    store = tmp_path / "run"
+    interrupted(plain(), store, at=3)
+    read = CheckpointStore(store)
+    written = [read.load(path) for path in read.checkpoints()]
+    assert [(c.index, c.progress.global_step) for c in written] == [(1, 1), (2, 2)]
+
+
+def test_a_graceful_stop_still_writes_its_final_checkpoint(tmp_path):
+    """It waits for the step to finish, so the state it leaves is whole."""
+    store = tmp_path / "run"
+    with pytest.raises(C3liRunError, match="cancelled by SIGTERM"):
+        Runner(
+            plain(),
+            seed=42,
+            store=store,
+            hooks=[Checkpointer(every=100, unit="step"), GracefulStop(), SignalAt(3)],
+        ).run()
+    read = CheckpointStore(store)
+    written = [read.load(path) for path in read.checkpoints()]
+    assert [(c.index, c.progress.global_step) for c in written] == [(3, 3)]
+
+
 def test_a_torch_format_checkpoint_resumes_too(tmp_path):
     """The runner reads whichever format the checkpointer was told to write."""
     store = tmp_path / "run"
@@ -494,7 +555,7 @@ def test_the_resumed_trace_matches_the_uninterrupted_one(tmp_path):
     """What the run reports must not say it was interrupted either."""
     store = tmp_path / "run"
     uninterrupted(plain(), trace=tmp_path / "alone")
-    interrupted(plain(), store, at=5, trace="first.jsonl")
+    interrupted(plain(), store, at=5, trace="first.jsonl", graceful=True)
     resumed(plain(), store, trace="second.jsonl")
 
     carried = work_trace(store / "first.jsonl") + work_trace(store / "second.jsonl")
@@ -568,7 +629,7 @@ def test_a_resumed_run_matches_bitwise_on_a_gpu(tmp_path):
 def test_a_reopened_pass_reports_the_epoch_it_resumed_into(tmp_path):
     """The trace is the oracle here, so its counters have to be right."""
     store = tmp_path / "run"
-    interrupted(plain(), store, at=6)
+    interrupted(plain(), store, at=6, graceful=True)
     resumed(plain(), store, trace="second.jsonl")
     trace = store / "second.jsonl"
     opened = [
@@ -683,7 +744,7 @@ def test_what_a_finished_stage_published_survives_a_resume(tmp_path, at, stage):
     store = tmp_path / "run"
     whole, carried = {}, {}
     uninterrupted(probed(whole))
-    interrupted(probed({}), store, at=at)
+    interrupted(probed({}), store, at=at, graceful=True)
     last = sorted(p for p in store.iterdir() if p.is_dir())[-1]
     state = json.loads((last / "manifest.json").read_text())["state"]["program"]
     assert state["index"] == stage

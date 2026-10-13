@@ -758,7 +758,8 @@ class Checkpointer:
             prefix: What each checkpoint directory is named before its number.
             rng: Whether to record the ambient RNG state as well.
             at_end: Whether to write a final checkpoint when the run ends,
-                cancelled and aborted runs included.
+                a graceful stop included; a run that failed partway into a
+                step writes none, its state being unsafe to resume.
 
         Raises:
             ValueError: If `every` is not positive, or `unit` is unknown.
@@ -846,7 +847,8 @@ class Checkpointer:
             self.save(event, announce=True)
         elif event.type is EventType.RUN_ENDED and (self.at_end or self._due):
             self._due = False
-            self.save(event, announce=False)
+            if not event.payload.get("aborted") or event.payload.get("at_boundary"):
+                self.save(event, announce=False)
         return Signal.GO
 
     def save(self, event: Event, announce: bool = True) -> None:

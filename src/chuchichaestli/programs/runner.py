@@ -327,12 +327,17 @@ class Runner:
                 hook.attach(self, ctx)
         ctx.emit(EventType.RUN_BEGAN, seed=self.seed, backends=self.backends)
         failure: str | None = None
+        # whether the state is whole: between program steps, not partway into one
+        settled = False
         try:
             signal = self._lockstep(lambda: self.program.enter(ctx))
             if self.resume is not None:
                 self._restore(ctx)
+            settled = True
             while not signal.halts:
+                settled = False
                 signal = self._lockstep(lambda: self.program.execute(ctx))
+                settled = True
                 if signal.halts:
                     break
                 signal = self._lockstep(lambda: self._advanced(ctx))
@@ -347,7 +352,7 @@ class Runner:
             ctx.progress = self.program.progress()
             self._report_unplaced()
             try:
-                ctx.emit(EventType.RUN_ENDED, aborted=failure)
+                ctx.emit(EventType.RUN_ENDED, aborted=failure, at_boundary=settled)
             except Exception as exc:
                 if failure is None:
                     raise
