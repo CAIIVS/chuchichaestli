@@ -596,7 +596,7 @@ class Step(Updater):
         total = optimizer.step(closure)
         scheduler = self.schedulers.get(None)
         if scheduler is not None:
-            scheduler.step()
+            step_schedule(scheduler, self.monitors.get(None), ctx)
         if not isinstance(total, torch.Tensor):
             total = torch.as_tensor(float("nan") if total is None else total)
         return Loss(total=total.detach(), parts=parts)

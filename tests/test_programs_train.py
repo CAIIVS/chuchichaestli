@@ -10,6 +10,7 @@ from torch.utils.data import TensorDataset
 
 from chuchichaestli.programs import (
     Alternating,
+    Call,
     Phase,
     Program,
     Repeat,
@@ -1014,3 +1015,22 @@ def test_a_pass_count_survives_a_resume():
     )
     revived.load_state_dict(saved)
     assert revived.total_passes == 2
+
+
+def test_a_closure_step_hands_a_plateau_schedule_its_value():
+    """L-BFGS steps itself, and its schedule must still read what it monitors."""
+    fit = Train(
+        "fit",
+        model=linear(),
+        data=ramp(4),
+        batch_size=4,
+        loss=nn.MSELoss(),
+        epochs=1,
+        optim=OptimSpec.lbfgs(lr=1.0).with_plateau_schedule(
+            "probe/mse", patience=0, interval="step"
+        ),
+    )
+    program = Program([Call("probe", fn=lambda ctx: {"probe/mse": 1.0}), fit])
+    Runner(program, hooks=[], device="cpu").run()
+    scheduler = fit.update.schedulers[None]
+    assert scheduler.best == 1.0
