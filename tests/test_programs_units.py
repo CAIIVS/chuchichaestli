@@ -12,14 +12,14 @@ def test_the_names_a_type_accepts_are_the_names_the_runner_accepts():
     from chuchichaestli.programs.hooks import (
         CHECKPOINT_UNIT_MAP,
         CheckpointUnitTypes,
-        ModeTypes,
-        MODES,
+        MonitorModeTypes,
+        MONITOR_MODES,
         ThresholdModeTypes,
         THRESHOLD_MODES,
     )
 
     assert set(CHECKPOINT_UNIT_MAP) == set(get_args(CheckpointUnitTypes))
-    assert set(MODES) == set(get_args(ModeTypes))
+    assert set(MONITOR_MODES) == set(get_args(MonitorModeTypes))
     assert set(THRESHOLD_MODES) == set(get_args(ThresholdModeTypes))
     assert set(CHECKPOINT_UNIT_MAP) <= set(UNIT_MAP)
     assert all(UNIT_MAP[name] is event for name, event in CHECKPOINT_UNIT_MAP.items())

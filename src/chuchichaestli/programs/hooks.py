@@ -39,12 +39,12 @@ if TYPE_CHECKING:
     from chuchichaestli.programs.runner import Runner
 
 
-ModeTypes = Literal["min", "max"]
+MonitorModeTypes = Literal["min", "max"]
 ThresholdModeTypes = Literal["rel", "abs"]
 CheckpointUnitTypes = Literal["advance", "epoch", "step"]
 BarUnitTypes = Literal["step", "epoch"]
 
-MODES: frozenset[str] = frozenset(get_args(ModeTypes))
+MONITOR_MODES: frozenset[str] = frozenset(get_args(MonitorModeTypes))
 THRESHOLD_MODES: frozenset[str] = frozenset(get_args(ThresholdModeTypes))
 CHECKPOINT_UNIT_MAP: dict[str, EventType] = units(CheckpointUnitTypes)
 BAR_UNIT_MAP: dict[str, EventType] = units(BarUnitTypes)
@@ -57,7 +57,7 @@ __all__ = [
     "Timer",
     "EarlyStop",
     "GracefulStop",
-    "ModeTypes",
+    "MonitorModeTypes",
     "ThresholdModeTypes",
     "CheckpointUnitTypes",
     "BarUnitTypes",
@@ -448,7 +448,7 @@ class EarlyStop:
     def __init__(
         self,
         monitor: str,
-        mode: ModeTypes = "min",
+        mode: MonitorModeTypes = "min",
         patience: int = 10,
         threshold: float = 1e-4,
         threshold_mode: ThresholdModeTypes = "rel",
@@ -467,7 +467,7 @@ class EarlyStop:
         Raises:
             ValueError: If `mode` or `threshold_mode` is not one of its two.
         """
-        require(mode, MODES, "mode")
+        require(mode, MONITOR_MODES, "mode")
         require(threshold_mode, THRESHOLD_MODES, "threshold mode")
         self.monitor = monitor
         self.mode = mode
