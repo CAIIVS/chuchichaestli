@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 import json
+import math
 import re
 import shutil
 from collections.abc import Mapping
@@ -68,6 +69,8 @@ class Checkpoint:
         bindings: Per-binding state, keyed by binding name.
         components: Component states of each stage, keyed by its path.
         hooks: State of each hook that keeps one, keyed as `hook_keys` names it.
+        score: The monitored value it was written at, with its `monitor` and
+            `mode`, or `None` if the writer monitored nothing.
         specs: How to rebuild each binding that records a model spec.
         weights: File each model binding was written to.
         rng: Ambient RNG capture, or `None` if it was not recorded.
@@ -85,6 +88,7 @@ class Checkpoint:
     bindings: Mapping[str, Any] = field(default_factory=dict)
     components: Mapping[str, Any] = field(default_factory=dict)
     hooks: Mapping[str, Any] = field(default_factory=dict)
+    score: Mapping[str, Any] | None = None
     specs: Mapping[str, ModelSpec] = field(default_factory=dict)
     weights: Mapping[str, Path] = field(default_factory=dict)
     rng: Mapping[str, Any] | None = None
@@ -259,10 +263,14 @@ class CheckpointStore:
         ):
             return self._at_position(resume)
         if resume == "best":
-            raise C3liCheckpointError(
-                "resume='best' needs a metric to rank checkpoints by, which no "
-                "stage reports yet. Use 'last' or name a directory."
-            )
+            best = self.best()
+            if best is None:
+                raise C3liCheckpointError(
+                    f"No checkpoint under {str(self.root)!r} records a score to "
+                    "rank by; give the Checkpointer a monitor=, or resume from "
+                    "'last'."
+                )
+            return best
         path = Path(resume)
         if path.is_file():
             path = path.parent
@@ -336,6 +344,7 @@ class CheckpointStore:
         at: str | None = None,
         rng: bool = True,
         hooks: Mapping[str, Any] | None = None,
+        score: Mapping[str, Any] | None = None,
     ) -> Checkpoint | None:
         """Write one checkpoint and return it, or `None` off the main process.
 
@@ -350,6 +359,8 @@ class CheckpointStore:
             at: Path of the stage that triggered the write.
             rng: Whether to capture the ambient RNG state as well.
             hooks: Hook states to record, as `hook_states` returns them.
+            score: The monitored value the checkpoint is ranked by, as a
+                mapping of `monitor`, `mode` and `value`.
         """
         directory = self.directory_for(index, create=True)
         models = {n: v for n, v in bindings.items() if isinstance(v, nn.Module)}
@@ -394,6 +405,8 @@ class CheckpointStore:
             "state_file": state_path.name,
             "state": skeleton,
         }
+        if score is not None:
+            manifest["score"] = dict(score)
         self._write_json(directory / self.manifest, manifest)
         # delete old checkpoints if `keep` is set
         self.prune()
@@ -409,6 +422,7 @@ class CheckpointStore:
             bindings={**payload["bindings"], **weights},
             components=payload["components"],
             hooks=payload["hooks"],
+            score=dict(score) if score is not None else None,
             specs={n: s for n, s in specs.items() if s is not None},
             weights=files,
             rng=payload.get("rng"),
@@ -450,12 +464,51 @@ class CheckpointStore:
                 return path
         return None
 
+    def best(self) -> Path | None:
+        """Return the checkpoint with the best recorded score, or `None`.
+
+        Ties go to the newer checkpoint.
+
+        Raises:
+            C3liCheckpointError: If the checkpoints were scored by different
+                monitors, which cannot be ranked against each other.
+        """
+        ranked = self._best_by_monitor()
+        if len(ranked) > 1:
+            raise C3liCheckpointError(
+                f"The checkpoints under {str(self.root)!r} were scored by "
+                f"different monitors {sorted(ranked)}; name a directory instead."
+            )
+        return next(iter(ranked.values()), None)
+
+    def _best_by_monitor(self) -> dict[tuple[str, str], Path]:
+        """Return the best-scored checkpoint for each monitor and mode."""
+        best: dict[tuple[str, str], tuple[float, Path]] = {}
+        for directory in self.checkpoints():
+            manifest = self._read_json(directory / self.manifest) or {}
+            score = manifest.get("score")
+            if not isinstance(score, Mapping):
+                continue
+            value = float(score.get("value", math.nan))
+            if math.isnan(value):
+                continue
+            key = (str(score.get("monitor")), str(score.get("mode", "min")))
+            sign = 1.0 if key[1] == "max" else -1.0
+            held = best.get(key)
+            if held is None or sign * value >= sign * held[0]:
+                best[key] = (value, directory)
+        return {key: directory for key, (_, directory) in best.items()}
+
     def prune(self) -> list[Path]:
-        """Delete the oldest checkpoints beyond `keep` and return what went."""
+        """Delete the oldest checkpoints beyond `keep` and return what went.
+
+        The best-scored checkpoint of each monitor is never pruned.
+        """
         if self.keep is None:
             return []
         found = self.checkpoints()
-        stale = found[: max(0, len(found) - self.keep)]
+        best = set(self._best_by_monitor().values())
+        stale = [d for d in found[: max(0, len(found) - self.keep)] if d not in best]
         for directory in stale:
             shutil.rmtree(directory)
         return stale
@@ -512,6 +565,7 @@ class CheckpointStore:
             bindings=bindings,
             components=payload.get("components") or {},
             hooks=payload.get("hooks") or {},
+            score=manifest.get("score"),
             specs=specs,
             weights=files,
             rng=payload.get("rng"),

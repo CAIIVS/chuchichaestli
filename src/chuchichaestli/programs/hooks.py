@@ -719,6 +719,8 @@ class Checkpointer:
     """Write a checkpoint as the run proceeds.
 
     Checkpoints are taken at stage boundaries, so they are always complete.
+    Given a `monitor`, it also writes one whenever the value improves, and the
+    store keeps the best of them for `resume="best"`.
 
     Attributes:
         critical: Whether a failed write stops the run.
@@ -740,6 +742,8 @@ class Checkpointer:
         rng: bool = True,
         at_end: bool = True,
         store: str | Path | None = None,
+        monitor: str | None = None,
+        mode: MonitorModeTypes = "min",
     ):
         """Constructor.
 
@@ -760,13 +764,18 @@ class Checkpointer:
             at_end: Whether to write a final checkpoint when the run ends,
                 a graceful stop included; a run that failed partway into a
                 step writes none, its state being unsafe to resume.
+            monitor: Payload key to rank checkpoints by, as `EarlyStop` reads
+                one, e.g. a metric an `Eval` stage reports as it ends.
+            mode: `"min"` if smaller is better, `"max"` if larger is.
 
         Raises:
-            ValueError: If `every` is not positive, or `unit` is unknown.
+            ValueError: If `every` is not positive, or `unit` or `mode` is
+                unknown.
         """
         if every < 1:
             raise ValueError(f"Checkpointer needs a positive interval, got {every!r}.")
         require(unit, CHECKPOINT_UNIT_MAP, "checkpoint unit")
+        require(mode, MONITOR_MODES, "mode")
         self.every = every
         self.unit = unit
         self.keep = keep
@@ -776,6 +785,10 @@ class Checkpointer:
         self.needs_store = self.store is None
         self.rng = rng
         self.at_end = at_end
+        self.monitor = monitor
+        self.mode = mode
+        self.best = math.inf if mode == "min" else -math.inf
+        self._score: float | None = None
         self._store: CheckpointStore | None = None
         self._runner: Runner | None = None
         self._ctx: Context | None = None
@@ -787,7 +800,10 @@ class Checkpointer:
     def __repr__(self) -> str:
         """Return a short description of the hook."""
         every, unit, keep = self.every, self.unit, self.keep
-        return f"Checkpointer({every=}, {unit=}, {keep=})"
+        if self.monitor is None:
+            return f"Checkpointer({every=}, {unit=}, {keep=})"
+        monitor, mode = self.monitor, self.mode
+        return f"Checkpointer({every=}, {unit=}, {keep=}, {monitor=}, {mode=})"
 
     @property
     def trigger(self) -> EventType:
@@ -795,8 +811,8 @@ class Checkpointer:
         return CHECKPOINT_UNIT_MAP[self.unit]
 
     def state_dict(self) -> dict[str, Any]:
-        """Return how far the hook has counted towards its next checkpoint."""
-        return {"counted": self._counted, "due": self._due}
+        """Return how far the hook has counted, and the best value it has seen."""
+        return {"counted": self._counted, "due": self._due, "best": self.best}
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         """Restore state previously returned by `state_dict`.
@@ -806,6 +822,7 @@ class Checkpointer:
         """
         self._counted = int(state.get("counted", 0))
         self._due = bool(state.get("due", False))
+        self.best = float(state.get("best", self.best))
 
     def attach(self, runner: Runner, ctx: Context) -> None:
         """Receive the run this hook writes checkpoints for.
@@ -820,6 +837,8 @@ class Checkpointer:
         self._due = False
         self._at = None
         self._at_path = None
+        self.best = math.inf if self.mode == "min" else -math.inf
+        self._score = None
         self._store = CheckpointStore(
             self.store or runner.store,
             keep=self.keep,
@@ -832,7 +851,8 @@ class Checkpointer:
 
         Epoch and step events come from inside a stage's `execute`; writing
         there would record a stage that has not been closed yet, so the write
-        waits for the advance that follows.
+        waits for the advance that follows. A monitored value scores only the
+        checkpoint written at that advance, the weights moving on after it.
 
         Args:
             event: What the runner just did.
@@ -842,14 +862,43 @@ class Checkpointer:
             self._due = self._due or self._counted % self.every == 0
             self._at = event.progress
             self._at_path = event.path
-        if event.type is EventType.STAGE_ADVANCED and self._due:
-            self._due = False
-            self.save(event, announce=True)
+        if self.monitor is not None:
+            self._observe(event)
+        if event.type is EventType.STAGE_ADVANCED:
+            if self._due:
+                self._due = False
+                self.save(event, announce=True)
+            self._score = None
         elif event.type is EventType.RUN_ENDED and (self.at_end or self._due):
             self._due = False
             if not event.payload.get("aborted") or event.payload.get("at_boundary"):
                 self.save(event, announce=False)
         return Signal.GO
+
+    def _observe(self, event: Event) -> None:
+        """Note the monitored value, and call for a checkpoint if it improved.
+
+        Args:
+            event: What the runner just did.
+        """
+        value = event.payload.get(self.monitor)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return
+        self._score = float(value)
+        if self.mode == "min":
+            improved = self._score < self.best
+        else:
+            improved = self._score > self.best
+        if improved:
+            self.best = self._score
+            self._due = True
+
+    @property
+    def score(self) -> dict[str, Any] | None:
+        """The monitored value the next checkpoint is ranked by, if any."""
+        if self.monitor is None or self._score is None:
+            return None
+        return {"monitor": self.monitor, "mode": self.mode, "value": self._score}
 
     def save(self, event: Event, announce: bool = True) -> None:
         """Write one checkpoint of the run as it currently stands.
@@ -882,6 +931,7 @@ class Checkpointer:
             at=self._at_path,
             rng=self.rng,
             hooks=hook_states(self._runner.hooks),
+            score=self.score,
         )
         if checkpoint is not None and announce:
             self._ctx.emit(

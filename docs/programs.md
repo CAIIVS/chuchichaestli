@@ -91,6 +91,12 @@ every event to a trace (`Jsonl.read` gets them back as `Event`s), and
 `Checkpointer` writes the run's state every nth epoch, keeping the last `keep`.
 All of them are optional, `hooks=[]` would run the same program in silence.
 
+`Checkpointer(monitor="mse", mode="min")` also writes a checkpoint whenever
+the monitored value improves, reading it as `EarlyStop` does, e.g. the metric
+an `Eval` stage reports as it ends. Each checkpoint records the value it was
+measured at, the best one is never pruned, and `resume="best"` or
+`CheckpointStore(root).load("best")` reads it back.
+
 
 ## Adversarial Training
 
@@ -182,8 +188,8 @@ state, and the same trace.
 --8<-- "examples/programs_resume.py:resume"
 ```
 
-`resume=` takes `"last"`, `"last~N"` for N checkpoints earlier, or a path to
-one. A run that *finished* records no stage state — a `Phase` saves only the
+`resume=` takes `"last"`, `"last~N"` for N checkpoints earlier, `"best"` for
+the best-scored one, or a path to one. A run that *finished* records no stage state — a `Phase` saves only the
 child it is in the middle of — so resuming its last checkpoint does nothing.
 To carry on training from finished weights, `Load` them into a `Finetune`
 stage instead, which starts an optimizer of its own.

@@ -8,7 +8,9 @@ import json
 import pytest
 import torch
 from torch import nn
+from torch.utils.data import TensorDataset
 
+from chuchichaestli.metrics import MSE
 from chuchichaestli.programs import (
     C3liCheckpointError,
     C3liProgramError,
@@ -26,7 +28,8 @@ from chuchichaestli.programs import (
     merge_tree,
 )
 from chuchichaestli.models.spec import InitArgMixin, ModelSpec
-from chuchichaestli.programs.stages import StageBlock
+from chuchichaestli.programs.stages import Eval, Phase, StageBlock, Train
+from chuchichaestli.training import OptimSpec
 from chuchichaestli.programs.ckpt import SCHEMA_VERSION
 from chuchichaestli.programs.serialize import writable_spec
 from chuchichaestli.utils.io import load_model, read_spec, read_state
@@ -321,10 +324,191 @@ def test_a_manifest_that_does_not_name_its_state_file_still_loads(tmp_path):
     assert store.load(written.path).rng is not None
 
 
-def test_best_says_what_it_still_needs(tmp_path):
-    """Ranking checkpoints needs a metric no stage reports yet."""
-    with pytest.raises(C3liCheckpointError, match="needs a metric"):
+def scored(store, index, value, monitor="score", mode="min"):
+    """Write an empty checkpoint ranked by a monitored value.
+
+    Args:
+        store: Store to write into.
+        index: Where in the run it is taken.
+        value: The monitored value it records.
+        monitor: Name of what was monitored.
+        mode: Whether smaller or larger is better.
+    """
+    return store.save(
+        index=index,
+        program=recorder([], "a"),
+        bindings={},
+        topology=Local(device="cpu"),
+        score={"monitor": monitor, "mode": mode, "value": value},
+    )
+
+
+def reporter(values, monitor="score"):
+    """Build a program whose calls each report one monitored value.
+
+    Args:
+        values: One call per value, reporting it in order.
+        monitor: Payload key the values are reported under.
+    """
+    return Program(
+        [
+            Call(
+                f"r{i}",
+                fn=lambda ctx, v=v: ctx.emit(
+                    EventType.STEP_ENDED, trains=False, **{monitor: v}
+                ),
+            )
+            for i, v in enumerate(values)
+        ]
+    )
+
+
+def test_best_needs_a_scored_checkpoint(tmp_path):
+    """Nothing can be ranked when no writer monitored anything."""
+    with pytest.raises(C3liCheckpointError, match="records a score"):
         CheckpointStore(tmp_path).resolve("best")
+
+
+@pytest.mark.parametrize("mode, expected", [("min", 2), ("max", 3)], ids=["min", "max"])
+def test_best_follows_the_mode(tmp_path, mode, expected):
+    """Smaller wins under min, larger under max."""
+    store = CheckpointStore(tmp_path)
+    for index, value in enumerate([3.0, 1.0, 5.0, 2.0], start=1):
+        scored(store, index, value, mode=mode)
+    assert store.resolve("best") == store.directory_for(expected)
+    assert store.load("best").score == {
+        "monitor": "score",
+        "mode": mode,
+        "value": {"min": 1.0, "max": 5.0}[mode],
+    }
+
+
+def test_best_goes_to_the_newer_of_a_tie(tmp_path):
+    """The newer checkpoint has trained at least as long."""
+    store = CheckpointStore(tmp_path)
+    for index, value in enumerate([2.0, 1.0, 1.0], start=1):
+        scored(store, index, value)
+    assert store.resolve("best") == store.directory_for(3)
+
+
+def test_best_ignores_a_nan_score(tmp_path):
+    """A diverged evaluation is not the best one."""
+    store = CheckpointStore(tmp_path)
+    scored(store, 1, float("nan"))
+    scored(store, 2, 4.0)
+    assert store.resolve("best") == store.directory_for(2)
+
+
+def test_best_refuses_scores_of_different_monitors(tmp_path):
+    """A loss and an accuracy cannot be ranked against each other."""
+    store = CheckpointStore(tmp_path)
+    scored(store, 1, 0.5, monitor="loss")
+    scored(store, 2, 0.9, monitor="accuracy", mode="max")
+    with pytest.raises(C3liCheckpointError, match="different monitors"):
+        store.resolve("best")
+
+
+def test_keep_never_prunes_the_best(tmp_path):
+    """Pruning the oldest must not delete the checkpoint worth keeping."""
+    store = CheckpointStore(tmp_path, keep=1)
+    for index, value in enumerate([3.0, 1.0, 2.0, 5.0], start=1):
+        scored(store, index, value)
+    assert store.checkpoints() == [store.directory_for(2), store.directory_for(4)]
+
+
+def test_a_monitored_improvement_writes_a_checkpoint(tmp_path):
+    """Only values that beat the best so far are worth a write."""
+    store = tmp_path / "run"
+    hook = Checkpointer(at_end=False, monitor="score")
+    Runner(reporter([3.0, 1.0, 2.0, 0.5, 4.0]), store=store, hooks=[hook]).run()
+    written = CheckpointStore(store)
+    assert [written.load_index(p) for p in written.checkpoints()] == [1, 2, 4]
+    assert written.load("best").score["value"] == 0.5
+
+
+def test_a_periodic_checkpoint_records_the_value_reported_with_it(tmp_path):
+    """Every write in the boundary after a report is scored by it."""
+    store = tmp_path / "run"
+    hook = Checkpointer(unit="advance", keep=1, monitor="score")
+    Runner(reporter([3.0, 1.0, 2.0, 5.0]), store=store, hooks=[hook]).run()
+    written = CheckpointStore(store)
+    assert [written.load(p).score["value"] for p in written.checkpoints()] == [
+        1.0,
+        5.0,
+    ]
+
+
+def test_a_checkpoint_written_after_training_moved_on_carries_no_score(tmp_path):
+    """A value describes the weights it was measured on, not later ones."""
+    store = tmp_path / "run"
+    program = Program(
+        [
+            Call("report", fn=lambda ctx: ctx.emit(EventType.STEP_ENDED, score=1.0)),
+            Call("later", fn=lambda ctx: None),
+        ]
+    )
+    hook = Checkpointer(unit="advance", every=2, at_end=False, monitor="score")
+    Runner(program, store=store, hooks=[hook]).run()
+    written = CheckpointStore(store)
+    assert [written.load(p).score for p in written.checkpoints()] == [
+        {"monitor": "score", "mode": "min", "value": 1.0}
+    ]
+
+
+def test_the_best_value_survives_a_resume(tmp_path):
+    """A resumed run must not count a worse value as an improvement."""
+    store = tmp_path / "run"
+    values = [3.0, 1.0, 2.0, 2.5, 0.5]
+    Runner(
+        reporter(values),
+        store=store,
+        hooks=[Checkpointer(monitor="score"), StopAfter(3)],
+    ).run()
+    Runner(
+        reporter(values),
+        store=store,
+        resume="last",
+        hooks=[Checkpointer(at_end=False, monitor="score")],
+    ).run()
+    written = CheckpointStore(store)
+    scores = {
+        written.load_index(p): (written.load(p).score or {}).get("value")
+        for p in written.checkpoints()
+    }
+    assert scores == {1: 3.0, 2: 1.0, 3: None, 5: 0.5}
+
+
+def test_the_best_checkpoint_holds_the_weights_it_was_scored_on(tmp_path):
+    """Ranking is only useful if the best checkpoint is the evaluated model."""
+    rows = TensorDataset(torch.rand(8, 2), torch.rand(8, 1))
+    fit = Train(
+        "fit", data=rows, batch_size=4, loss=nn.MSELoss(), optim=OptimSpec.sgd(lr=0.5)
+    )
+    check = Eval("check", data=rows, batch_size=4, metrics=[MSE()])
+    seen: list[tuple[float, dict[str, torch.Tensor]]] = []
+
+    def snapshot(ctx):
+        state = ctx["model"].state_dict()
+        seen.append((ctx["check/mse"], {k: v.clone() for k, v in state.items()}))
+
+    program = Program(
+        [Phase.each_pass(6, fit, check, Call("snapshot", fn=snapshot))],
+        provide={"model": nn.Linear(2, 1)},
+    )
+    store = tmp_path / "run"
+    hook = Checkpointer(keep=1, monitor="mse")
+    Runner(program, store=store, device="cpu", hooks=[hook]).run()
+    value, expected = min(seen, key=lambda pair: pair[0])
+    best = CheckpointStore(store).load("best")
+    assert best.score["value"] == pytest.approx(value)
+    for key, tensor in expected.items():
+        assert torch.equal(best.bindings["model"][key], tensor)
+
+
+def test_a_checkpointer_refuses_an_unknown_mode():
+    """A typo must fail at construction, not rank checkpoints backwards."""
+    with pytest.raises(ValueError, match="mode"):
+        Checkpointer(monitor="score", mode="lowest")
 
 
 def test_resume_continues_where_the_run_stopped(tmp_path):
