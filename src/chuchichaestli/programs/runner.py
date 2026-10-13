@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 import os
+import re
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -416,9 +417,11 @@ class Runner:
             state = left.pop(key, None)
             if state is not None and isinstance(hook, Stateful):
                 hook.load_state_dict(state)
-        if left:
+        present = {type(hook).__name__ for hook in self.hooks}
+        unmatched = sorted(k for k in left if re.split(r"[:#]", k)[0] in present)
+        if unmatched:
             warnings.warn(
-                f"No hook in this run matches {sorted(left)}, so their state "
+                f"No hook in this run matches {unmatched}, so their state "
                 f"in {self.resume!r} was not restored.",
                 stacklevel=2,
             )

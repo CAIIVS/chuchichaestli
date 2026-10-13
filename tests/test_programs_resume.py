@@ -4,6 +4,7 @@
 """Tests that a resumed run is indistinguishable from an uninterrupted one."""
 
 import json
+import warnings
 
 import pytest
 import torch
@@ -413,6 +414,16 @@ def test_early_stopping_on_another_value_starts_afresh(tmp_path):
     with pytest.warns(UserWarning, match="EarlyStop:total#0"):
         Runner(plain(), seed=42, store=store, resume="last", hooks=[other]).run()
     assert other.waited == 0
+
+
+def test_leaving_a_hook_out_of_the_resumed_run_is_not_reported(tmp_path):
+    """Resuming without the checkpointer is a choice, not a mistake."""
+    store = tmp_path / "run"
+    interrupted(plain(), store, at=5)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        resumed(plain(), store)
+    assert not [w for w in caught if "No hook in this run" in str(w.message)]
 
 
 def test_a_torch_format_checkpoint_resumes_too(tmp_path):
