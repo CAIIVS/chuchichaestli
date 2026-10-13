@@ -371,8 +371,6 @@ class ImageExport(Exporter):
     """Plot a binding's images, one file each, from rank 0 only.
 
     Reads what `save_images` accepts, a `Predict` stage's pairs included.
-    Under several processes, pairs kept in memory are plotted from rank 0's
-    share alone.
 
     Attributes:
         kwargs: Arguments `save_images` is called with.
@@ -469,24 +467,6 @@ class ArchiveExport(Exporter):
             ValueError: If the suffix names no archive format.
         """
         require(target.suffix, SAVERS, "archive format")
-
-    def core(self, ctx: Context) -> None:
-        """Write the source binding, in a run of one process.
-
-        Args:
-            ctx: Execution context for this entry.
-
-        Raises:
-            ValueError: If the run spans several processes, each holding its
-                own share of a prediction.
-        """
-        if ctx.topology.world_size > 1:
-            raise ValueError(
-                f"ArchiveExport({self.name!r}) would write rank 0's share of "
-                f"{self.source!r} alone; archive where the samples are made "
-                "instead, as with Predict(archive=...)."
-            )
-        super().core(ctx)
 
     def write(self, target: Path, artifact: Any, ctx: Context) -> None:
         """Write the samples, and the truths paired with them if any.

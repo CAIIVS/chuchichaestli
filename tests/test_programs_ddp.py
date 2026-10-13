@@ -596,36 +596,45 @@ def test_archived_pairs_hold_each_sample_once(tmp_path):
     assert sorted(truth for _, truth in reported[0]) == ramp(9).tensors[1].tolist()
 
 
+def predicted_then_archived(path) -> tuple[Predict, Program]:
+    """Build a program archiving what an earlier stage kept in memory.
+
+    Args:
+        path: File the predictions are archived to.
+    """
+    inputs = TensorDataset(ramp(9).tensors[0])
+    guess = Predict("guess", model=model(), data=inputs, batch_size=2, inputs=("x",))
+    save = ArchiveExport("save", path=path, source="guess/predictions")
+    return guess, Program(stages=[guess, save])
+
+
 def _archive_exports(rank, world, results, port, path):
-    """Export a binding on every rank and report how the run ended.
+    """Predict, then archive the predictions, on every rank.
 
     Args:
         rank: Index of this process.
         world: Number of processes taking part.
         results: Shared mapping the ranks report into.
         port: Rendezvous port.
-        path: File the export would land on.
+        path: File the predictions are archived to.
     """
     topology = join_group(rank, world, port)
     try:
-        program = Program(
-            stages=[ArchiveExport("save", path=path, source="samples")],
-            provide={"samples": torch.zeros(4, 2)},
-        )
-        try:
-            Runner(program, seed=42, topology=topology, hooks=[]).run()
-            results[rank] = "finished"
-        except Exception as failure:
-            results[rank] = f"raised: {failure}"
+        _, program = predicted_then_archived(path)
+        Runner(program, seed=42, topology=topology, hooks=[]).run()
     finally:
         topology.close()
 
 
-def test_an_archive_export_refuses_a_run_of_several_processes(tmp_path):
-    """Rank 0 alone would write only its own share of a prediction."""
-    reported = under_ddp(_archive_exports, free_port(), str(tmp_path / "out.h5"))
-    assert all("Predict(archive=...)" in outcome for outcome in reported.values())
-    assert not list(tmp_path.glob("*.h5"))
+def test_an_archive_export_writes_every_rank_s_predictions(tmp_path):
+    """Rank 0 writes the file, and it holds what one process would have."""
+    from chuchichaestli.programs.topology import Local
+
+    under_ddp(_archive_exports, free_port(), str(tmp_path / "ddp.h5"))
+    guess, program = predicted_then_archived(tmp_path / "alone.h5")
+    Runner(program, seed=42, topology=Local(device="cpu"), hooks=[]).run()
+    written = torch.cat(list(read_archive(tmp_path / "ddp.h5", "data")))
+    assert torch.equal(written, guess.predictions)
 
 
 def test_the_shards_are_joined_into_one_file(tmp_path):
