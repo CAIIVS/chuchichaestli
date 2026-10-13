@@ -401,6 +401,52 @@ def test_a_reduced_metric_scores_a_repeated_batch_once():
     assert reported[0][0] == pytest.approx(float(alone.metrics["mse"].compute()))
 
 
+def predicted_then_scored() -> tuple[Predict, Eval, Program]:
+    """Build a program scoring what an earlier stage predicted, in memory."""
+    guess = Predict(
+        "guess", model=model(), data=ramp(9), batch_size=2, inputs=("x",), targets="y"
+    )
+    score = Eval("score", model=None, data="guess/pairs", batch_size=2, metrics=[MSE()])
+    return guess, score, Program(stages=[guess, score])
+
+
+def _scores_predictions(rank, world, results, port):
+    """Predict, then score the pairs, and report what each rank ended with.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+    """
+    topology = join_group(rank, world, port)
+    try:
+        guess, score, program = predicted_then_scored()
+        Runner(program, seed=42, topology=topology, hooks=[]).run()
+        metric = score.metrics["mse"]
+        results[rank] = (
+            guess.predictions.tolist(),
+            float(metric.n_observations),
+            float(metric.compute()),
+        )
+    finally:
+        topology.close()
+
+
+def test_a_later_stage_scores_every_rank_s_predictions():
+    """Each rank keeps only its share, which a later stage would split again."""
+    from chuchichaestli.programs.topology import Local
+
+    reported = under_ddp(_scores_predictions, free_port())
+    guess, score, program = predicted_then_scored()
+    Runner(program, seed=42, topology=Local(device="cpu"), hooks=[]).run()
+    metric = score.metrics["mse"]
+    for predictions, observed, value in reported.values():
+        assert predictions == guess.predictions.tolist()
+        assert observed == float(metric.n_observations) == 9.0
+        assert value == pytest.approx(float(metric.compute()))
+
+
 def _weighs_uneven_shards(rank, world, results, port, balance):
     """Take one step over shards of different sizes and report the weights.
 

@@ -2089,11 +2089,35 @@ class Predict(Inference):
             self._written = self._gather_shards(ctx, self.archive)
             ctx.publish(f"{self.name}/archive", self._written)
         else:
+            self._predictions = self._gather_batches(ctx, self._predictions)
+            self._truths = self._gather_batches(ctx, self._truths)
             y = self.predictions
             if y is not None:
                 ctx.publish(f"{self.name}/predictions", y)
         self._publish_pairs(ctx)
         return super().leave(ctx)
+
+    def _gather_batches(
+        self, ctx: Context, batches: list[torch.Tensor]
+    ) -> list[torch.Tensor]:
+        """Return every process's kept batches, in the order of one process.
+
+        Each process is dealt every `world_size`-th batch, so interleaving the
+        shares puts the batches back in the order they were planned.
+
+        Args:
+            ctx: Execution context for this entry.
+            batches: This process's batches.
+        """
+        if ctx.topology.world_size == 1:
+            return batches
+        shares = ctx.topology.gather([batch.detach().cpu() for batch in batches])
+        return [
+            share[index]
+            for index in range(max(map(len, shares)))
+            for share in shares
+            if index < len(share)
+        ]
 
     def _publish_pairs(self, ctx: Context) -> None:
         """Publish what was produced beside what it should have been.
