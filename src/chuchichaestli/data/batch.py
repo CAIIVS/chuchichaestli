@@ -116,7 +116,12 @@ def batch_to_device(batch: BatchType, device: torch.device | str) -> BatchType:
         batch: A batch as the loader produced it.
         device: Where its tensors should land.
     """
-    return map_nested(batch, lambda tensor: tensor.to(device, non_blocking=True))
+    # an asynchronous copy is only safe on CUDA; elsewhere, e.g. on MPS, it can
+    # read a loader's buffer after it has been reused
+    non_blocking = torch.device(device).type == "cuda"
+    return map_nested(
+        batch, lambda tensor: tensor.to(device, non_blocking=non_blocking)
+    )
 
 
 def input_in_batch(batch: BatchType, name: str = "x") -> Any:

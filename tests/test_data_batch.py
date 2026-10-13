@@ -5,6 +5,7 @@
 
 import pytest
 import torch
+from torch.utils.data import DataLoader, TensorDataset
 
 from chuchichaestli.data import (
     as_image_batch,
@@ -86,6 +87,34 @@ def test_a_batch_moves_to_a_device_whatever_shape_it_has():
     assert isinstance(pair, tuple) and all(t.device.type == "cpu" for t in pair)
     mapping = batch_to_device({"x": torch.ones(2, 2)}, "cpu")
     assert isinstance(mapping, dict) and mapping["x"].device.type == "cpu"
+
+
+@pytest.mark.parametrize("device, asynchronous", [("cuda", True), ("mps", False)])
+def test_a_batch_is_copied_asynchronously_only_onto_cuda(
+    monkeypatch, device, asynchronous
+):
+    """Elsewhere an asynchronous copy can read a buffer the loader reused."""
+    calls = []
+
+    def to(tensor, *args, **kwargs):
+        calls.append(kwargs.get("non_blocking", False))
+        return tensor
+
+    monkeypatch.setattr(torch.Tensor, "to", to)
+    batch_to_device((torch.ones(2, 2), torch.zeros(2, 1)), device)
+    assert calls == [asynchronous, asynchronous]
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="needs MPS")
+def test_loader_batches_arrive_intact_on_mps():
+    """Each batch matches what the loader handed over."""
+    x = torch.arange(8 * 64, dtype=torch.float32).reshape(8, 1, 8, 8)
+    moved = [
+        batch_to_device(batch, "mps")
+        for batch in DataLoader(TensorDataset(x), batch_size=2)
+    ]
+    for index, (batch,) in enumerate(moved):
+        assert torch.equal(batch.cpu(), x[2 * index : 2 * index + 2])
 
 
 def test_the_leading_value_ignores_what_else_a_batch_carries():
