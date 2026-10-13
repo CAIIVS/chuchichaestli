@@ -20,7 +20,7 @@ was already serving from memory -- a lower bound, and the reproducible one.
     python benches/dataset_caching.py
 
     # a 2 GiB dataset, uncached against half cached, over four workers
-    python benches/dataset_caching.py --samples 8192 --fractions 0 0.5 --workers 4
+    python benches/dataset_caching.py --samples 8192 --fractions 0 0.5 --num-workers 4
 
     # saved, plotted, and reported again later without measuring anything
     python benches/dataset_caching.py --json caching.json --plot caching.png
@@ -249,7 +249,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     """
     parser = base_parser(__doc__, backends=list(BACKENDS))
     add_data_options(parser)
-    parser.set_defaults(workers=[0], order=["shuffled"])
+    parser.set_defaults(num_workers=[0], order=["shuffled"])
     parser.add_argument(
         "--fractions",
         nargs="+",

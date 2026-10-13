@@ -753,7 +753,7 @@ def trace_dataflow(
                     provenance.setdefault(id(tensor), set()).update(prov)
             return out
 
-    def pre_hook(module: nn.Module, inp: Any) -> None:
+    def pre_hook(module: nn.Module, inp: tuple[Any, ...]) -> None:
         ins: list[torch.Tensor] = []
         _iter_tensors(inp, ins)
         mid = id(module)
@@ -763,7 +763,7 @@ def trace_dataflow(
                 if src != mid:
                     edges.setdefault(src, set()).add(mid)
 
-    def post_hook(module: nn.Module, inp: Any, out: Any) -> None:
+    def post_hook(module: nn.Module, inp: tuple[Any, ...], out: Any) -> None:
         outs: list[torch.Tensor] = []
         _iter_tensors(out, outs)
         for tensor in outs:
@@ -828,7 +828,7 @@ def _create_info_pre_hook(
 ) -> Callable[[nn.Module, Any], None]:
     """Construct an info initialization hook function."""
 
-    def pre_hook(module: nn.Module, inputs: Any) -> None:
+    def pre_hook(module: nn.Module, inputs: tuple[Any, ...]) -> None:
         """Create a LayerInfo object to aggregate layer information."""
         del inputs
         info = LayerInfo(label, module, curr_depth, parent_info)
@@ -847,7 +847,7 @@ def _create_info_hook(
 ) -> Callable[[nn.Module, Any, Any], None]:
     """Construct an info hook function."""
 
-    def hook(module: nn.Module, inputs: Any, outputs: Any) -> None:
+    def hook(module: nn.Module, inputs: tuple[Any, ...], outputs: Any) -> None:
         """Update LayerInfo after forward pass."""
         info = global_layer_info[id(module)]
         if info.contains_lazy_param:

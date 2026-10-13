@@ -87,3 +87,59 @@ def test_generation(dimensions, batchsize, yield_intermediate):
 
     # Check the output shape
     assert output.shape == (2 * batchsize, 16) + (32,) * dimensions
+
+
+def _rows_marked(batchsize, shape):
+    """Return a batch whose every row is the constant of its index.
+
+    Args:
+        batchsize: Number of rows.
+        shape: Shape of one row.
+    """
+    index = torch.arange(float(batchsize)).view(batchsize, *([1] * len(shape)))
+    return index.expand(batchsize, *shape).contiguous()
+
+
+def test_a_condition_is_expanded_with_the_sample_over_timesteps():
+    """It inherits DDPM's expansion and cats the condition the same way."""
+    c = _rows_marked(4, (3, 32, 32))
+    prior_grad = PriorGrad(
+        torch.zeros(3, 32, 32), torch.ones(3, 32, 32), num_timesteps=10
+    )
+    out, _, timesteps = prior_grad.noise_step(
+        torch.randn(4, 3, 32, 32), condition=c, timesteps=torch.tensor([0, 1, 2, 3])
+    )
+    assert out.shape[0] == 4 * 4
+    assert torch.equal(out[:, :3], torch.cat([c] * 4, dim=0))
+    assert timesteps.tolist() == [0] * 4 + [1] * 4 + [2] * 4 + [3] * 4
+
+
+def test_an_absent_condition_is_left_out_rather_than_cat():
+    """Its condition is optional, as DDPM's is, so omitting it must not raise."""
+    prior_grad = PriorGrad(torch.zeros(16, 32), torch.ones(16, 32), num_timesteps=10)
+    x_t, noise, timesteps = prior_grad.noise_step(torch.randn(4, 16, 32))
+    assert x_t.shape == (4, 16, 32)
+    assert noise.shape == (4, 16, 32)
+    assert timesteps.shape == (4,)
+
+
+def test_an_absent_condition_still_expands_over_timesteps():
+    """The two optional arguments are independent of one another."""
+    prior_grad = PriorGrad(torch.zeros(16, 32), torch.ones(16, 32), num_timesteps=10)
+    x_t, _, timesteps = prior_grad.noise_step(
+        torch.randn(4, 16, 32), timesteps=torch.tensor([0, 1, 2, 3])
+    )
+    assert x_t.shape == (4 * 4, 16, 32)
+    assert timesteps.tolist() == [0] * 4 + [1] * 4 + [2] * 4 + [3] * 4
+
+
+@pytest.mark.parametrize(
+    "mean, scale",
+    [(0.0, 1.0), (torch.zeros(16, 32), torch.ones(16, 32)), (0.0, torch.ones(16, 32))],
+)
+def test_the_prior_takes_the_scalars_its_signature_offers(mean, scale):
+    """Annotated `float | Tensor`, so a float must not be asked for `.to`."""
+    prior_grad = PriorGrad(mean, scale, num_timesteps=10)
+    assert isinstance(prior_grad.mean, torch.Tensor)
+    x_t, _, _ = prior_grad.noise_step(torch.randn(4, 16, 32))
+    assert x_t.shape == (4, 16, 32)

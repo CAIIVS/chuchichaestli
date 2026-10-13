@@ -13,7 +13,7 @@ formats.
     python benches/dataset_types.py
 
     # a 2 GiB dataset read shuffled through eight workers
-    python benches/dataset_types.py --samples 8192 --workers 8 --order shuffled
+    python benches/dataset_types.py --samples 8192 --num-workers 8 --order shuffled
 
     # what the batch costs, over one dataset
     python benches/dataset_types.py --batch-size 1 8 64

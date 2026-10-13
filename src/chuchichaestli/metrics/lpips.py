@@ -20,7 +20,11 @@ from torchvision.transforms.v2.functional import normalize
 from torchvision import models as tv
 from torchvision.models.feature_extraction import create_feature_extractor
 from torch.fx.graph_module import GraphModule
-from chuchichaestli.metrics.base import sanitize_ndim, as_tri_channel, as_batched_slices
+from chuchichaestli.utils.tensors import (
+    as_batched_slices,
+    as_tri_channel,
+    sanitize_ndim,
+)
 from chuchichaestli.models.blocks import BaseConvBlock
 from chuchichaestli.utils import partialclass
 from typing import Any, Literal

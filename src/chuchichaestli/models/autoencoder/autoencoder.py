@@ -11,6 +11,7 @@ from chuchichaestli.models.autoencoder.encoder import Encoder
 from chuchichaestli.models.autoencoder.traits import DecoderLike, EncoderLike
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.models.norm import NormTypes
+from chuchichaestli.models.spec import InitArgMixin
 from collections.abc import Sequence
 from itertools import chain
 
@@ -79,7 +80,7 @@ def _reject_sequences(**kwargs) -> None:
             )
 
 
-class Autoencoder(nn.Module):
+class Autoencoder(InitArgMixin, nn.Module):
     """Flexible autoencoder implementation.
 
     The architecture consists of an encoder-decoder structure.

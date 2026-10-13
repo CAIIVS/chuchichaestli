@@ -16,6 +16,7 @@ from chuchichaestli.models.blocks import SMConvBlock
 from chuchichaestli.models.downsampling import AvgPool
 from chuchichaestli.models.dwt import MultilevelWaveletTransformND
 from chuchichaestli.models.norm import NormTypes
+from chuchichaestli.models.spec import InitArgMixin
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.utils import partialclass, prod
 from collections.abc import Sequence
@@ -36,7 +37,7 @@ __all__ = [
 ]
 
 
-class LiteVAEEncoder(nn.Module):
+class LiteVAEEncoder(InitArgMixin, nn.Module):
     """Wavelet-domain encoding component of a `LiteVAE`.
 
     The input is decomposed by a multi-level wavelet transform, every level is
@@ -107,7 +108,9 @@ class LiteVAEEncoder(nn.Module):
         """
         super().__init__()
         if dwt_levels < 1:
-            raise ValueError(f"A wavelet encoder needs at least one level; got {dwt_levels}.")
+            raise ValueError(
+                f"A wavelet encoder needs at least one level; got {dwt_levels}."
+            )
         if mode != "periodization":
             raise ValueError(
                 f"A wavelet encoder pools every level to the resolution of the"
@@ -143,12 +146,12 @@ class LiteVAEEncoder(nn.Module):
             **{
                 f"attn_{name}": attn_args[name]
                 for name in (
-                        "n_heads",
-                        "head_dim",
-                        "dropout_p",
-                        "norm_type",
-                        "groups",
-                        "kernel_size",
+                    "n_heads",
+                    "head_dim",
+                    "dropout_p",
+                    "norm_type",
+                    "groups",
+                    "kernel_size",
                 )  # UNet attn_args
                 if name in attn_args
             },

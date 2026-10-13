@@ -10,7 +10,8 @@ from collections.abc import Callable
 from typing import Any
 
 from torch import nn
-from chuchichaestli.debug import as_bytes, cli_pbar
+from chuchichaestli.debug import as_bytes
+from chuchichaestli.utils.ansi import cli_pbar
 
 
 class HookDirection(Enum):

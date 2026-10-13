@@ -159,6 +159,9 @@ dependencies = ["pytest", "pytest-cov"]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
+# `tests` must be importable by name: torch.multiprocessing.spawn pickles a
+# worker as `tests.<module>.<fn>` and hands the child this sys.path to load it
+pythonpath = ["."]
 
 # Testing & coverage
 [tool.coverage.run]

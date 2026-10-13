@@ -5,9 +5,12 @@
 
 import torch
 import pytest
+
 # from safetensors import safe_open
 # from safetensors.torch import save_file as st_save
 from chuchichaestli.data.procedural import (
+    ConditionalDensityDataset,
+    DensityDataset,
     ProceduralDataset,
     HalfMoonsDataset,
     SpiralsDataset,
@@ -24,13 +27,29 @@ N = 20
 
 
 DATASET_FACTORIES = [
-    pytest.param(lambda: HalfMoonsDataset(n_samples=N, noise=0.0, seed=0), id="HalfMoons"),
+    pytest.param(
+        lambda: HalfMoonsDataset(n_samples=N, noise=0.0, seed=0), id="HalfMoons"
+    ),
     pytest.param(lambda: SpiralsDataset(n_samples=N, noise=0.0, seed=0), id="Spirals"),
-    pytest.param(lambda: CheckerboardDataset(n_samples=N, noise=0.0, seed=0), id="Checkerboard"),
-    pytest.param(lambda: RingsDataset(n_samples=N, n_rings=3, noise=0.0, seed=0), id="Rings"),
-    pytest.param(lambda: ConcentricSpheresDataset(dim=3, n_samples=N, noise=0.0, seed=0), id="ConcentricSpheres"),
-    pytest.param(lambda: GaussiansDataset(dim=2, n_samples=N // 3, n_gaussians=3, noise=0.0, seed=0), id="Gaussians"),
-    pytest.param(lambda: SwissRollDataset(n_samples=N, noise=0.0, seed=0), id="SwissRoll"),
+    pytest.param(
+        lambda: CheckerboardDataset(n_samples=N, noise=0.0, seed=0), id="Checkerboard"
+    ),
+    pytest.param(
+        lambda: RingsDataset(n_samples=N, n_rings=3, noise=0.0, seed=0), id="Rings"
+    ),
+    pytest.param(
+        lambda: ConcentricSpheresDataset(dim=3, n_samples=N, noise=0.0, seed=0),
+        id="ConcentricSpheres",
+    ),
+    pytest.param(
+        lambda: GaussiansDataset(
+            dim=2, n_samples=N // 3, n_gaussians=3, noise=0.0, seed=0
+        ),
+        id="Gaussians",
+    ),
+    pytest.param(
+        lambda: SwissRollDataset(n_samples=N, noise=0.0, seed=0), id="SwissRoll"
+    ),
 ]
 
 
@@ -50,8 +69,10 @@ class TestProceduralDatasetAbstract:
 
     def test_subclass_without_generate_raises(self):
         """Test incomplete abstract instance."""
+
         class Incomplete(ProceduralDataset):
             pass  # generate() not implemented
+
         with pytest.raises(TypeError):
             Incomplete(dim=2, n_samples=10)
 
@@ -121,6 +142,15 @@ class TestDerivedProceduralDataset:
             _ = ds[len(ds)]
 
     @pytest.mark.parametrize("factory", DATASET_FACTORIES)
+    def test_generation_leaves_the_global_rng_alone(self, factory):
+        """Building a dataset must not reseed its caller's generator."""
+        torch.manual_seed(123)
+        expected = torch.randn(4)
+        torch.manual_seed(123)
+        factory()
+        assert torch.equal(torch.randn(4), expected)
+
+    @pytest.mark.parametrize("factory", DATASET_FACTORIES)
     def test_reproducibility_same_seed(self, factory):
         """Test random seed."""
         ds_a = factory()
@@ -132,6 +162,7 @@ class TestDerivedProceduralDataset:
 
     def test_different_seeds_differ(self):
         """Test random seeds variability."""
+
         # Use procedural_dataset with a trivially different generator to check seeds vary.
         def _uniform(ds_):
             torch.manual_seed(ds_.seed)
@@ -153,7 +184,10 @@ class TestDerivedProceduralDataset:
         assert ds._mmap[0].shape[1] == ds.dim + 1
 
     @pytest.mark.parametrize("n_samples", [7, 10, 11, 13, 17, 99, 100, 101])
-    @pytest.mark.parametrize("cls", [RingsDataset, HalfMoonsDataset, SpiralsDataset, ConcentricSpheresDataset])
+    @pytest.mark.parametrize(
+        "cls",
+        [RingsDataset, HalfMoonsDataset, SpiralsDataset, ConcentricSpheresDataset],
+    )
     def test_classes_exact_n_samples(self, cls, n_samples):
         """Test derived ProceduralDataset n_samples per class."""
         ds = cls(n_samples=n_samples, seed=0)
@@ -214,7 +248,10 @@ class TestDerivedProceduralDataset:
         assert y.max() <= 1.0
 
     @pytest.mark.parametrize("dim", [2, 3, 5, 8])
-    @pytest.mark.parametrize("cls", [RingsDataset, HalfMoonsDataset, SpiralsDataset, ConcentricSpheresDataset])
+    @pytest.mark.parametrize(
+        "cls",
+        [RingsDataset, HalfMoonsDataset, SpiralsDataset, ConcentricSpheresDataset],
+    )
     def test_arbitrary_dim(self, cls, dim):
         """Test derived ProceduralDatasets in various dimensions."""
         ds = cls(n_samples=N, noise=0.05, dim=dim, seed=0)
@@ -224,7 +261,9 @@ class TestDerivedProceduralDataset:
 
     def test_checkerboard_2d_matches_parity(self):
         """In 2D the label is still (ix + iy) % 2."""
-        ds = CheckerboardDataset(n_samples=200, n_tiles=4, extent=2.0, noise=0.0, dim=2, seed=0)
+        ds = CheckerboardDataset(
+            n_samples=200, n_tiles=4, extent=2.0, noise=0.0, dim=2, seed=0
+        )
         X, y = _xy(ds)
         e, n_tiles = ds.extent, ds.n_tiles
         cell_size = 2.0 * e / n_tiles
@@ -264,7 +303,7 @@ class TestDerivedProceduralDataset:
         path = ds.save(tmp_path / "moons")  # no extension
         assert path.suffix == ".safetensors"
         assert path.exists()
-        
+
     def test_save_keeps_existing_extension(self, tmp_path):
         """Test ProceduralDataset.save method (with extension)."""
         ds = HalfMoonsDataset(n_samples=N, noise=0.0, seed=0)
@@ -304,6 +343,7 @@ class TestDerivedProceduralDataset:
                 ds = HalfMoonsDataset(n_samples=N, path=str(nonexistent))
         assert len(ds) == N
 
+
 class TestGenerateProceduralDataset:
     """Test the generate_procedural_dataset method."""
 
@@ -312,7 +352,7 @@ class TestGenerateProceduralDataset:
         X = torch.rand(ds.n_samples, ds.dim)
         y = (X[:, 0] > 0.5).float()
         return X, y
-    
+
     def test_basic_shape(self):
         """Test generated dataset shape."""
         ds = generate_procedural_dataset(self._simple_gen, dim=3, n_samples=N)
@@ -323,7 +363,9 @@ class TestGenerateProceduralDataset:
 
     def test_dtype_float64(self):
         """Test generated dataset data type."""
-        ds = generate_procedural_dataset(self._simple_gen, dim=2, n_samples=N, dtype=torch.float64)
+        ds = generate_procedural_dataset(
+            self._simple_gen, dim=2, n_samples=N, dtype=torch.float64
+        )
         X, y = _xy(ds)
         assert X.dtype == torch.float64
         assert y.dtype == torch.float64
@@ -351,5 +393,74 @@ class TestGenerateProceduralDataset:
             call_log.append(getattr(ds, "custom_attr", "MISSING"))
             return torch.zeros(ds.n_samples, ds.dim), torch.zeros(ds.n_samples)
 
-        generate_procedural_dataset(recording_gen, dim=2, n_samples=N, custom_attr="hello")
+        generate_procedural_dataset(
+            recording_gen, dim=2, n_samples=N, custom_attr="hello"
+        )
         assert call_log == ["hello"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [HalfMoonsDataset, CheckerboardDataset, RingsDataset, SwissRollDataset],
+)
+def test_any_point_cloud_becomes_images(source):
+    """The binning is the same whatever the cloud, however many dimensions.
+
+    Args:
+        source: Point cloud under test.
+    """
+    dataset = DensityDataset(source=source, n_images=4, side=8, points=100)
+    assert len(dataset) == 4
+    assert tuple(dataset[0].shape) == (1, 8, 8)
+    assert 0.0 <= float(dataset[0].min()) and float(dataset[0].max()) == 1.0
+
+
+def test_every_image_samples_the_whole_distribution():
+    """Dealing the points in order would cut one picture into pieces."""
+    dataset = DensityDataset(n_images=8, side=8, points=200)
+    filled = [float((image > 0).float().mean()) for image in dataset]
+    assert min(filled) > 0.5 * max(filled)
+
+
+def test_the_same_seed_bins_the_same_images():
+    """The shuffle derives from it, so the dataset is reproducible."""
+    first = DensityDataset(n_images=4, side=8, points=100, seed=7)
+    again = DensityDataset(n_images=4, side=8, points=100, seed=7)
+    assert torch.equal(first.images, again.images)
+
+
+def test_a_conditional_pair_is_the_image_and_a_coarser_one():
+    """The coarse image is what a conditional process is given to refine."""
+    dataset = ConditionalDensityDataset(n_images=4, side=16, points=200, factor=4)
+    fine, coarse = dataset[0]
+    assert fine.shape == coarse.shape
+    blocks = coarse.reshape(1, 4, 4, 4, 4)
+    assert torch.equal(blocks.amin(dim=(2, 4)), blocks.amax(dim=(2, 4)))
+    assert not torch.equal(fine, coarse)
+
+
+def test_a_side_that_does_not_divide_is_refused():
+    """Pooling down and restoring would not return the size it started at."""
+    with pytest.raises(ValueError, match="does not divide"):
+        ConditionalDensityDataset(n_images=2, side=10, points=50, factor=4)
+
+
+def test_too_few_points_for_the_images_asked_for():
+    """Silently making emptier images would be worse than saying so."""
+    cloud = HalfMoonsDataset(n_samples=50)
+    with pytest.raises(ValueError, match="too few"):
+        DensityDataset(source=cloud, n_images=4, side=8, points=100)
+
+
+def test_a_conditional_pair_can_name_its_halves():
+    """An objective reading a condition by name should not read by position."""
+    named = ConditionalDensityDataset(
+        n_images=2, side=8, points=50, return_as={"x": 0, "c": 1}
+    )
+    item = named[0]
+    assert sorted(item) == ["c", "x"]
+    assert torch.equal(item["x"], named.images[0])
+    assert torch.equal(item["c"], named.conditions[0])
+    assert isinstance(
+        ConditionalDensityDataset(n_images=2, side=8, points=50)[0], tuple
+    )
