@@ -6,7 +6,7 @@
 from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 import torch
 from torch import nn
 from torch.optim import Optimizer
@@ -23,7 +23,9 @@ from chuchichaestli.utils.registry import require
 __all__ = [
     "ClipTypes",
     "ReductionTypes",
+    "NonFiniteTypes",
     "CLIP_FUNCTIONS",
+    "NONFINITE_MODES",
     "UpdatePolicy",
     "Ema",
     "Swa",
@@ -33,6 +35,9 @@ __all__ = [
 
 ClipTypes = Literal["norm", "value"]
 ReductionTypes = Literal["mean", "sum"]
+NonFiniteTypes = Literal["raise", "skip", "ignore"]
+
+NONFINITE_MODES: frozenset[str] = frozenset(get_args(NonFiniteTypes))
 
 CLIP_FUNCTIONS: dict[str, Callable[..., torch.Tensor | None]] = {
     "norm": nn.utils.clip_grad_norm_,
@@ -48,21 +53,25 @@ class UpdatePolicy:
         clip: Threshold gradients are clipped to, or `None`.
         clip_mode: Whether `clip` bounds the gradient norm or each value.
         reduction: How the objective reduced over its batch.
+        nonfinite: Action for non-finite gradients: `"raise"` stops the run,
+            `"skip"` warns and leaves weights as is, `"ignore"` steps anyway.
     """
 
     clip: float | None = None
     clip_mode: ClipTypes = "norm"
     reduction: ReductionTypes = "mean"
+    nonfinite: NonFiniteTypes = "raise"
 
     def __post_init__(self) -> None:
-        """Validate the clipping and reduction settings.
+        """Validate the clipping, reduction and non-finite settings.
 
         Raises:
-            ValueError: If `clip_mode` or `reduction` is unknown, or `clip`
-                is not positive.
+            ValueError: If `clip_mode`, `reduction` or `nonfinite` is unknown,
+                or `clip` is not positive.
         """
         require(self.clip_mode, CLIP_FUNCTIONS, "clip mode")
         require(self.reduction, ("mean", "sum"), "reduction")
+        require(self.nonfinite, NONFINITE_MODES, "non-finite mode")
         if self.clip is not None and self.clip <= 0:
             raise ValueError(f"A clip threshold must be positive, got {self.clip!r}.")
 
@@ -84,6 +93,18 @@ class UpdatePolicy:
         if self.clip is None:
             return
         CLIP_FUNCTIONS[self.clip_mode](list(params), self.clip)
+
+    @staticmethod
+    def finite_grads(params: Iterable[nn.Parameter]) -> bool:
+        """Whether every gradient is finite.
+
+        Args:
+            params: Parameters whose gradients are checked.
+        """
+        grads = [p.grad for p in params if p.grad is not None]
+        if not grads:
+            return True
+        return bool(torch.stack([torch.isfinite(g).all() for g in grads]).all())
 
     def zero_grad(self, optimizer: Optimizer) -> None:
         """Zero the optimizer's gradients.

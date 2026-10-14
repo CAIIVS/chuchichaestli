@@ -10,6 +10,7 @@ from torch.optim import SGD, LBFGS
 
 from chuchichaestli.programs import (
     Alternating,
+    C3liRunError,
     SwaWindow,
     CompositeObjective,
     Context,
@@ -615,3 +616,72 @@ def test_the_discriminator_steps_on_its_own_loss_alone(kind):
     """The generator's loss reaches the discriminator, which must not step on it."""
     alone = discriminator_step(Alternating, ("disc",), ("d",))
     assert torch.allclose(discriminator_step(kind), alone)
+
+
+def broken_step(policy: UpdatePolicy, model: nn.Module, **kwargs) -> Step:
+    """Apply one step whose gradients are NaN.
+
+    Args:
+        policy: Says what a non-finite step does.
+        model: Model stepped, whose input is NaN.
+        kwargs: Passed on to `Step`.
+    """
+    update = Step(policy, **kwargs)
+    optimizer = SGD(model.parameters(), lr=0.1)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.5)
+    update.bind({None: optimizer}, {None: scheduler})
+    update.apply(
+        Criterion(nn.MSELoss(), model=model),
+        [(torch.full((4, 1), float("nan")), torch.zeros(4, 1))],
+        a_context(),
+    )
+    return update
+
+
+def test_a_non_finite_step_stops_the_run_by_default():
+    """Silently stepping would leave every later weight NaN."""
+    with pytest.raises(C3liRunError, match="Non-finite gradients in t after 0 steps"):
+        broken_step(UpdatePolicy(), linear())
+
+
+def test_a_skipped_step_leaves_the_weights_and_the_schedule():
+    """The step did not happen, so neither the weights nor the rate move."""
+    model = linear()
+    with pytest.warns(UserWarning, match="the step is skipped"):
+        update = broken_step(UpdatePolicy(nonfinite="skip"), model)
+    assert model.weight.item() == 1.0
+    assert model.weight.grad is None
+    assert update.schedulers[None].last_epoch == 0
+
+
+def test_an_ignored_step_steps_anyway():
+    """The old behaviour, kept for whoever wants to spare the check its sync."""
+    model = linear()
+    broken_step(UpdatePolicy(nonfinite="ignore"), model)
+    assert torch.isnan(model.weight).all()
+
+
+@pytest.mark.filterwarnings("ignore:Detected call of `lr_scheduler.step\\(\\)`")
+def test_the_scaler_handles_a_non_finite_step_in_float16():
+    """Overflow is routine while the scale settles, so it must not stop the run."""
+    model = linear()
+    broken_step(UpdatePolicy(), model, precision=torch.float16)
+    assert model.weight.item() == 1.0
+
+
+def test_a_non_finite_step_names_its_group():
+    """With several models, the report says which one broke."""
+    gen, disc = linear(), linear()
+    update = Alternating(("disc", "gen"))
+    update.bind(
+        {
+            "disc": SGD(disc.parameters(), lr=0.1),
+            "gen": SGD(gen.parameters(), lr=0.1),
+        }
+    )
+    with pytest.raises(C3liRunError, match="group 'disc'"):
+        update.apply(
+            Adversarial(),
+            [torch.full((4, 1), float("nan"))],
+            a_context(gen=gen, disc=disc),
+        )

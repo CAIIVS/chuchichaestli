@@ -23,7 +23,9 @@ from chuchichaestli.training.objective import (
 )
 from chuchichaestli.training.update import (
     CLIP_FUNCTIONS,
+    NONFINITE_MODES,
     ClipTypes,
+    NonFiniteTypes,
     ReductionTypes,
     Ema,
     Swa,
@@ -64,6 +66,8 @@ __all__ = [
     "Swa",
     "average_targets",
     "ClipTypes",
+    "NonFiniteTypes",
+    "NONFINITE_MODES",
     "ReductionTypes",
     "CLIP_FUNCTIONS",
     "Loss",

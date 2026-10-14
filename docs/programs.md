@@ -97,6 +97,12 @@ an `Eval` stage reports as it ends. Each checkpoint records the value it was
 measured at, the best one is never pruned, and `resume="best"` or
 `CheckpointStore(root).load("best")` reads it back.
 
+A step whose gradients are not finite stops the run with a `C3liRunError`
+naming the stage and step, before the optimizer writes NaN into the weights.
+`Train(nonfinite="skip")` leaves such a step out instead, with a warning, and
+`nonfinite="ignore"` steps anyway, sparing the check its device sync. Under
+`precision=torch.float16` the grad scaler skips non-finite steps itself.
+
 
 ## Adversarial Training
 

@@ -66,6 +66,7 @@ def test_without_a_threshold_the_gradients_are_left_alone():
     [
         ({"clip_mode": "abs"}, "Unsupported clip mode"),
         ({"reduction": "median"}, "Unsupported reduction"),
+        ({"nonfinite": "warn"}, "Unsupported non-finite mode"),
         ({"clip": 0.0}, "must be positive"),
         ({"clip": -1.0}, "must be positive"),
     ],
@@ -256,3 +257,20 @@ def test_refreshing_recomputes_the_batch_statistics():
     averaged.module[1].running_mean.fill_(99.0)
     averaged.refresh_batch_stats([torch.randn(8, 2) for _ in range(4)])
     assert averaged.module[1].running_mean.abs().max() < 10.0
+
+
+@pytest.mark.parametrize(
+    ("scale", "finite"),
+    [(1.0, True), (float("nan"), False), (float("inf"), False), (-float("inf"), False)],
+    ids=["finite", "nan", "inf", "-inf"],
+)
+def test_finite_grads_tells_a_usable_gradient_from_a_broken_one(scale, finite):
+    """Any one non-finite element is enough to corrupt the step."""
+    net = with_gradients(model(), 1.0)
+    net.weight.grad[0, 1] = scale
+    assert UpdatePolicy.finite_grads(net.parameters()) is finite
+
+
+def test_parameters_without_gradients_are_finite():
+    """A parameter the loss did not reach has nothing to corrupt."""
+    assert UpdatePolicy.finite_grads(model().parameters())

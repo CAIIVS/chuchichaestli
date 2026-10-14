@@ -4,6 +4,7 @@
 """Applying one optimizer step, over a single group of parameters or several."""
 
 from __future__ import annotations
+import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -448,11 +449,41 @@ class Updater(ABC):
                 self.policy.clip_grads(self._params[group])
             scaler.step(optimizer)
             scaler.update()
-        else:
+        elif self._finite(group, ctx):
             self.policy.step(optimizer, self._params[group])
+        else:
+            return
         scheduler = self.schedulers.get(group)
         if scheduler is not None:
             step_schedule(scheduler, self.monitors.get(group), ctx)
+
+    def _finite(self, group: str | None, ctx: Context) -> bool:
+        """Whether a group's gradients are finite, acting on them if not.
+
+        Gradients are reduced across processes before this check.
+
+        Args:
+            group: Update group being applied, or `None`.
+            ctx: Execution context of the stage, named in the report.
+
+        Raises:
+            C3liRunError: If a gradient is not finite and the policy says to
+                raise.
+        """
+        mode = self.policy.nonfinite
+        if mode == "ignore" or self.policy.finite_grads(self._params[group]):
+            return True
+        where = ctx.path if group is None else f"{ctx.path} (group {group!r})"
+        steps = ctx.progress.global_step
+        found = f"Non-finite gradients in {where} after {steps} steps"
+        if mode == "raise":
+            raise C3liRunError(
+                f"{found}; stepping would corrupt the weights. Pass "
+                "nonfinite='skip' to leave such steps out."
+            )
+        warnings.warn(f"{found}; the step is skipped.", stacklevel=2)
+        self.policy.zero_grad(self.optimizers[group])
+        return False
 
     @staticmethod
     def state_key(prefix: str, group: str | None) -> str:

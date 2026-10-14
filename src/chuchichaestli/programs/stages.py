@@ -54,6 +54,7 @@ from chuchichaestli.training.optim import OptimSpec, disjoint_params
 from chuchichaestli.training.update import (
     ClipTypes,
     Ema,
+    NonFiniteTypes,
     ReductionTypes,
     UpdatePolicy,
     average_targets,
@@ -1217,6 +1218,7 @@ class Train(StageLoop):
         clip: float | None = None,
         clip_mode: ClipTypes | None = None,
         reduction: ReductionTypes | None = None,
+        nonfinite: NonFiniteTypes | None = None,
         precision: torch.dtype | None = None,
         requires: Sequence[str] = (),
         provides: Sequence[str] = (),
@@ -1258,6 +1260,9 @@ class Train(StageLoop):
                 `"norm"` when absent.
             reduction: How the objective reduced over its batch; `"mean"`
                 when absent.
+            nonfinite: What a step with non-finite gradients does: `"raise"`
+                (when absent) stops the run, `"skip"` leaves the weights as
+                they were, and `"ignore"` steps anyway.
             precision: Precision the forward runs in, or `None` for full precision.
             requires: Binding names that must resolve before the run starts.
             provides: Binding names this stage publishes.
@@ -1301,6 +1306,7 @@ class Train(StageLoop):
                     ("clip", clip),
                     ("clip_mode", clip_mode),
                     ("reduction", reduction),
+                    ("nonfinite", nonfinite),
                     ("precision", precision),
                 )
                 if value is not None
@@ -1323,6 +1329,7 @@ class Train(StageLoop):
             clip=clip,
             clip_mode="norm" if clip_mode is None else clip_mode,
             reduction="mean" if reduction is None else reduction,
+            nonfinite="raise" if nonfinite is None else nonfinite,
         )
         self.precision = precision
         self.update = update or Step(policy=self.policy, precision=precision)

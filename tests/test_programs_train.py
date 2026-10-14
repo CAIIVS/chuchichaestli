@@ -20,10 +20,11 @@ from chuchichaestli.programs import (
     Finetune,
     Runner,
     Signal,
+    Step,
     Train,
 )
 from chuchichaestli.programs.data import C3liDataError
-from chuchichaestli.programs.runner import C3liProgramError
+from chuchichaestli.programs.runner import C3liProgramError, C3liRunError
 from chuchichaestli.training import OptimSpec, Term
 from chuchichaestli.training.update import Ema
 
@@ -1090,3 +1091,57 @@ def test_a_closure_step_hands_a_plateau_schedule_its_value():
     Runner(program, hooks=[], device="cpu").run()
     scheduler = fit.update.schedulers[None]
     assert scheduler.best == 1.0
+
+
+class NanOnce(nn.Module):
+    """A mean squared error that is NaN on its first call only."""
+
+    def __init__(self):
+        """Constructor."""
+        super().__init__()
+        self.calls = 0
+
+    def forward(self, y, target):
+        """Compare an output to its target.
+
+        Args:
+            y: The model's output.
+            target: What it should have been.
+        """
+        self.calls += 1
+        loss = nn.functional.mse_loss(y, target)
+        return loss * float("nan") if self.calls == 1 else loss
+
+
+def test_a_run_skipping_a_non_finite_step_trains_on():
+    """One bad batch costs one step, not the run."""
+    model = linear(fill=0.5)
+    fit = Train(
+        "fit",
+        model=model,
+        data=ramp(4),
+        batch_size=2,
+        loss=NanOnce(),
+        epochs=1,
+        nonfinite="skip",
+        optim=OptimSpec.sgd(lr=1e-3),
+    )
+    with pytest.warns(UserWarning, match="fit after 0 steps; the step is skipped"):
+        Runner(fit, hooks=[], device="cpu").run()
+    assert torch.isfinite(model.weight).all()
+    assert not torch.equal(model.weight, torch.full_like(model.weight, 0.5))
+
+
+def test_a_run_stops_at_a_non_finite_step_by_default():
+    """The weights it would have written are worse than no run at all."""
+    fit = Train(
+        "fit", model=linear(), data=ramp(4), batch_size=2, loss=NanOnce(), epochs=1
+    )
+    with pytest.raises(C3liRunError, match="Non-finite gradients in fit"):
+        Runner(fit, hooks=[], device="cpu").run()
+
+
+def test_nonfinite_belongs_to_the_update_when_one_is_given():
+    """Setting it on the stage as well would leave one of the two ignored."""
+    with pytest.raises(ValueError, match="nonfinite"):
+        Train(loss=nn.MSELoss(), update=Step(), nonfinite="skip")
