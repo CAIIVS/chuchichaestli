@@ -936,6 +936,7 @@ class Checkpointer:
             hooks=hook_states(self._runner.hooks),
             score=self.score,
             run_name=self._run_name,
+            counts=self._ctx.counts(),
         )
         if checkpoint is not None and announce:
             self._ctx.emit(

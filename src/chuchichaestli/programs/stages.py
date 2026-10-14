@@ -41,7 +41,7 @@ from chuchichaestli.programs.update import (
     Updater,
     WeightsTypes,
 )
-from chuchichaestli.programs.events import UNIT_MAP, EventType, Progress, Signal
+from chuchichaestli.programs.events import EventType, Progress, Signal
 from chuchichaestli.programs.topology import lockstep, reduce_metrics
 from chuchichaestli.programs.traits import (
     DiffusionLike,
@@ -299,8 +299,7 @@ class Exporter(StageBlock, ABC):
         template = str(self.path)
         if "{" not in template:
             return self.path
-        totals = {unit: ctx.total(unit) for unit in UNIT_MAP}
-        return Path(template.format(name=self.name, **totals))
+        return Path(template.format(name=self.name, **ctx.counts()))
 
     def check(self, target: Path) -> None:
         """Reject a file this exporter cannot write, on every rank.

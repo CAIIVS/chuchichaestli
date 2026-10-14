@@ -32,6 +32,7 @@ from chuchichaestli.programs import (
     Runner,
     Signal,
     Train,
+    WeightsExport,
 )
 from chuchichaestli.metrics import MSE
 from chuchichaestli.models.unet import UNet
@@ -770,3 +771,48 @@ def test_what_a_finished_stage_published_survives_a_resume(tmp_path, at, stage):
     resumed(probed(carried), store)
     assert carried["mse"] == whole["mse"]
     assert identical(dict(whole["ema"]), dict(carried["ema"]))
+
+
+def counted(seen: list, export=None) -> Program:
+    """Build a program that trains, then notes the run's counts.
+
+    Args:
+        seen: List the counts are appended to.
+        export: Directory to export numbered weights into, if any.
+    """
+    stages = [
+        trainer(epochs=3),
+        Call("count", fn=lambda ctx: seen.append(ctx.counts())),
+    ]
+    if export is not None:
+        stages.append(
+            WeightsExport(
+                "save", path=export / "w_{epoch}_{step}_{advance}.safetensors"
+            )
+        )
+    return Program(provide={"model": model()}, stages=stages)
+
+
+@pytest.mark.parametrize("at", [3, 5, 8])
+def test_a_resumed_run_counts_on_from_where_it_stopped(tmp_path, at):
+    """The run's step, epoch and advance counts must not restart at zero."""
+    whole: list = []
+    uninterrupted(counted(whole))
+    carried: list = []
+    store = tmp_path / "run"
+    interrupted(counted([]), store, at=at)
+    resumed(counted(carried), store)
+    assert carried == whole
+    assert whole[0]["step"] == 3 * STEPS_PER_EPOCH and whole[0]["epoch"] == 3
+
+
+def test_a_resumed_export_numbers_its_file_as_an_uninterrupted_one(tmp_path):
+    """Restarted counters would overwrite the files of earlier passes."""
+    first, second = tmp_path / "whole", tmp_path / "carried"
+    uninterrupted(counted([], first))
+    store = tmp_path / "run"
+    interrupted(counted([], second), store, at=5)
+    resumed(counted([], second), store)
+    assert sorted(p.name for p in second.iterdir()) == sorted(
+        p.name for p in first.iterdir()
+    )

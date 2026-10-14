@@ -434,6 +434,7 @@ class Runner:
         )
         ctx.watch_bindings(self._place)
         self._restore_hooks(checkpoint.hooks)
+        ctx.restore_counts(checkpoint.counts)
         if checkpoint.rng is not None:
             restore_rng_state(dict(checkpoint.rng))
         ctx.progress = self.program.progress()

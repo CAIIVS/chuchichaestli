@@ -75,6 +75,7 @@ class Checkpoint:
         weights: File each model binding was written to.
         rng: Ambient RNG capture, or `None` if it was not recorded.
         run_name: Name of the run that wrote it, or `None`.
+        counts: Units the run had completed, as `Context.counts` returns them.
     """
 
     path: Path
@@ -94,6 +95,7 @@ class Checkpoint:
     weights: Mapping[str, Path] = field(default_factory=dict)
     rng: Mapping[str, Any] | None = None
     run_name: str | None = None
+    counts: Mapping[str, int] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         """Return a short description of the checkpoint."""
@@ -348,6 +350,7 @@ class CheckpointStore:
         hooks: Mapping[str, Any] | None = None,
         score: Mapping[str, Any] | None = None,
         run_name: str | None = None,
+        counts: Mapping[str, int] | None = None,
     ) -> Checkpoint | None:
         """Write one checkpoint and return it, or `None` off the main process.
 
@@ -365,6 +368,7 @@ class CheckpointStore:
             score: The monitored value the checkpoint is ranked by, as a
                 mapping of `monitor`, `mode` and `value`.
             run_name: Name of the run writing it.
+            counts: Units the run has completed.
         """
         directory = self.directory_for(index, create=True)
         models = {n: v for n, v in bindings.items() if isinstance(v, nn.Module)}
@@ -413,6 +417,8 @@ class CheckpointStore:
             manifest["score"] = dict(score)
         if run_name is not None:
             manifest["run_name"] = run_name
+        if counts is not None:
+            manifest["counts"] = dict(counts)
         self._write_json(directory / self.manifest, manifest)
         # delete old checkpoints if `keep` is set
         self.prune()
@@ -433,6 +439,7 @@ class CheckpointStore:
             weights=files,
             rng=payload.get("rng"),
             run_name=run_name,
+            counts=dict(counts or {}),
         )
 
     def _weight_name(self, binding: str, taken: set[Path]) -> str:
@@ -573,6 +580,7 @@ class CheckpointStore:
             weights=files,
             rng=payload.get("rng"),
             run_name=manifest.get("run_name"),
+            counts=manifest.get("counts", {}),
         )
 
     def read_manifest(self, resume: str | Path | int) -> dict[str, Any]:

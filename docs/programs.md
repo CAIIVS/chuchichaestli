@@ -251,8 +251,8 @@ where the run had got to, so a stage entered every few epochs leaves its own
 files rather than overwriting the last ones. An inference pass is not an
 epoch: `Predict` and `Eval` loops report `trains=False`, so only a loop that
 updates the model moves the epoch and step counters. `Checkpointer(unit=...)`
-counts the same way. The counters start from zero on a resume, as the
-checkpointer's own interval does.
+counts the same way. A checkpoint records the counters, so a resumed run
+carries on numbering where it stopped.
 
 ```python
 ImageExport(

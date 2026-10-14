@@ -1716,3 +1716,16 @@ def test_an_unreadable_manifest_is_reported(tmp_path):
     (written.path / store.manifest).write_text("{")
     with pytest.raises(C3liCheckpointError, match="No checkpoint manifest|unreadable"):
         store.read_manifest(written.path)
+
+
+def test_a_checkpoint_records_the_run_counts(tmp_path):
+    """A resume needs them to number its exports and steps where it stopped."""
+    store = CheckpointStore(tmp_path)
+    written = store.save(
+        index=1,
+        program=recorder([], "a"),
+        bindings={},
+        topology=Local(device="cpu"),
+        counts={"advance": 4, "epoch": 2, "step": 8},
+    )
+    assert store.load(written.path).counts == {"advance": 4, "epoch": 2, "step": 8}

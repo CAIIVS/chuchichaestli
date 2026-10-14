@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 import torch
 from chuchichaestli.programs.events import (
@@ -56,7 +56,7 @@ class Context:
         dispatch: Callable[[Event], Signal] | None = None,
         bindings: dict[str, Any] | None = None,
         group: str | None = None,
-        totals: dict[str, int] | None = None,
+        counts: dict[str, int] | None = None,
         registry: dict[str, Any] | None = None,
         watcher: Callable[[str, Any], None] | None = None,
     ):
@@ -72,7 +72,7 @@ class Context:
             dispatch: Receives emitted events and returns the hooks' verdict.
             bindings: Artifacts bound at this level.
             group: Update group currently being applied.
-            totals: Units completed so far, shared with every child.
+            counts: Units completed so far, shared with every child.
             registry: Every binding of the run, shared with every child.
             watcher: Receives each binding as it is registered.
         """
@@ -88,7 +88,7 @@ class Context:
         self.progress = Progress()
         self._bindings: dict[str, Any] = dict(bindings or {})
         self._cache: dict[tuple[str | None, str], Any] = {}
-        self._totals = {} if totals is None else totals
+        self._counts = {} if counts is None else counts
         self._registry = {} if registry is None else registry
         self._watcher = watcher
         self._dispatch = dispatch
@@ -289,16 +289,29 @@ class Context:
         event = Event(event_type, self.path, self.progress, payload)
         for unit in UNIT_MAP:
             if counts_toward(event, unit):
-                self._totals[unit] = self._totals.get(unit, 0) + 1
+                self._counts[unit] = self._counts.get(unit, 0) + 1
         return self._dispatch(event) if self._dispatch is not None else Signal.GO
 
-    def total(self, unit: str) -> int:
+    def count(self, unit: str) -> int:
         """Return how many of a unit the run has completed.
 
         Args:
             unit: `"advance"`, `"epoch"` or `"step"`.
         """
-        return self._totals.get(unit, 0)
+        return self._counts.get(unit, 0)
+
+    def counts(self) -> dict[str, int]:
+        """Return how many of each unit the run has completed."""
+        return {unit: self.count(unit) for unit in UNIT_MAP}
+
+    def restore_counts(self, counts: Mapping[str, int]) -> None:
+        """Carry on counting from counts a checkpoint recorded.
+
+        Args:
+            counts: Units completed, as `counts` returns them.
+        """
+        self._counts.clear()
+        self._counts.update({unit: int(count) for unit, count in counts.items()})
 
     def child(self, index: int, name: str) -> Context:
         """Build the context for a child stage.
@@ -319,7 +332,7 @@ class Context:
             dtype=self.dtype,
             dispatch=self._dispatch,
             group=self.group,
-            totals=self._totals,
+            counts=self._counts,
             registry=self._registry,
             watcher=self._watcher,
         )

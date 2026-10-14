@@ -133,3 +133,13 @@ def test_stateful_sees_what_an_enclosing_context_bound():
     child.bind("optim", torch.optim.Adam(root["model"].parameters()))
     assert sorted(child.stateful()) == ["model", "optim"]
     assert sorted(root.stateful()) == ["model"]
+
+
+def test_restored_counts_reach_every_child():
+    """A child counts into the same dict, so a restore must reach it too."""
+    root = Context("program", 0)
+    child = root.child(0, "fit")
+    root.restore_counts({"step": 12, "epoch": 3})
+    assert child.counts() == {"advance": 0, "epoch": 3, "step": 12}
+    child.emit(EventType.STEP_ENDED, trains=True)
+    assert root.count("step") == 13
