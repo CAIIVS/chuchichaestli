@@ -833,3 +833,46 @@ def test_a_rank_pins_its_device_before_joining_the_group(monkeypatch):
     monkeypatch.setattr(dist, "get_world_size", lambda: 1)
     Ddp(device="cpu")
     assert order == ["pin", "init"]
+
+
+class Names:
+    """A hook keeping the name the run opened with."""
+
+    def __init__(self):
+        """Constructor."""
+        self.run_name = None
+
+    def on(self, event):
+        """Keep the run's name when it begins.
+
+        Args:
+            event: What the runner just did.
+        """
+        if event.type is EventType.RUN_BEGAN:
+            self.run_name = event.payload["run_name"]
+        return Signal.GO
+
+
+def _names(rank, world, results, port):
+    """Run unnamed on every rank and report the name each one drew.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+    """
+    topology = join_group(rank, world, port)
+    try:
+        names = Names()
+        Runner(Call("a", fn=lambda c: None), topology=topology, hooks=[names]).run()
+        results[rank] = names.run_name
+    finally:
+        topology.close()
+
+
+def test_every_rank_opens_with_the_same_drawn_name():
+    """Each rank drawing its own would split one run across several names."""
+    reported = under_ddp(_names, free_port())
+    assert len(reported) == WORLD
+    assert reported[0] == reported[1]

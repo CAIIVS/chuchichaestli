@@ -74,6 +74,7 @@ class Checkpoint:
         specs: How to rebuild each binding that records a model spec.
         weights: File each model binding was written to.
         rng: Ambient RNG capture, or `None` if it was not recorded.
+        run_name: Name of the run that wrote it, or `None`.
     """
 
     path: Path
@@ -92,6 +93,7 @@ class Checkpoint:
     specs: Mapping[str, ModelSpec] = field(default_factory=dict)
     weights: Mapping[str, Path] = field(default_factory=dict)
     rng: Mapping[str, Any] | None = None
+    run_name: str | None = None
 
     def __repr__(self) -> str:
         """Return a short description of the checkpoint."""
@@ -345,6 +347,7 @@ class CheckpointStore:
         rng: bool = True,
         hooks: Mapping[str, Any] | None = None,
         score: Mapping[str, Any] | None = None,
+        run_name: str | None = None,
     ) -> Checkpoint | None:
         """Write one checkpoint and return it, or `None` off the main process.
 
@@ -361,6 +364,7 @@ class CheckpointStore:
             hooks: Hook states to record, as `hook_states` returns them.
             score: The monitored value the checkpoint is ranked by, as a
                 mapping of `monitor`, `mode` and `value`.
+            run_name: Name of the run writing it.
         """
         directory = self.directory_for(index, create=True)
         models = {n: v for n, v in bindings.items() if isinstance(v, nn.Module)}
@@ -407,6 +411,8 @@ class CheckpointStore:
         }
         if score is not None:
             manifest["score"] = dict(score)
+        if run_name is not None:
+            manifest["run_name"] = run_name
         self._write_json(directory / self.manifest, manifest)
         # delete old checkpoints if `keep` is set
         self.prune()
@@ -426,6 +432,7 @@ class CheckpointStore:
             specs={n: s for n, s in specs.items() if s is not None},
             weights=files,
             rng=payload.get("rng"),
+            run_name=run_name,
         )
 
     def _weight_name(self, binding: str, taken: set[Path]) -> str:
@@ -526,11 +533,7 @@ class CheckpointStore:
         """
         directory = self.resolve(resume)
         # read manifest
-        manifest = self._read_json(directory / self.manifest)
-        if manifest is None:
-            raise C3liCheckpointError(
-                f"The manifest at {str(directory / self.manifest)!r} is unreadable."
-            )
+        manifest = self.read_manifest(directory)
         version = int(manifest.get("version", 0))
         if version > SCHEMA_VERSION:
             raise C3liCheckpointError(
@@ -569,7 +572,31 @@ class CheckpointStore:
             specs=specs,
             weights=files,
             rng=payload.get("rng"),
+            run_name=manifest.get("run_name"),
         )
+
+    def read_manifest(self, resume: str | Path | int) -> dict[str, Any]:
+        """Read a checkpoint's manifest, without its tensors.
+
+        Args:
+            resume: An index, `"first"`, `"last"`, `"last~N"`, `"best"`, a
+                checkpoint directory, or its manifest file.
+
+        Raises:
+            C3liCheckpointError: If nothing usable is there.
+        """
+        path = self.resolve(resume) / self.manifest
+        manifest = self._read_json(path)
+        if manifest is None:
+            raise C3liCheckpointError(f"The manifest at {str(path)!r} is unreadable.")
+        return manifest
+
+    def run_names(self) -> set[str]:
+        """Return the names of the runs that wrote this store's checkpoints."""
+        names = (
+            self.read_manifest(path).get("run_name") for path in self.checkpoints()
+        )
+        return {name for name in names if name}
 
     def restore(
         self,

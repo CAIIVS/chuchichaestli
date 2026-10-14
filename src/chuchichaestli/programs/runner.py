@@ -36,6 +36,7 @@ from chuchichaestli.programs.traits import (
     is_critical,
     needs_store,
 )
+from chuchichaestli.utils.names import unique_name
 from chuchichaestli.utils.registry import require
 
 
@@ -127,6 +128,9 @@ class Runner:
         topology: Topology | None = None,
         backends: BackendsPresets = "default",
         allow_signature_change: bool = False,
+        project: str | None = None,
+        experiment: str | None = None,
+        run_name: str | None = None,
     ):
         """Constructor.
 
@@ -145,6 +149,10 @@ class Runner:
                 `"deterministic"` or `"strict"`.
             allow_signature_change: Resume even though the program's stages
                 no longer match the original ones.
+            project: Project the run belongs to, for trackers.
+            experiment: Experiment the run belongs to, for trackers.
+            run_name: Name of the run; drawn when absent, or kept from the
+                checkpoint a run resumes.
         """
         self.program = program
         self.seed = seed
@@ -153,6 +161,9 @@ class Runner:
         self.hooks = list(hooks) if hooks is not None else [Console()]
         self.backends = backends
         self.allow_signature_change = allow_signature_change
+        self.project = project
+        self.experiment = experiment
+        self.run_name = run_name
         self._device = torch.device(device) if device is not None else None
         self._topology = topology
         self._muted: set[int] = set()
@@ -325,7 +336,14 @@ class Runner:
         for hook in self.hooks:
             if isinstance(hook, RunAwareHook):
                 hook.attach(self, ctx)
-        ctx.emit(EventType.RUN_BEGAN, seed=self.seed, backends=self.backends)
+        ctx.emit(
+            EventType.RUN_BEGAN,
+            seed=self.seed,
+            backends=self.backends,
+            project=self.project,
+            experiment=self.experiment,
+            run_name=self._name_run(),
+        )
         failure: str | None = None
         # whether the state is whole: between program steps, not partway into one
         settled = False
@@ -360,6 +378,18 @@ class Runner:
                     f"Closing the failed run also raised {exc!r}.", stacklevel=2
                 )
         return self.program.progress()
+
+    def _name_run(self) -> str:
+        """Return the run's name: the given one, the resumed one, or a new one."""
+        if self.run_name is not None:
+            return self.run_name
+        store = self.checkpoints
+        if self.resume is not None and store is not None:
+            resumed = store.read_manifest(self.resume).get("run_name")
+            if resumed:
+                return resumed
+        taken = store.run_names() if store is not None else ()
+        return self.topology.broadcast(unique_name(taken))
 
     def _advanced(self, ctx: Context) -> Signal:
         """Announce that the program took one step.

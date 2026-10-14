@@ -1652,3 +1652,67 @@ def test_two_stages_holding_models_keep_them_apart(tmp_path):
         "program-0-a-model.safetensors",
         "program-1-b-model.safetensors",
     ]
+
+
+def run_names(trace) -> list[str]:
+    """Return the name each run in a trace opened with.
+
+    Args:
+        trace: JSONL file the `Jsonl` hook appended to.
+    """
+    return [
+        e.payload["run_name"] for e in Jsonl.read(trace, only=[EventType.RUN_BEGAN])
+    ]
+
+
+def test_a_checkpoint_records_the_name_of_its_run(tmp_path):
+    """The name is how a resumed run finds itself again."""
+    store = tmp_path / "run"
+    Runner(
+        recorder([]),
+        store=store,
+        run_name="baseline",
+        hooks=[Checkpointer(every=1, unit="advance")],
+    ).run()
+    written = CheckpointStore(store)
+    assert {written.load(p).run_name for p in written.checkpoints()} == {"baseline"}
+    assert written.read_manifest("last")["run_name"] == "baseline"
+    assert written.run_names() == {"baseline"}
+
+
+def test_a_resumed_run_keeps_its_name(tmp_path):
+    """Its points belong in the same tracker run as before the interruption."""
+    store = tmp_path / "run"
+    Runner(
+        recorder([]),
+        store=store,
+        hooks=[Checkpointer(every=1, unit="advance"), Jsonl(), StopAfter(2)],
+    ).run()
+    Runner(recorder([]), store=store, resume="last", hooks=[Jsonl()]).run()
+    first, second = run_names(store / "trace.jsonl")
+    assert first == second
+
+
+def test_a_given_name_overrides_the_resumed_one(tmp_path):
+    """An explicit name is used as given, even on a resume."""
+    store = tmp_path / "run"
+    Runner(
+        recorder([]),
+        store=store,
+        hooks=[Checkpointer(every=1, unit="advance"), StopAfter(2)],
+    ).run()
+    Runner(
+        recorder([]), store=store, resume="last", run_name="renamed", hooks=[Jsonl()]
+    ).run()
+    assert run_names(store / "trace.jsonl") == ["renamed"]
+
+
+def test_an_unreadable_manifest_is_reported(tmp_path):
+    """A truncated write must not pass for a checkpoint without a name."""
+    store = CheckpointStore(tmp_path)
+    written = store.save(
+        index=1, program=recorder([], "a"), bindings={}, topology=Local(device="cpu")
+    )
+    (written.path / store.manifest).write_text("{")
+    with pytest.raises(C3liCheckpointError, match="No checkpoint manifest|unreadable"):
+        store.read_manifest(written.path)

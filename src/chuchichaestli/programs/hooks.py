@@ -796,6 +796,7 @@ class Checkpointer:
         self._due = False
         self._at: Progress | None = None
         self._at_path: str | None = None
+        self._run_name: str | None = None
 
     def __repr__(self) -> str:
         """Return a short description of the hook."""
@@ -857,6 +858,8 @@ class Checkpointer:
         Args:
             event: What the runner just did.
         """
+        if event.type is EventType.RUN_BEGAN:
+            self._run_name = event.payload.get("run_name")
         if counts_toward(event, self.unit):
             self._counted += 1
             self._due = self._due or self._counted % self.every == 0
@@ -932,6 +935,7 @@ class Checkpointer:
             rng=self.rng,
             hooks=hook_states(self._runner.hooks),
             score=self.score,
+            run_name=self._run_name,
         )
         if checkpoint is not None and announce:
             self._ctx.emit(

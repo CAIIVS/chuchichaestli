@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the runner: pre-flight, control flow and placement."""
 
+import re
 import socket
 
 import pytest
@@ -17,6 +18,7 @@ from chuchichaestli.programs.events import (
     Progress,
     Signal,
 )
+from chuchichaestli.programs.ckpt import CheckpointStore
 from chuchichaestli.programs.hooks import Console, Jsonl
 from chuchichaestli.programs.runner import (
     C3liProgramError,
@@ -456,8 +458,10 @@ def test_two_identical_runs_produce_identical_traces(tmp_path):
         )
 
     first, second = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
-    Runner(build(), seed=5, hooks=[Jsonl(first.name)], store=first.parent).run()
-    Runner(build(), seed=5, hooks=[Jsonl(second.name)], store=second.parent).run()
+    for trace in (first, second):
+        Runner(
+            build(), seed=5, hooks=[Jsonl(trace.name)], store=trace.parent, run_name="r"
+        ).run()
     assert first.read_text() == second.read_text()
 
 
@@ -637,3 +641,80 @@ def test_console_colours_when_forced():
         hooks=[Console(stream=out, color=True)],
     ).run()
     assert "\033[36m" in out.getvalue()
+
+
+def began(record: Record) -> dict:
+    """Return the payload the run opened with.
+
+    Args:
+        record: Hook that saw the run.
+    """
+    return next(e for e in record.events if e.type is EventType.RUN_BEGAN).payload
+
+
+def test_the_run_opens_with_its_names():
+    """Trackers and traces learn the names from the event, not the runner."""
+    record = Record()
+    Runner(
+        Call("a", fn=lambda c: None),
+        hooks=[record],
+        project="vision",
+        experiment="ablation",
+        run_name="baseline",
+    ).run()
+    payload = began(record)
+    assert (payload["project"], payload["experiment"]) == ("vision", "ablation")
+    assert payload["run_name"] == "baseline"
+
+
+def test_an_unnamed_run_draws_a_readable_name():
+    """Every run has a name, and none is left to the backend."""
+    record = Record()
+    Runner(Call("a", fn=lambda c: None), hooks=[record]).run()
+    payload = began(record)
+    assert payload["project"] is None and payload["experiment"] is None
+    assert re.fullmatch("[a-z]+-[a-z]+", payload["run_name"])
+
+
+def test_a_drawn_name_avoids_those_in_the_store(tmp_path, monkeypatch):
+    """Runs sharing a store must not share a name."""
+    from chuchichaestli.programs import runner as runner_module
+
+    store = CheckpointStore(tmp_path)
+    store.save(
+        index=1,
+        program=Program([Call("a", fn=lambda c: None)]),
+        bindings={},
+        topology=Local(device="cpu"),
+        run_name="warm-badger",
+    )
+    seen = []
+    monkeypatch.setattr(
+        runner_module, "unique_name", lambda taken: seen.append(set(taken)) or "x-y"
+    )
+    Runner(Call("a", fn=lambda c: None), store=tmp_path, hooks=[]).run()
+    assert seen == [{"warm-badger"}]
+
+
+def test_naming_a_run_leaves_its_randomness_alone():
+    """A drawn name must not move the seeded streams the run draws from."""
+
+    def weights(**names):
+        x = torch.rand(4, 2, generator=torch.Generator().manual_seed(0))
+        model = nn.Linear(2, 2, bias=False)
+        fit = Train(
+            "fit",
+            model=model,
+            data=TensorDataset(x, x),
+            batch_size=2,
+            loss=nn.MSELoss(),
+            epochs=1,
+            optim=OptimSpec.sgd(lr=0.1),
+        )
+        program = Program(
+            [Call("noise", fn=lambda c: model.weight.data.normal_()), fit]
+        )
+        Runner(program, seed=3, hooks=[], device="cpu", **names).run()
+        return model.weight.detach().clone()
+
+    assert torch.equal(weights(), weights(run_name="given"))
