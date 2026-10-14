@@ -22,7 +22,7 @@ from chuchichaestli.utils.rng import (
     rng_generator,
     seed_ambient,
 )
-from chuchichaestli.utils.registry import require
+from chuchichaestli.utils.registry import require, require_module
 from chuchichaestli.utils.units import metric_suffix, nbytes
 from chuchichaestli.utils.tensors import (
     as_array,
@@ -64,6 +64,7 @@ __all__ = [
     "broadcast",
     "broadcast_kwargs",
     "require",
+    "require_module",
     "metric_suffix",
     "nbytes",
     "derive_seed",

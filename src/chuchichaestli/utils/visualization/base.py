@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, get_args
 from chuchichaestli.utils.modules import DEFAULT_MODULE_LABELS as _L
+from chuchichaestli.utils.registry import require_module
 from chuchichaestli.utils.ir import IRGraph, IRNode
 from chuchichaestli.utils.visualization.colors import get_color, color_variant
 
@@ -32,22 +33,17 @@ def require_mpl(purpose: str = "this backend") -> SimpleNamespace:
     Args:
         purpose: What matplotlib is needed for, named in the error.
     """
-    try:
-        import matplotlib
-        from matplotlib.figure import Figure
-        from matplotlib.patches import (
-            Polygon,
-            FancyBboxPatch,
-            FancyArrowPatch,
-            ConnectionPatch,
-            Patch,
-            Rectangle,
-        )
-    except ModuleNotFoundError as exc:
-        raise ImportError(
-            f"Matplotlib is required for {purpose}. "
-            "Install it with: pip install 'chuchichaestli[viz]'"
-        ) from exc
+    matplotlib = require_module("matplotlib", "viz", purpose)
+    from matplotlib.figure import Figure
+    from matplotlib.patches import (
+        Polygon,
+        FancyBboxPatch,
+        FancyArrowPatch,
+        ConnectionPatch,
+        Patch,
+        Rectangle,
+    )
+
     return SimpleNamespace(
         matplotlib=matplotlib,
         Figure=Figure,

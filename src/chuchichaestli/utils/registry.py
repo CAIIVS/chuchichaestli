@@ -1,14 +1,16 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Registry lookups that name the alternatives when they fail."""
+"""Lookups that name the alternatives, or the fix, when they fail."""
 
 from __future__ import annotations
 from collections.abc import Callable, Collection, Mapping
+from importlib import import_module
+from types import ModuleType
 from typing import Any
 
 
-__all__ = ["require"]
+__all__ = ["require", "require_module"]
 
 
 def require(
@@ -41,3 +43,24 @@ def require(
         raise ValueError(message(options))
     qualifier = f" {context}" if context else ""
     raise ValueError(f"Unsupported{qualifier}: {name!r}. Use one of {options}.")
+
+
+def require_module(module: str, extra: str, purpose: str) -> ModuleType:
+    """Import an optional package, naming the extra that installs it if missing.
+
+    Args:
+        module: Dotted name of the module to import.
+        extra: The `chuchichaestli` extra that installs it.
+        purpose: What the module is needed for, named in the error.
+
+    Raises:
+        ImportError: If the module cannot be found.
+    """
+    try:
+        return import_module(module)
+    except ModuleNotFoundError as exc:
+        package = module.partition(".")[0]
+        raise ImportError(
+            f"{package} is required for {purpose}. "
+            f"Install it with: pip install 'chuchichaestli[{extra}]'"
+        ) from exc

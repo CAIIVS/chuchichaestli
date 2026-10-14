@@ -1,11 +1,14 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Tests for registry lookups."""
+"""Tests for registry lookups and optional imports."""
+
+import sys
 
 import pytest
 
-from chuchichaestli.utils.registry import require
+from chuchichaestli.utils.registry import require, require_module
+from chuchichaestli.utils.visualization.base import require_mpl
 
 
 REGISTRY = {"b": 2, "a": 1, "c": 3}
@@ -71,3 +74,28 @@ def test_a_custom_message_is_only_built_on_failure():
 
     assert require("a", REGISTRY, message=message) == 1
     assert calls == []
+
+
+def test_an_installed_module_is_returned():
+    """Submodules import by their dotted name."""
+    import json.decoder
+
+    assert require_module("json.decoder", "x", "decoding") is json.decoder
+
+
+def test_a_missing_module_names_its_extra_and_purpose():
+    """The error says what failed, why it was needed and how to fix it."""
+    with pytest.raises(
+        ImportError, match="pip install 'chuchichaestli\\[trk\\]'"
+    ) as info:
+        require_module("c3li_absent.sub", "trk", "the tracker")
+    message = str(info.value)
+    assert message.startswith("c3li_absent is required for the tracker.")
+    assert isinstance(info.value.__cause__, ModuleNotFoundError)
+
+
+def test_require_mpl_names_the_viz_extra(monkeypatch):
+    """A blocked matplotlib reports through the shared guard."""
+    monkeypatch.setitem(sys.modules, "matplotlib", None)
+    with pytest.raises(ImportError, match=r"plots\. .*chuchichaestli\[viz\]"):
+        require_mpl("plots")
