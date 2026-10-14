@@ -31,7 +31,7 @@ from chuchichaestli.data.batch import (
     samples_in_batch,
 )
 from chuchichaestli.data.save import SAVERS, save_dataset
-from chuchichaestli.programs.context import Context
+from chuchichaestli.programs.context import Context, join_path
 from chuchichaestli.programs.data import C3liDataError, DataManager
 from chuchichaestli.programs.objective import CompositeObjective, Criterion
 from chuchichaestli.programs.update import (
@@ -707,7 +707,7 @@ class Phase:
         here = path or self.name
         tree = [(here, type(self).__name__)]
         for index, child in enumerate(self.stages):
-            child_path = f"{here}/{index}:{child.name}"
+            child_path = join_path(here, index, child.name)
             if isinstance(child, Phase):
                 tree.extend(child.walk(child_path))
             else:

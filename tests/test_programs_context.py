@@ -6,7 +6,12 @@
 import pytest
 import torch
 
-from chuchichaestli.programs.context import Context, C3liContextError
+from chuchichaestli.programs.context import (
+    Context,
+    C3liContextError,
+    join_path,
+    split_segment,
+)
 from chuchichaestli.programs.events import EventType, Progress, Signal
 
 
@@ -143,3 +148,15 @@ def test_restored_counts_reach_every_child():
     assert child.counts() == {"advance": 0, "epoch": 3, "step": 12}
     child.emit(EventType.STEP_ENDED, trains=True)
     assert root.count("step") == 13
+
+
+def test_a_segment_splits_back_into_what_joined_it():
+    """Building and parsing a path must agree, or a resume finds the wrong stage."""
+    path = join_path("program/0:repeat", 2, "fit")
+    assert path == Context("program/0:repeat", 0).child(2, "fit").path
+    assert split_segment(path.rsplit("/", 1)[-1]) == (2, "fit")
+
+
+def test_the_root_segment_has_no_position():
+    """The root is named, not numbered."""
+    assert split_segment("program") == (None, "program")

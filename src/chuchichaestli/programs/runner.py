@@ -14,7 +14,7 @@ import torch
 from torch import nn
 from chuchichaestli.programs.ckpt import CheckpointStore
 from chuchichaestli.programs.serialize import C3liCheckpointError, hook_keys
-from chuchichaestli.programs.context import Context
+from chuchichaestli.programs.context import Context, join_path
 from chuchichaestli.programs.events import (
     C3liRunError,
     Event,
@@ -251,7 +251,7 @@ class Runner:
             inner = available | set(stage.provide)
             for index, child in enumerate(stage.stages):
                 inner = self._check_stage(
-                    child, inner, problems, f"{path}/{index}:{child.name}"
+                    child, inner, problems, join_path(path, index, child.name)
                 )
         return available | set(getattr(stage, "provides", ()))
 
@@ -310,7 +310,7 @@ class Runner:
                 provide[f"{path}/model"] = stage.model
         for index, child in enumerate(getattr(stage, "stages", ())):
             self._provision_stage(
-                child, provide, f"{path}/{index}:{child.name}", provisioned
+                child, provide, join_path(path, index, child.name), provisioned
             )
 
     def run(self) -> Progress:

@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 import torch
 from chuchichaestli.models.spec import ModelSpec
+from chuchichaestli.programs.context import split_segment
 from chuchichaestli.programs.traits import Stage, Stateful
 
 
@@ -165,7 +166,7 @@ def _stage_at(root: Stage, path: str) -> Stage | None:
     """
     held = root
     for step in path.split("/")[1:]:
-        index = int(step.split(":", 1)[0])
+        index, _ = split_segment(step)
         children = getattr(held, "stages", ())
         if index >= len(children):
             return None

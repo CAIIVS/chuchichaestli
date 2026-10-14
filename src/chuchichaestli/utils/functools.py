@@ -8,13 +8,15 @@ from functools import partialmethod, wraps
 import torch
 import numpy as np
 from typing import Any
-from collections.abc import Sequence, Iterable, Callable
+from collections.abc import Sequence, Iterable, Callable, Collection, Mapping
 
 __all__ = [
     "partialclass",
     "alias_kwargs",
     "nested_list_size",
     "prod",
+    "as_number",
+    "numbers",
     "map_nested",
     "broadcast",
     "broadcast_kwargs",
@@ -156,6 +158,33 @@ def prod(num_list: Iterable[int] | torch.Size) -> int:
         for item in num_list:
             result *= prod(item) if isinstance(item, Iterable) else item
     return result
+
+
+def as_number(value: Any) -> int | float | None:
+    """Return a value if it is a plain number, never a bool, else `None`.
+
+    Args:
+        value: Value to check.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value
+
+
+def numbers(
+    mapping: Mapping[str, Any], skip: Collection[str] = ()
+) -> dict[str, int | float]:
+    """Return a mapping's plain numbers, each with its own type.
+
+    Args:
+        mapping: Mapping to filter.
+        skip: Keys to leave out.
+    """
+    return {
+        key: value
+        for key, value in mapping.items()
+        if key not in skip and as_number(value) is not None
+    }
 
 
 def broadcast(

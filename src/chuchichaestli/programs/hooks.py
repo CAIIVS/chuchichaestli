@@ -32,6 +32,7 @@ from chuchichaestli.programs.events import (
     counts_toward,
     units,
 )
+from chuchichaestli.utils.functools import as_number, numbers
 from chuchichaestli.utils.registry import require
 
 if TYPE_CHECKING:
@@ -183,8 +184,7 @@ class Console:
             f"{k}={paint(f'{v:.4g}', ANSIShade.BOLD, on=tint)}"
             if isinstance(v, float)
             else f"{k}={v}"
-            for k, v in event.payload.items()
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and k != "total"
+            for k, v in numbers(event.payload, skip=("total",)).items()
         )
 
     def _step_ended(self, event: Event, tint: bool) -> str | None:
@@ -519,8 +519,8 @@ class EarlyStop:
         Args:
             event: What the runner just did.
         """
-        value = event.payload.get(self.monitor)
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
+        value = as_number(event.payload.get(self.monitor))
+        if value is None:
             return Signal.GO
         if self._improved(float(value)):
             self.best = float(value)
@@ -884,8 +884,8 @@ class Checkpointer:
         Args:
             event: What the runner just did.
         """
-        value = event.payload.get(self.monitor)
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
+        value = as_number(event.payload.get(self.monitor))
+        if value is None:
             return
         self._score = float(value)
         if self.mode == "min":

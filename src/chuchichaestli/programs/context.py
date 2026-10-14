@@ -21,7 +21,28 @@ from chuchichaestli.programs.topology import Local
 from chuchichaestli.programs.traits import Stateful, Topology
 
 
-__all__ = ["Context", "C3liContextError"]
+__all__ = ["Context", "C3liContextError", "join_path", "split_segment"]
+
+
+def join_path(path: str, index: int, name: str) -> str:
+    """Return the path of a phase's child.
+
+    Args:
+        path: Path of the phase.
+        index: Position of the child within it.
+        name: The child stage's name.
+    """
+    return f"{path}/{index}:{name}"
+
+
+def split_segment(segment: str) -> tuple[int | None, str]:
+    """Return a path segment's position and stage name; the root has no position.
+
+    Args:
+        segment: One segment of a path, e.g. `"0:fit"`.
+    """
+    index, sep, name = segment.partition(":")
+    return (int(index), name) if sep else (None, segment)
 
 
 class C3liContextError(KeyError):
@@ -324,7 +345,7 @@ class Context:
             name: The child stage's name.
         """
         return Context(
-            f"{self.path}/{index}:{name}",
+            join_path(self.path, index, name),
             self.seed,
             parent=self,
             topology=self.topology,
