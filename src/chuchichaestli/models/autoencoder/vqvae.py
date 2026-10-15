@@ -7,13 +7,13 @@ import torch
 from torch import nn
 from chuchichaestli.models.autoencoder.autoencoder import Autoencoder
 from chuchichaestli.models.autoencoder.traits import DecoderLike, EncoderLike
-from chuchichaestli.models.spec import InitArgMixin
+from chuchichaestli.models.spec import ModelSpecMixin
 
 
 __all__ = ["VectorQuantizer", "VQVAE"]
 
 
-class VectorQuantizer(InitArgMixin, nn.Module):
+class VectorQuantizer(ModelSpecMixin, nn.Module):
     """Vector Quantizer for VQVAE."""
 
     def __init__(self, num_embeddings: int, embedding_dim: int, beta: float = 0.25):

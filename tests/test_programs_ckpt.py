@@ -27,7 +27,7 @@ from chuchichaestli.programs import (
     stage_signature,
     merge_tree,
 )
-from chuchichaestli.models.spec import InitArgMixin, ModelSpec, load_model, read_spec
+from chuchichaestli.models.spec import ModelSpec, ModelSpecMixin, load_model, read_spec
 from chuchichaestli.programs.stages import Eval, Phase, StageBlock, Train
 from chuchichaestli.training import OptimSpec
 from chuchichaestli.programs.ckpt import SCHEMA_VERSION
@@ -636,7 +636,7 @@ def test_a_checkpoint_announces_itself(tmp_path):
     assert seen and all("ckpt_" in path for path in seen)
 
 
-class Tiny(InitArgMixin, nn.Module):
+class Tiny(ModelSpecMixin, nn.Module):
     """A model that records how it was built."""
 
     def __init__(self, width: int = 4):
@@ -649,7 +649,7 @@ class Tiny(InitArgMixin, nn.Module):
         self.lin = nn.Linear(width, width)
 
 
-class Opaque(InitArgMixin, nn.Module):
+class Opaque(ModelSpecMixin, nn.Module):
     """A model built from a component that records nothing."""
 
     def __init__(self, inner: nn.Module):

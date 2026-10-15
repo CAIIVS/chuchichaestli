@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Various higher-order functions and operations for chuchichaestli."""
 
+import inspect
 import sys
 from functools import partialmethod, wraps
 import torch
@@ -12,6 +13,7 @@ from collections.abc import Sequence, Iterable, Callable, Collection, Mapping
 
 __all__ = [
     "partialclass",
+    "InitArgMixin",
     "alias_kwargs",
     "nested_list_size",
     "prod",
@@ -36,6 +38,52 @@ def partialclass(name: str, cls: type[object], *args, **kwargs):
     if docstring is not None:
         part_cls.__doc__ = docstring
     return part_cls
+
+
+class InitArgMixin:
+    """Records the arguments each instance was constructed with."""
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Wrap a subclass's `__init__` so its arguments are recorded.
+
+        Args:
+            kwargs: Passed to the next `__init_subclass__` in the chain.
+        """
+        super().__init_subclass__(**kwargs)
+        init = cls.__dict__.get("__init__")
+        if not inspect.isfunction(init) or getattr(init, "_records_init", False):
+            return
+        signature = inspect.signature(init)
+
+        @wraps(init)
+        def recorded(self: Any, *args: Any, **kwargs: Any) -> None:
+            """Run the original `__init__`, remembering what it was given.
+
+            Args:
+                self: The object being constructed.
+                args: Positional arguments, as the caller gave them.
+                kwargs: Keyword arguments, as the caller gave them.
+            """
+            bound = signature.bind(self, *args, **kwargs)
+            bound.apply_defaults()
+            recorded_args = dict(bound.arguments)
+            recorded_args.pop("self", None)
+            for name, parameter in signature.parameters.items():
+                if parameter.kind is parameter.VAR_KEYWORD:
+                    recorded_args.update(recorded_args.pop(name, {}))
+                elif parameter.kind is parameter.VAR_POSITIONAL:
+                    recorded_args[name] = list(recorded_args.get(name, ()))
+            init(self, *args, **kwargs)
+            # the most-derived class's wrapper runs last, so its arguments win
+            object.__setattr__(self, "_init_args", recorded_args)
+
+        recorded._records_init = True
+        cls.__init__ = recorded
+
+    @property
+    def init_args(self) -> dict[str, Any] | None:
+        """Return the constructor's arguments with defaults, or `None` if unrecorded."""
+        return getattr(self, "_init_args", None)
 
 
 def alias_kwargs(key: str | dict[str, str], alias: str | None = None) -> Callable:

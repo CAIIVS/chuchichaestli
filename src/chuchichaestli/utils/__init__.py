@@ -5,6 +5,7 @@
 
 from chuchichaestli.utils.functools import (
     partialclass,
+    InitArgMixin,
     alias_kwargs,
     prod,
     as_number,
@@ -55,6 +56,7 @@ __all__ = [
     "factor",
     "reverse",
     "partialclass",
+    "InitArgMixin",
     "alias_kwargs",
     "prod",
     "as_number",

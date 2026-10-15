@@ -24,7 +24,7 @@ from chuchichaestli.models.downsampling import (
 )
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.utils.registry import require
-from chuchichaestli.models.spec import InitArgMixin
+from chuchichaestli.models.spec import ModelSpecMixin
 from chuchichaestli.models.norm import NormTypes
 from chuchichaestli.models.unet.time_embeddings import (
     TimeEmbeddingTypes,
@@ -41,7 +41,7 @@ from collections.abc import Sequence
 SkipConnectionTypes = Literal["concat", "avg", "add"]
 
 
-class UNet(InitArgMixin, nn.Module):
+class UNet(ModelSpecMixin, nn.Module):
     """Highly customizable U-Net model implementation.
 
     The architecture consists of an encoder-decoder structure with skip connections.

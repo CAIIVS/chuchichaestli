@@ -14,13 +14,13 @@ from chuchichaestli.models.blocks import (
 )
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS
 from chuchichaestli.models.norm import NormTypes
-from chuchichaestli.models.spec import InitArgMixin
+from chuchichaestli.models.spec import ModelSpecMixin
 from chuchichaestli.utils import partialclass
 from typing import Literal
 from collections.abc import Sequence
 
 
-class ResNet(InitArgMixin, nn.Module):
+class ResNet(ModelSpecMixin, nn.Module):
     """Generic ResNet model."""
 
     def __init__(

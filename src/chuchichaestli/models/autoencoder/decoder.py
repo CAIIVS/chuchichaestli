@@ -17,13 +17,13 @@ from chuchichaestli.models.blocks import (
 )
 from chuchichaestli.utils.registry import require
 from chuchichaestli.models.norm import NormTypes
-from chuchichaestli.models.spec import InitArgMixin
+from chuchichaestli.models.spec import ModelSpecMixin
 from chuchichaestli.models.upsampling import UPSAMPLE_FUNCTIONS, UpsampleTypes
 from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
 from collections.abc import Sequence
 
 
-class Decoder(InitArgMixin, nn.Module):
+class Decoder(ModelSpecMixin, nn.Module):
     """Flexible decoder implementation for autoencoders."""
 
     def __init__(

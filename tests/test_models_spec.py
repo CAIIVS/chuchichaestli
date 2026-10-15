@@ -42,18 +42,19 @@ from chuchichaestli.models.autoencoder.vqvae import VectorQuantizer
 from chuchichaestli.models.resnet import ResNet, ResNet18
 from chuchichaestli.models.spec import (
     C3liSpecError,
-    InitArgMixin,
     ModelSpec,
+    ModelSpecMixin,
     load_model,
     read_model_state,
     read_spec,
     write_model_state,
 )
+from chuchichaestli.utils.functools import InitArgMixin
 from chuchichaestli.utils.io import METADATA_KEY, WRITERS
 from chuchichaestli.models.unet import UNet
 
 
-class Tiny(InitArgMixin, nn.Module):
+class Tiny(ModelSpecMixin, nn.Module):
     """A model whose choices mostly leave no tensors behind."""
 
     def __init__(
@@ -125,7 +126,7 @@ def test_recording_leaves_the_module_intact():
 def test_a_class_without_its_own_init_says_so():
     """Better an explicit error than a spec that silently omits everything."""
 
-    class Bare(InitArgMixin):
+    class Bare(ModelSpecMixin):
         """A class that defines no constructor."""
 
     with pytest.raises(AttributeError, match="recorded no constructor arguments"):
@@ -209,7 +210,7 @@ def test_an_argument_rebuilds_as_itself(value):
     assert same(spec.build().spec.kwargs["payload"], value)
 
 
-class Wrapper(InitArgMixin, nn.Module):
+class Wrapper(ModelSpecMixin, nn.Module):
     """A model assembled from a component it was handed."""
 
     def __init__(self, inner: nn.Module, scale: float = 1.0):
@@ -243,7 +244,7 @@ def test_a_nested_spec_rebuilds_its_component():
 
 def test_a_module_that_records_nothing_is_refused():
     """A repr would serialize fine and then rebuild into the wrong thing."""
-    with pytest.raises(TypeError, match="does not inherit InitArgMixin"):
+    with pytest.raises(TypeError, match="does not inherit ModelSpecMixin"):
         Wrapper(nn.Linear(4, 4)).spec.to_dict()
 
 
@@ -267,7 +268,7 @@ def test_an_argument_with_no_faithful_encoding_is_refused(value):
         Tiny(payload=value).spec.to_dict()
 
 
-class SpecShaped(InitArgMixin, nn.Module):
+class SpecShaped(ModelSpecMixin, nn.Module):
     """A model whose arguments share the names of a spec's fields."""
 
     def __init__(self, cls: str = "x", kwargs: str = "y"):
@@ -407,9 +408,9 @@ MODELS = [
 
 
 @pytest.mark.parametrize("model_cls", MODELS, ids=lambda c: c.__name__)
-def test_every_model_family_records_its_arguments(model_cls):
-    """A model added without the mixin cannot be rebuilt from a checkpoint."""
-    assert issubclass(model_cls, InitArgMixin)
+def test_every_model_family_can_be_rebuilt_from_a_spec(model_cls):
+    """A model on the plain recorder, or none, cannot be rebuilt from a checkpoint."""
+    assert issubclass(model_cls, ModelSpecMixin)
 
 
 def test_a_real_model_rebuilds_from_its_spec():
@@ -564,3 +565,46 @@ def test_the_spec_is_none_when_the_file_carries_one_none(suffix, tmp_path):
     state, spec = read_model_state(path)
     assert spec is None
     assert set(state) == set(Tiny().state_dict())
+
+
+class Recorded(InitArgMixin):
+    """A plain object that records how it was built."""
+
+    def __init__(self, width: int, depth: int = 2, **extra):
+        """Constructor.
+
+        Args:
+            width: A required argument.
+            depth: An argument left at its default.
+            extra: Further keyword arguments.
+        """
+        self.width = width
+
+
+class Narrower(Recorded):
+    """A subclass passing its own arguments on."""
+
+    def __init__(self, scale: float = 0.5):
+        """Constructor.
+
+        Args:
+            scale: Fraction of the parent's width.
+        """
+        super().__init__(width=int(8 * scale), depth=1)
+
+
+def test_recorded_arguments_include_defaults_and_extra_keywords():
+    """What the instance was built with, as one flat mapping."""
+    assert Recorded(4, tag="x").init_args == {"width": 4, "depth": 2, "tag": "x"}
+
+
+def test_the_most_derived_constructor_s_arguments_are_kept():
+    """A subclass is described by what it was called with, not what it passed on."""
+    assert Narrower(scale=0.25).init_args == {"scale": 0.25}
+
+
+def test_recording_arguments_does_not_allow_building_from_a_spec():
+    """Only models opt into being rebuilt from a file; plain recording stays out."""
+    assert Recorded not in ModelSpec._allowed
+    assert Tiny in ModelSpec._allowed
+    assert issubclass(ModelSpecMixin, InitArgMixin)

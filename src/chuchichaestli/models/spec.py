@@ -14,12 +14,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar
 import torch
+from chuchichaestli.utils.functools import InitArgMixin
 from chuchichaestli.utils.io import reader_for, write_state
 
 
 __all__ = [
     "ModelSpec",
-    "InitArgMixin",
+    "ModelSpecMixin",
     "C3liSpecError",
     "read_spec",
     "read_model_state",
@@ -27,7 +28,6 @@ __all__ = [
     "load_model",
 ]
 
-_INIT_ARGS = "_init_args"
 _TAG = "__c3li__"
 _PACKAGE = __name__.partition(".")[0]
 
@@ -191,12 +191,12 @@ class ModelSpec:
             TypeError: If `value` is a module that records no arguments, or
                 anything else `decode_arg` could not restore.
         """
-        if isinstance(value, InitArgMixin):
+        if isinstance(value, ModelSpecMixin):
             return value.spec.to_dict()
         if isinstance(value, torch.nn.Module):
             raise TypeError(
                 f"Cannot record a {type(value).__name__} argument in a spec: it "
-                "does not inherit InitArgMixin, so nothing says how to rebuild it."
+                "does not inherit ModelSpecMixin, so nothing says how to rebuild it."
             )
         if isinstance(value, torch.Tensor):
             return cls._encode_tensor(value)
@@ -390,45 +390,17 @@ class ModelSpec:
         return cls.from_dict(json.loads(text))
 
 
-class InitArgMixin:
+class ModelSpecMixin(InitArgMixin):
     """Records every constructor argument, so `.spec` can rebuild the object."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        """Wrap a subclass's `__init__` so its arguments are recorded, and allow it.
+        """Record a subclass's arguments, and allow it to be built from a spec.
 
         Args:
             kwargs: Passed to the next `__init_subclass__` in the chain.
         """
         super().__init_subclass__(**kwargs)
         ModelSpec.allow(cls)
-        init = cls.__dict__.get("__init__")
-        if not inspect.isfunction(init) or getattr(init, "_records_init", False):
-            return
-        signature = inspect.signature(init)
-
-        @functools.wraps(init)
-        def recorded(self: Any, *args: Any, **kwargs: Any) -> None:
-            """Run the original `__init__`, remembering what it was given.
-
-            Args:
-                self: The object being constructed.
-                args: Positional arguments, as the caller gave them.
-                kwargs: Keyword arguments, as the caller gave them.
-            """
-            bound = signature.bind(self, *args, **kwargs)
-            bound.apply_defaults()
-            recorded_args = dict(bound.arguments)
-            recorded_args.pop("self", None)
-            for name, parameter in signature.parameters.items():
-                if parameter.kind is parameter.VAR_KEYWORD:
-                    recorded_args.update(recorded_args.pop(name, {}))
-                elif parameter.kind is parameter.VAR_POSITIONAL:
-                    recorded_args[name] = list(recorded_args.get(name, ()))
-            init(self, *args, **kwargs)
-            object.__setattr__(self, _INIT_ARGS, recorded_args)
-
-        recorded._records_init = True
-        cls.__init__ = recorded
 
     @property
     def spec(self) -> ModelSpec:
@@ -438,7 +410,7 @@ class InitArgMixin:
             AttributeError: If the arguments were never recorded, which means
                 the class defines no `__init__` of its own to wrap.
         """
-        recorded = getattr(self, _INIT_ARGS, None)
+        recorded = self.init_args
         if recorded is None:
             raise AttributeError(
                 f"{type(self).__name__} recorded no constructor arguments; "

@@ -18,12 +18,12 @@ from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS, DownsampleT
 from chuchichaestli.models.maps import DIM_TO_CONV_MAP
 from chuchichaestli.utils.registry import require
 from chuchichaestli.models.norm import NormTypes
-from chuchichaestli.models.spec import InitArgMixin
+from chuchichaestli.models.spec import ModelSpecMixin
 from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
 from collections.abc import Sequence
 
 
-class Encoder(InitArgMixin, nn.Module):
+class Encoder(ModelSpecMixin, nn.Module):
     """Flexible encoder implementation for autoencoders."""
 
     def __init__(
