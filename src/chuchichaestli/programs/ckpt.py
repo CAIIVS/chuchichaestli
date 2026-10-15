@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 from torch import nn
-from chuchichaestli.models.spec import ModelSpec
+from chuchichaestli.models.spec import ModelSpec, read_model_state, write_model_state
 from chuchichaestli.programs.events import Progress
 from chuchichaestli.programs.serialize import (
     C3liCheckpointError,
@@ -391,7 +391,7 @@ class CheckpointStore:
         for name, tensors in weights.items():
             path = directory / self._weight_name(name, set(files.values()))
             with staged(path) as (scratch,):
-                write_state(scratch, tensors, spec=specs[name])
+                write_model_state(scratch, tensors, spec=specs[name])
             files[name] = path
         # write states for optimizer, LR scheduler, etc.
         tensors, skeleton = unpack_tree(payload)
@@ -557,7 +557,7 @@ class CheckpointStore:
         specs, files = {}, {}
         for name, filename in manifest.get("weights", {}).items():
             path = directory / filename
-            bindings[name], spec = read_state(path, spec=True)
+            bindings[name], spec = read_model_state(path)
             files[name] = path
             if spec is not None:
                 specs[name] = spec

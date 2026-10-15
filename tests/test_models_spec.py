@@ -6,6 +6,7 @@
 import functools
 import json
 import math
+import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
@@ -39,7 +40,16 @@ from chuchichaestli.models.autoencoder import (
 )
 from chuchichaestli.models.autoencoder.vqvae import VectorQuantizer
 from chuchichaestli.models.resnet import ResNet, ResNet18
-from chuchichaestli.models.spec import C3liSpecError, InitArgMixin, ModelSpec
+from chuchichaestli.models.spec import (
+    C3liSpecError,
+    InitArgMixin,
+    ModelSpec,
+    load_model,
+    read_model_state,
+    read_spec,
+    write_model_state,
+)
+from chuchichaestli.utils.io import METADATA_KEY, WRITERS
 from chuchichaestli.models.unet import UNet
 
 
@@ -435,3 +445,122 @@ def test_a_forwarding_constructor_records_what_its_caller_passed():
     assert encoder.spec.kwargs["out_channels"] == 4
     rebuilt = ModelSpec.from_json(encoder.spec.to_json()).build()
     assert rebuilt.latent_channels == encoder.latent_channels == 4
+
+
+def test_a_spec_travels_inside_the_weights(tmp_path):
+    """The whole point: the file says which architecture built it."""
+    path = tmp_path / "model.safetensors"
+    model = Tiny(width=8, act="gelu")
+    write_model_state(path, model.state_dict(), spec=model.spec)
+
+    rebuilt = load_model(path)
+    assert type(rebuilt.act).__name__ == "GELU"
+    assert torch.equal(rebuilt.lin.weight, model.lin.weight)
+
+
+def test_weights_without_a_spec_refuse_to_guess(tmp_path):
+    """Inferring the architecture would load cleanly and compute the wrong thing."""
+    path = tmp_path / "plain.safetensors"
+    write_model_state(path, Tiny().state_dict())
+    assert read_spec(path) is None
+    with pytest.raises(ValueError, match="No model spec"):
+        load_model(path)
+
+
+@pytest.mark.parametrize("suffix", sorted(WRITERS))
+def test_a_spec_survives_every_format(tmp_path, suffix):
+    """A torch archive has no metadata header, but it can still carry one."""
+    path = tmp_path / f"model{suffix}"
+    model = Tiny(width=8, act="gelu")
+    write_model_state(path, model.state_dict(), spec=model.spec)
+    rebuilt = load_model(path)
+    assert type(rebuilt.act).__name__ == "GELU"
+    assert torch.equal(rebuilt.lin.weight, model.lin.weight)
+
+
+def test_an_unknown_suffix_cannot_hold_a_spec_either(tmp_path):
+    """The refusal names the formats that do work."""
+    model = Tiny()
+    with pytest.raises(ValueError, match="Cannot write '.ckpt'"):
+        write_model_state(tmp_path / "model.ckpt", model.state_dict(), spec=model.spec)
+
+
+def test_a_file_naming_what_was_not_allowed_is_refused(tmp_path):
+    """Loading weights must not call what a crafted spec names."""
+    path = tmp_path / "model.safetensors"
+    spec = ModelSpec(cls="subprocess:run", kwargs={"args": ["true"]})
+    write_model_state(path, {"w": torch.zeros(1)}, spec=spec)
+    with pytest.raises(C3liSpecError, match="subprocess:run"):
+        load_model(path)
+
+
+def test_a_library_model_loads_in_a_process_that_never_imported_it(tmp_path):
+    """Loading must not depend on the caller importing the class first."""
+    path = tmp_path / "model.safetensors"
+    model = PixelDiscriminator(dimensions=2, in_channels=1, n_channels=4)
+    write_model_state(path, model.state_dict(), spec=model.spec)
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from chuchichaestli.models.spec import load_model\n"
+        f"assert {type(model).__module__!r} not in sys.modules\n"
+        f"print(type(load_model(Path({str(path)!r}))).__name__)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "PixelDiscriminator"
+
+
+@pytest.mark.parametrize("suffix", sorted(WRITERS))
+def test_a_spec_past_the_limit_is_refused(tmp_path, suffix, monkeypatch):
+    """Every format is bounded, the torch archive included."""
+    path = tmp_path / f"model{suffix}"
+    model = Tiny()
+    write_model_state(path, model.state_dict(), spec=model.spec)
+    monkeypatch.setattr(ModelSpec, "json_limit", 10)
+    with pytest.raises(C3liSpecError, match="json_limit"):
+        load_model(path)
+
+
+def test_load_model_accepts_overrides(tmp_path):
+    """Swapping a parameter-free choice should not need the spec edited by hand."""
+    path = tmp_path / "model.safetensors"
+    model = Tiny(width=4, act="gelu")
+    write_model_state(path, model.state_dict(), spec=model.spec)
+    rebuilt = load_model(path, act="silu")
+    assert type(rebuilt.act).__name__ == "SiLU"
+    assert torch.equal(rebuilt.lin.weight, model.lin.weight)
+
+
+def test_an_override_that_changes_shapes_fails_loudly(tmp_path):
+    """`strict` covers key names, not shapes, so this must still raise."""
+    path = tmp_path / "model.safetensors"
+    model = Tiny(width=4)
+    write_model_state(path, model.state_dict(), spec=model.spec)
+    with pytest.raises(RuntimeError, match="(?i)size mismatch|shape"):
+        load_model(path, width=6)
+
+
+@pytest.mark.parametrize("suffix", sorted(WRITERS))
+def test_state_and_spec_come_back_together(suffix, tmp_path):
+    """`write_model_state` stores a spec, so `read_model_state` returns it."""
+    path = tmp_path / f"model{suffix}"
+    model = Tiny(width=8, act="gelu")
+    write_model_state(path, model.state_dict(), spec=model.spec)
+
+    state, spec = read_model_state(path)
+    assert spec == model.spec
+    assert torch.equal(state["lin.weight"], model.lin.weight)
+    assert METADATA_KEY not in state
+
+
+@pytest.mark.parametrize("suffix", sorted(WRITERS))
+def test_the_spec_is_none_when_the_file_carries_one_none(suffix, tmp_path):
+    """Asking for a spec must not fail on weights that were saved without one."""
+    path = tmp_path / f"plain{suffix}"
+    write_model_state(path, Tiny().state_dict())
+    state, spec = read_model_state(path)
+    assert spec is None
+    assert set(state) == set(Tiny().state_dict())

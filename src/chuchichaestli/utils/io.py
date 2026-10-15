@@ -9,11 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from torch import nn
 from safetensors import safe_open
 from safetensors.torch import load_file, save_file
 
-from chuchichaestli.models.spec import ModelSpec
 from chuchichaestli.utils.registry import require
 
 
@@ -29,9 +27,7 @@ __all__ = [
     "reader_for",
     "writer_for",
     "read_state",
-    "read_spec",
     "write_state",
-    "load_model",
 ]
 
 
@@ -163,34 +159,18 @@ def writer_for(path: Path) -> Callable[..., None]:
     )
 
 
-def read_state(
-    path: Path, spec: bool = False
-) -> dict[str, torch.Tensor] | tuple[dict[str, torch.Tensor], ModelSpec | None]:
+def read_state(path: Path) -> dict[str, torch.Tensor]:
     """Read a state dict, picking the reader from the suffix.
 
     Args:
         path: File to read.
-        spec: Return `(state, spec)` rather than the state alone. The spec is
-            `None` when the file carries none.
     """
-    state, stored = reader_for(path)(path)
-    if not spec:
-        return state
-    return state, ModelSpec.from_json(stored) if stored else None
-
-
-def read_spec(path: Path) -> ModelSpec | None:
-    """Return the spec a file carries, or `None` if it carries none.
-
-    Args:
-        path: File to read.
-    """
-    stored = reader_for(path)(path, spec_only=True)
-    return ModelSpec.from_json(stored) if stored else None
+    state, _ = reader_for(path)(path)
+    return state
 
 
 def write_state(
-    path: Path, state: dict[str, torch.Tensor], spec: ModelSpec | None = None
+    path: Path, state: dict[str, torch.Tensor], spec: str | None = None
 ) -> None:
     """Write a state dict, picking the writer from the suffix.
 
@@ -199,7 +179,7 @@ def write_state(
     Args:
         path: File to write.
         state: Tensors to store.
-        spec: How to rebuild the model, stored beside the tensors.
+        spec: Serialized spec to store beside them, if any.
 
     Raises:
         ValueError: If the suffix names no known format.
@@ -210,32 +190,4 @@ def write_state(
         else value
         for key, value in state.items()
     }
-    writer_for(path)(path, storable, spec.to_json() if spec is not None else None)
-
-
-def load_model(
-    path: Path, strict: bool = True, trusted: bool = False, **overrides: Any
-) -> nn.Module:
-    """Rebuild a model from a file and load its weights.
-
-    Args:
-        path: File to read.
-        strict: Whether every key must match, as for `load_state_dict`.
-        trusted: Let the spec name anything, for a file you trust.
-        overrides: Constructor arguments to replace before building. Changing
-            one that affects a tensor's shape makes the weights unloadable,
-            which `strict` does not cover.
-
-    Raises:
-        ValueError: If the file carries no spec, since the architecture cannot
-            be inferred from weights alone.
-    """
-    state, spec = read_state(path, spec=True)
-    if spec is None:
-        raise ValueError(
-            f"No model spec in {str(path)!r}; weights alone do not say which "
-            "architecture built them. Save it with write_state(..., spec=...)."
-        )
-    model = spec.build(trusted=trusted, **overrides)
-    model.load_state_dict(state, strict=strict)
-    return model
+    writer_for(path)(path, storable, spec)

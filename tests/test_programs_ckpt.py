@@ -27,12 +27,12 @@ from chuchichaestli.programs import (
     stage_signature,
     merge_tree,
 )
-from chuchichaestli.models.spec import InitArgMixin, ModelSpec
+from chuchichaestli.models.spec import InitArgMixin, ModelSpec, load_model, read_spec
 from chuchichaestli.programs.stages import Eval, Phase, StageBlock, Train
 from chuchichaestli.training import OptimSpec
 from chuchichaestli.programs.ckpt import SCHEMA_VERSION
 from chuchichaestli.programs.serialize import writable_spec
-from chuchichaestli.utils.io import load_model, read_spec, read_state
+from chuchichaestli.utils.io import read_state
 
 
 class StopAfter:

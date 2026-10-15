@@ -14,9 +14,18 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar
 import torch
+from chuchichaestli.utils.io import reader_for, write_state
 
 
-__all__ = ["ModelSpec", "InitArgMixin", "C3liSpecError"]
+__all__ = [
+    "ModelSpec",
+    "InitArgMixin",
+    "C3liSpecError",
+    "read_spec",
+    "read_model_state",
+    "write_model_state",
+    "load_model",
+]
 
 _INIT_ARGS = "_init_args"
 _TAG = "__c3li__"
@@ -436,3 +445,67 @@ class InitArgMixin:
                 "it defines no __init__ for InitArgMixin to wrap."
             )
         return ModelSpec(cls=ModelSpec.qualname(type(self)), kwargs=dict(recorded))
+
+
+def read_spec(path: Path) -> ModelSpec | None:
+    """Return the spec a file carries, or `None` if it carries none.
+
+    Args:
+        path: File to read.
+    """
+    stored = reader_for(path)(path, spec_only=True)
+    return ModelSpec.from_json(stored) if stored else None
+
+
+def read_model_state(path: Path) -> tuple[dict[str, torch.Tensor], ModelSpec | None]:
+    """Read a state dict and the spec stored beside it, `None` if there is none.
+
+    Args:
+        path: File to read.
+    """
+    state, stored = reader_for(path)(path)
+    return state, ModelSpec.from_json(stored) if stored else None
+
+
+def write_model_state(
+    path: Path, state: dict[str, torch.Tensor], spec: ModelSpec | None = None
+) -> None:
+    """Write a state dict with the spec that rebuilds its model, if any.
+
+    Args:
+        path: File to write.
+        state: Tensors to store.
+        spec: How to rebuild the model, stored beside the tensors.
+
+    Raises:
+        ValueError: If the suffix names no known format.
+    """
+    write_state(path, state, spec.to_json() if spec is not None else None)
+
+
+def load_model(
+    path: Path, strict: bool = True, trusted: bool = False, **overrides: Any
+) -> torch.nn.Module:
+    """Rebuild a model from a file and load its weights.
+
+    Args:
+        path: File to read.
+        strict: Whether every key must match, as for `load_state_dict`.
+        trusted: Let the spec name anything, for a file you trust.
+        overrides: Constructor arguments to replace before building. Changing
+            one that affects a tensor's shape makes the weights unloadable,
+            which `strict` does not cover.
+
+    Raises:
+        ValueError: If the file carries no spec, since the architecture cannot
+            be inferred from weights alone.
+    """
+    state, spec = read_model_state(path)
+    if spec is None:
+        raise ValueError(
+            f"No model spec in {str(path)!r}; weights alone do not say which "
+            "architecture built them. Save it with write_model_state(..., spec=...)."
+        )
+    model = spec.build(trusted=trusted, **overrides)
+    model.load_state_dict(state, strict=strict)
+    return model
