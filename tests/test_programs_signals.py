@@ -8,7 +8,13 @@ import signal
 
 import pytest
 
-from chuchichaestli.programs.events import C3liRunError, Event, EventType, Signal
+from chuchichaestli.programs.events import (
+    C3liRunCancelled,
+    C3liRunError,
+    Event,
+    EventType,
+    Signal,
+)
 from chuchichaestli.programs.hooks import GracefulStop
 from chuchichaestli.programs.runner import Runner
 from chuchichaestli.programs.stages import Call, Phase, Program
@@ -54,11 +60,12 @@ def test_a_signal_stops_the_run_gracefully(name):
     """SIGTERM otherwise kills the process without unwinding at all."""
     watch = Watch()
     program = Program([Call("a", fn=raise_signal(name)), Call("b", fn=lambda c: None)])
-    with pytest.raises(C3liRunError, match=f"cancelled by {name}"):
+    with pytest.raises(C3liRunCancelled, match=f"cancelled by {name}"):
         Runner(program, hooks=[GracefulStop(), watch]).run()
 
     ended = [e for e in watch.events if e.type is EventType.RUN_ENDED]
     assert ended and ended[0].payload["aborted"] == f"cancelled by {name}"
+    assert ended[0].payload["cancelled"] is True
     began = [e.path for e in watch.events if e.type is EventType.STAGE_BEGAN]
     assert "program/1:b" not in began
 

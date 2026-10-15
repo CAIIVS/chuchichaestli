@@ -24,6 +24,7 @@ from chuchichaestli.utils.ansi import (
 from chuchichaestli.programs.ckpt import CheckpointFormats, CheckpointStore
 from chuchichaestli.programs.serialize import hook_states
 from chuchichaestli.programs.events import (
+    C3liRunCancelled,
     C3liRunError,
     Event,
     EventType,
@@ -605,7 +606,7 @@ class GracefulStop:
             event: What the runner just did.
 
         Raises:
-            C3liRunError: As the program advances after a signal is caught.
+            C3liRunCancelled: As the program advances after a signal is caught.
                 A second signal interrupts the program immediately.
         """
         if event.type is EventType.RUN_BEGAN:
@@ -623,7 +624,7 @@ class GracefulStop:
         stepped = event.type is EventType.STAGE_ADVANCED
         if stepped and self.caught is not None and not self._raised:
             self._raised = True
-            raise C3liRunError(f"cancelled by {self.caught}")
+            raise C3liRunCancelled(f"cancelled by {self.caught}")
         return Signal.GO
 
 

@@ -12,6 +12,7 @@ from torch import nn
 from torch.utils.data import TensorDataset
 
 from chuchichaestli.programs.events import (
+    C3liRunCancelled,
     C3liRunError,
     Event,
     EventType,
@@ -27,7 +28,13 @@ from chuchichaestli.programs.runner import (
 )
 from chuchichaestli.programs.stages import Call, Phase, Program, Repeat, Train
 from chuchichaestli.training import OptimSpec
-from chuchichaestli.programs.topology import Ddp, Local, auto_topology, default_device
+from chuchichaestli.programs.topology import (
+    Ddp,
+    Local,
+    auto_topology,
+    default_device,
+    lockstep,
+)
 
 
 class Record:
@@ -79,6 +86,7 @@ def test_run_brackets_the_program_with_run_events():
     assert hook.events[0].type is EventType.RUN_BEGAN
     assert hook.events[-1].type is EventType.RUN_ENDED
     assert hook.events[-1].payload["aborted"] is None
+    assert hook.events[-1].payload["cancelled"] is False
 
 
 def test_event_paths_match_the_stage_tree():
@@ -173,6 +181,7 @@ def test_abort_propagates_and_still_closes_the_trace():
         Runner(Program([Call("bad", fn=boom)]), hooks=[hook]).run()
     assert hook.events[-1].type is EventType.RUN_ENDED
     assert hook.events[-1].payload["aborted"] == "stage said stop"
+    assert hook.events[-1].payload["cancelled"] is False
 
 
 def test_an_ordinary_error_is_named_in_the_closing_event():
@@ -187,6 +196,7 @@ def test_an_ordinary_error_is_named_in_the_closing_event():
         Runner(Program([Call("bad", fn=explode)]), hooks=[hook]).run()
     assert hook.events[-1].type is EventType.RUN_ENDED
     assert hook.events[-1].payload["aborted"] == "ValueError: bad shape"
+    assert hook.events[-1].payload["cancelled"] is False
 
 
 def test_an_interrupt_is_named_in_the_closing_event():
@@ -200,6 +210,7 @@ def test_an_interrupt_is_named_in_the_closing_event():
     with pytest.raises(KeyboardInterrupt):
         Runner(Program([Call("bad", fn=interrupt)]), hooks=[hook]).run()
     assert hook.events[-1].payload["aborted"] == "KeyboardInterrupt: "
+    assert hook.events[-1].payload["cancelled"] is True
 
 
 class FailsOnClose:
@@ -718,3 +729,15 @@ def test_naming_a_run_leaves_its_randomness_alone():
         return model.weight.detach().clone()
 
     assert torch.equal(weights(), weights(run_name="given"))
+
+
+@pytest.mark.parametrize("error", [C3liRunError("stop"), C3liRunCancelled("stop")])
+def test_lockstep_raises_the_very_error_it_caught(error):
+    """Rewrapping it would lose that a run was cancelled rather than failed."""
+
+    def fails():
+        raise error
+
+    with pytest.raises(C3liRunError) as raised:
+        lockstep(Local(device="cpu"), fails)
+    assert raised.value is error

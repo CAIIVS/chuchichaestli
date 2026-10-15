@@ -15,7 +15,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_model_state_dict,
 )
 from torch.nn.parallel import DistributedDataParallel
-from chuchichaestli.programs.events import C3liRunError, Signal
+from chuchichaestli.programs.events import C3liRunCancelled, C3liRunError, Signal
 from chuchichaestli.programs.traits import Stateful, Topology
 from chuchichaestli.utils.registry import require
 
@@ -89,29 +89,27 @@ def lockstep(topology: Topology, call: Any) -> Any:
         call: Performs the work, returning a signal.
 
     Raises:
-        C3liRunError: On every rank, if any of them aborted.
+        C3liRunCancelled: On every rank that did not raise, if one was
+            cancelled.
+        C3liRunError: On every rank that did not raise, if any of them aborted.
         Exception: On the rank that raised one, after every rank has agreed
             that the run is over, so none is left waiting in a collective.
     """
     raised: Exception | None = None
     try:
-        signal, reason = call(), None
-    except C3liRunError as aborted:
-        signal, reason = Signal.BREAK, str(aborted) or "aborted"
+        signal = call()
     except Exception as error:
-        signal, reason, raised = Signal.BREAK, f"{type(error).__name__}: {error}", error
+        signal, raised = Signal.BREAK, error
+    # 0: carried on, 1: aborted, 2: cancelled; the worst outcome wins
+    outcome = 0 if raised is None else 2 if isinstance(raised, C3liRunCancelled) else 1
     if topology.world_size > 1:
-        failures = topology.reduce(
-            torch.tensor([0.0 if reason is None else 1.0]), op="sum"
-        )
-        if float(failures) > 0.0:
-            if raised is not None:
-                raise raised
-            raise C3liRunError(reason or "another process aborted the run")
-    elif reason is not None:
+        outcome = int(topology.reduce(torch.tensor([float(outcome)]), op="max"))
+    if outcome:
         if raised is not None:
             raise raised
-        raise C3liRunError(reason)
+        if outcome == 2:
+            raise C3liRunCancelled("another process was cancelled")
+        raise C3liRunError("another process aborted the run")
     return topology.broadcast(signal)
 
 

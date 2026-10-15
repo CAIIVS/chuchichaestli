@@ -30,6 +30,7 @@ from chuchichaestli.programs.objective import (
 )
 from chuchichaestli.programs.events import (
     ArtifactTypes,
+    C3liRunCancelled,
     C3liRunError,
     Event,
     EventType,
@@ -141,6 +142,7 @@ __all__ = [
     "Progress",
     "Signal",
     "C3liRunError",
+    "C3liRunCancelled",
     "filter_priority",
     "Console",
     "ProgressBar",

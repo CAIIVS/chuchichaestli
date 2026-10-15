@@ -23,6 +23,7 @@ __all__ = [
     "units",
     "counts_toward",
     "C3liRunError",
+    "C3liRunCancelled",
     "Progress",
     "EventType",
     "Event",
@@ -60,6 +61,10 @@ def filter_priority(signals: Iterable[Signal]) -> Signal:
 
 class C3liRunError(RuntimeError):
     """Raised to stop the program, needs to be broadcasted to all ranks."""
+
+
+class C3liRunCancelled(C3liRunError):
+    """Raised to stop the program because it was asked to, not because it failed."""
 
 
 @dataclass(frozen=True, slots=True)

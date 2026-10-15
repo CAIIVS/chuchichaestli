@@ -29,7 +29,7 @@ from chuchichaestli.programs import (
     Train,
     WeightsExport,
 )
-from chuchichaestli.programs.events import C3liRunError
+from chuchichaestli.programs.events import C3liRunCancelled, C3liRunError
 from chuchichaestli.data.archive import read_archive
 from chuchichaestli.metrics import MSE
 from chuchichaestli.training import OptimSpec
@@ -278,15 +278,17 @@ def _breaks_on_one_rank(rank, world, results, port):
 class AbortOffMain:
     """Raise on a rank that is not the one others watch for decisions."""
 
-    def __init__(self, topology, after: int):
+    def __init__(self, topology, after: int, error: type = C3liRunError):
         """Constructor.
 
         Args:
             topology: Process layout, for deciding who raises.
             after: Steps to allow before raising.
+            error: What is raised.
         """
         self.topology = topology
         self.after = after
+        self.error = error
         self.seen = 0
 
     def on(self, event):
@@ -301,18 +303,19 @@ class AbortOffMain:
         if event.type is EventType.STEP_ENDED and not self.topology.is_main:
             self.seen += 1
             if self.seen >= self.after:
-                raise C3liRunError("cancelled on a follower")
+                raise self.error("stopped on a follower")
         return Signal.GO
 
 
-def _aborts_off_main(rank, world, results, port):
-    """Raise on the follower and report whether every rank unwound.
+def _aborts_off_main(rank, world, results, port, cancel=False):
+    """Raise on the follower and report how every rank unwound.
 
     Args:
         rank: Index of this process.
         world: Number of processes taking part.
         results: Shared mapping the ranks report into.
         port: Rendezvous port.
+        cancel: Whether the follower is cancelled rather than failing.
     """
     topology = join_group(rank, world, port)
     try:
@@ -322,11 +325,17 @@ def _aborts_off_main(rank, world, results, port):
                 program,
                 seed=42,
                 topology=topology,
-                hooks=[AbortOffMain(topology, after=2)],
+                hooks=[
+                    AbortOffMain(
+                        topology,
+                        after=2,
+                        error=C3liRunCancelled if cancel else C3liRunError,
+                    )
+                ],
             ).run()
             results[rank] = "finished"
         except C3liRunError as failure:
-            results[rank] = f"raised: {failure}"
+            results[rank] = type(failure).__name__
     finally:
         topology.close()
 
@@ -782,10 +791,12 @@ def test_a_stop_decided_on_one_rank_ends_them_all():
     assert reported[0] == reported[1]
 
 
-def test_an_abort_on_a_follower_unwinds_every_rank():
-    """Raising is not self-synchronizing, so it is broadcast like any signal."""
-    reported = under_ddp(_aborts_off_main, free_port())
-    assert all(str(outcome).startswith("raised") for outcome in reported.values())
+@pytest.mark.parametrize("cancel", [False, True])
+def test_an_abort_on_a_follower_unwinds_every_rank(cancel):
+    """Raising is not self-synchronizing, and a cancellation stays one on every rank."""
+    reported = under_ddp(_aborts_off_main, free_port(), cancel)
+    expected = "C3liRunCancelled" if cancel else "C3liRunError"
+    assert set(reported.values()) == {expected}
 
 
 @pytest.mark.parametrize("samples", [8, 9, 10])

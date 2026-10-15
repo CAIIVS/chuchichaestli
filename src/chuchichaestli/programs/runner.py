@@ -16,6 +16,7 @@ from chuchichaestli.programs.ckpt import CheckpointStore
 from chuchichaestli.programs.serialize import C3liCheckpointError, hook_keys
 from chuchichaestli.programs.context import Context, join_path
 from chuchichaestli.programs.events import (
+    C3liRunCancelled,
     C3liRunError,
     Event,
     EventType,
@@ -345,6 +346,7 @@ class Runner:
             run_name=self._name_run(),
         )
         failure: str | None = None
+        cancelled = False
         # whether the state is whole: between program steps, not partway into one
         settled = False
         try:
@@ -360,17 +362,24 @@ class Runner:
                     break
                 signal = self._lockstep(lambda: self._advanced(ctx))
         except C3liRunError as exc:
-            failure = str(exc)
+            failure = str(exc) or "aborted"
+            cancelled = isinstance(exc, C3liRunCancelled)
             raise
         except BaseException as exc:
             failure = f"{type(exc).__name__}: {exc}"
+            cancelled = isinstance(exc, KeyboardInterrupt)
             raise
         finally:
             self.program.leave(ctx)
             ctx.progress = self.program.progress()
             self._report_unplaced()
             try:
-                ctx.emit(EventType.RUN_ENDED, aborted=failure, at_boundary=settled)
+                ctx.emit(
+                    EventType.RUN_ENDED,
+                    aborted=failure,
+                    cancelled=cancelled,
+                    at_boundary=settled,
+                )
             except Exception as exc:
                 if failure is None:
                     raise
