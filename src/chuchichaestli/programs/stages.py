@@ -9,7 +9,7 @@ from copy import deepcopy
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from dataclasses import replace
-from typing import Any
+from typing import Any, ClassVar
 import torch
 from torch import nn
 from torch.optim import Optimizer
@@ -41,7 +41,7 @@ from chuchichaestli.programs.update import (
     Updater,
     WeightsTypes,
 )
-from chuchichaestli.programs.events import EventType, Progress, Signal
+from chuchichaestli.programs.events import ArtifactTypes, EventType, Progress, Signal
 from chuchichaestli.programs.topology import lockstep, reduce_metrics
 from chuchichaestli.programs.traits import (
     DiffusionLike,
@@ -257,17 +257,20 @@ class Load(StageBlock):
 
 
 class Exporter(StageBlock, ABC):
-    """Write a binding out to a file, from rank 0 only.
+    """Write a binding out to a file, from rank 0 only, and announce it.
 
-    Subclasses implement `write`.
+    Subclasses implement `write` and set `kind`. Every rank emits `EXPORTED`
+    with the files rank 0 wrote.
 
     Attributes:
         path: File each export lands on, possibly a template.
         source: Binding name of what is exported.
+        kind: What the written files hold.
         single_file: Whether the export lands on a single file, written under
             a scratch name and moved into place.
     """
 
+    kind: ClassVar[ArtifactTypes]
     single_file: bool = True
 
     def __init__(
@@ -309,17 +312,18 @@ class Exporter(StageBlock, ABC):
         """
 
     @abstractmethod
-    def write(self, target: Path, artifact: Any, ctx: Context) -> None:
-        """Write the artifact out.
+    def write(self, target: Path, artifact: Any, ctx: Context) -> Sequence[Path] | None:
+        """Write the artifact out and return its files, or `None` for the target.
 
         Args:
-            target: Scratch file to write, moved into place afterwards.
+            target: File to write; a scratch file moved into place afterwards
+                when `single_file` holds.
             artifact: What the source binding resolved to.
             ctx: Execution context for this entry.
         """
 
     def core(self, ctx: Context) -> None:
-        """Write the source binding to its file.
+        """Write the source binding to its file and announce what was written.
 
         Args:
             ctx: Execution context for this entry.
@@ -329,14 +333,18 @@ class Exporter(StageBlock, ABC):
         """
         target = self.target(ctx)
         self.check(target)
-        if not ctx.topology.is_main:
-            return
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not self.single_file:
-            self.write(target, ctx[self.source], ctx)
-            return
-        with staged(target) as (scratch,):
-            self.write(scratch, ctx[self.source], ctx)
+        files: list[str] | None = None
+        if ctx.topology.is_main:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            written = None
+            if self.single_file:
+                with staged(target) as (scratch,):
+                    self.write(scratch, ctx[self.source], ctx)
+            else:
+                written = self.write(target, ctx[self.source], ctx)
+            files = [str(f) for f in (written if written is not None else [target])]
+        files = ctx.topology.broadcast(files)
+        ctx.emit(EventType.EXPORTED, files=files, kind=self.kind, source=self.source)
 
 
 class WeightsExport(Exporter):
@@ -344,6 +352,8 @@ class WeightsExport(Exporter):
 
     The suffix picks the format (.safetensors or .pt/.pth).
     """
+
+    kind = "weights"
 
     def check(self, target: Path) -> None:
         """Reject a suffix no state writer handles.
@@ -376,6 +386,7 @@ class ImageExport(Exporter):
         kwargs: Arguments `save_images` is called with.
     """
 
+    kind = "image"
     single_file: bool = False
 
     def __init__(
@@ -412,17 +423,17 @@ class ImageExport(Exporter):
 
         require(target.suffix.lower(), IMAGE_FORMATS, "image format")
 
-    def write(self, target: Path, artifact: Any, ctx: Context) -> None:
+    def write(self, target: Path, artifact: Any, ctx: Context) -> list[Path]:
         """Draw the source binding as one file per image.
 
         Args:
-            target: Scratch file to write.
+            target: File whose stem names every image.
             artifact: The images being plotted.
             ctx: Execution context for this entry.
         """
         from chuchichaestli.utils.visualization.images import save_images
 
-        save_images(artifact, target, **self.kwargs)
+        return save_images(artifact, target, **self.kwargs)
 
 
 class ArchiveExport(Exporter):
@@ -435,6 +446,7 @@ class ArchiveExport(Exporter):
         key: Name the samples are stored under.
     """
 
+    kind = "tensor"
     single_file: bool = False
 
     def __init__(
@@ -468,7 +480,7 @@ class ArchiveExport(Exporter):
         """
         require(target.suffix, SAVERS, "archive format")
 
-    def write(self, target: Path, artifact: Any, ctx: Context) -> None:
+    def write(self, target: Path, artifact: Any, ctx: Context) -> tuple[Path, ...]:
         """Write the samples, and the truths paired with them if any.
 
         Args:
@@ -496,6 +508,7 @@ class ArchiveExport(Exporter):
         with staged(*files) as scratches:
             for scratch, column in zip(scratches, columns):
                 save_dataset(scratch, column.detach().cpu(), key=self.key)
+        return files
 
 
 class Barrier(StageBlock):
@@ -2108,7 +2121,7 @@ class Predict(Inference):
         return None
 
     def leave(self, ctx: Context) -> Signal:
-        """Finish the archive, or publish what was kept.
+        """Finish the archive and announce it, or publish what was kept.
 
         Args:
             ctx: Execution context for this entry.
@@ -2126,7 +2139,25 @@ class Predict(Inference):
             if y is not None:
                 ctx.publish(f"{self.name}/predictions", y)
         self._publish_pairs(ctx)
+        if self._written is not None:
+            ctx.emit(
+                EventType.EXPORTED,
+                files=[str(f) for f in self.archive_files(ctx.topology.world_size)],
+                kind="tensor",
+                source=f"{self.name}/archive",
+            )
         return super().leave(ctx)
+
+    def archive_files(self, world_size: int) -> list[Path]:
+        """Return every file the archive left: one per archive, or each shard.
+
+        Args:
+            world_size: Number of processes that wrote shards.
+        """
+        archives = [a for a in (self.archive, self.targets_archive) if a is not None]
+        if world_size == 1 or self.merge:
+            return archives
+        return [self.shard_path(r, a) for a in archives for r in range(world_size)]
 
     def _gather_batches(
         self, ctx: Context, batches: list[torch.Tensor]

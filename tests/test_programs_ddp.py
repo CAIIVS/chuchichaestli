@@ -4,6 +4,7 @@
 """Tests for running across several processes without deadlocking one."""
 
 import os
+from pathlib import Path
 
 import pytest
 import torch
@@ -26,6 +27,7 @@ from chuchichaestli.programs import (
     Runner,
     Signal,
     Train,
+    WeightsExport,
 )
 from chuchichaestli.programs.events import C3liRunError
 from chuchichaestli.data.archive import read_archive
@@ -660,6 +662,77 @@ def test_the_shards_can_be_left_apart(tmp_path):
         for shard in tmp_path.glob("*.h5")
     )
     assert rows == 8
+
+
+class Exports:
+    """Records the payload of every `EXPORTED` event."""
+
+    def __init__(self):
+        """Constructor."""
+        self.seen: list[dict] = []
+
+    def on(self, event):
+        """Record an export.
+
+        Args:
+            event: What the runner just did.
+        """
+        if event.type is EventType.EXPORTED:
+            self.seen.append(dict(event.payload))
+        return Signal.GO
+
+
+def _announces(rank, world, results, port, directory, merge):
+    """Stream, archive and export on every rank, and report what was announced.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+        directory: Where every file is written.
+        merge: Whether the streamed shards are joined when the run ends.
+    """
+    from pathlib import Path
+
+    directory = Path(directory)
+    topology = join_group(rank, world, port)
+    try:
+        exports = Exports()
+        _, archived = predicted_then_archived(directory / "saved.h5")
+        sample = Predict(
+            "sample",
+            model=model(),
+            data=ramp(8),
+            batch_size=2,
+            archive=directory / "streamed.h5",
+            merge=merge,
+        )
+        weights = WeightsExport("weights", path=directory / "w.safetensors")
+        program = Program(
+            provide={"model": model()}, stages=[archived, sample, weights]
+        )
+        Runner(program, seed=42, topology=topology, hooks=[exports]).run()
+        results[rank] = exports.seen
+    finally:
+        topology.close()
+
+
+@pytest.mark.parametrize("merge", [True, False])
+def test_every_rank_announces_the_same_files(tmp_path, merge):
+    """A trace has to read the same whichever rank wrote it."""
+    reported = under_ddp(_announces, free_port(), str(tmp_path), merge)
+    assert reported[0] == reported[1]
+    streamed = ["streamed.h5"] if merge else ["streamed.rank0.h5", "streamed.rank1.h5"]
+    named = [
+        (seen["kind"], [Path(f).name for f in seen["files"]]) for seen in reported[0]
+    ]
+    assert named == [
+        ("tensor", ["saved.h5"]),
+        ("tensor", streamed),
+        ("weights", ["w.safetensors"]),
+    ]
+    assert all(Path(f).is_file() for seen in reported[0] for f in seen["files"])
 
 
 def test_every_rank_agrees_on_the_weights():

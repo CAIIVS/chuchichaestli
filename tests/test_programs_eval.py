@@ -21,10 +21,12 @@ from chuchichaestli.programs import (
     Call,
     Context,
     Eval,
+    EventType,
     ImageExport,
     Predict,
     Program,
     Runner,
+    Signal,
     Train,
 )
 
@@ -787,3 +789,56 @@ def test_an_archive_creates_the_directories_it_needs(tmp_path):
     )
     Runner(program, hooks=(), device="cpu").run()
     assert (tmp_path / "nested" / "under" / "out.h5").is_file()
+
+
+class Exports:
+    """Records the payload of every `EXPORTED` event."""
+
+    def __init__(self):
+        """Constructor."""
+        self.seen: list[dict] = []
+
+    def on(self, event):
+        """Record an export.
+
+        Args:
+            event: What the runner just did.
+        """
+        if event.type is EventType.EXPORTED:
+            self.seen.append(dict(event.payload))
+        return Signal.GO
+
+
+def test_an_archive_export_announces_samples_and_truths(tmp_path):
+    """A pair lands in two files, both holding tensors."""
+    exports = Exports()
+    path = tmp_path / "pairs.h5"
+    program = Program(
+        stages=[
+            Predict("out", model=linear(), data=paired(), batch_size=4, targets="y"),
+            ArchiveExport("save", path=path, source="out/pairs"),
+        ]
+    )
+    Runner(program, seed=0, hooks=(exports,)).run()
+    files = [str(path), str(targets_path(path))]
+    assert exports.seen == [{"files": files, "kind": "tensor", "source": "out/pairs"}]
+
+
+def test_a_streamed_prediction_is_announced_as_it_leaves(tmp_path):
+    """An archive written without an exporter is an artifact all the same."""
+    exports = Exports()
+    archive = tmp_path / "out.h5"
+    stage = Predict(
+        "out", model=linear(), data=paired(), batch_size=4, targets="y", archive=archive
+    )
+    Runner(Program(stages=[stage]), seed=0, hooks=(exports,)).run()
+    files = [str(archive), str(targets_path(archive))]
+    assert exports.seen == [{"files": files, "kind": "tensor", "source": "out/archive"}]
+
+
+def test_predictions_kept_in_memory_are_not_announced():
+    """Nothing was written, so there is no file to name."""
+    exports = Exports()
+    stage = Predict("out", model=linear(), data=paired(), batch_size=4)
+    Runner(Program(stages=[stage]), seed=0, hooks=(exports,)).run()
+    assert exports.seen == []

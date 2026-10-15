@@ -29,6 +29,7 @@ from chuchichaestli.programs.objective import (
     Reconstruction,
 )
 from chuchichaestli.programs.events import (
+    ArtifactTypes,
     C3liRunError,
     Event,
     EventType,
@@ -136,6 +137,7 @@ __all__ = [
     "C3liDataError",
     "Event",
     "EventType",
+    "ArtifactTypes",
     "Progress",
     "Signal",
     "C3liRunError",

@@ -238,13 +238,19 @@ written.
 ## Exports and previews
 
 `Exporter` is the shared half of writing something out: the binding it reads,
-the path, the rank-0 guard and the atomic write. What the two concrete stages
-do with the file is all that separates them.
+the path, the rank-0 guard and the atomic write. What the concrete stages do
+with the file is all that separates them.
 
-| stage | writes | suffix picks |
-|---|---|---|
-| `WeightsExport` | a binding's `state_dict`, atomically | `.safetensors`, `.pt`, `.pth` |
-| `ImageExport` | one file per image | `.png`, `.jpg`, `.webp`, `.tif`, `.pdf`, `.svg` |
+| stage | writes | kind | suffix picks |
+|---|---|---|---|
+| `WeightsExport` | a binding's `state_dict`, atomically | `weights` | `.safetensors`, `.pt`, `.pth` |
+| `ImageExport` | one file per image | `image` | `.png`, `.jpg`, `.webp`, `.tif`, `.pdf`, `.svg` |
+| `ArchiveExport` | samples, and their truths beside them | `tensor` | any suffix under [Archives](#archives) |
+
+Every export is announced with an `EXPORTED` event carrying the `files`
+written, their `kind` and the `source` binding, identical on every rank. A
+`Predict(archive=...)` announces its archive the same way as it ends, with
+kind `tensor`, so hooks such as `Jsonl` see every file a run leaves.
 
 A path with an `{epoch}`, `{step}` or `{advance}` field numbers the exports by
 where the run had got to, so a stage entered every few epochs leaves its own

@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the stage vocabulary: blocks, phases and their composition."""
 
+from pathlib import Path
+
 import pytest
 import torch
 from torch import nn
@@ -10,7 +12,7 @@ from torch.utils.data import TensorDataset
 
 from chuchichaestli.programs.runner import Runner
 from chuchichaestli.programs.context import Context
-from chuchichaestli.programs.events import Progress, Signal
+from chuchichaestli.programs.events import EventType, Progress, Signal
 from chuchichaestli.programs.stages import (
     Train,
     Barrier,
@@ -461,3 +463,49 @@ def test_each_pass_refuses_a_loop_counting_in_steps():
     )
     with pytest.raises(ValueError, match="counts in steps"):
         Phase.each_pass(3, counting)
+
+
+class Exports:
+    """Records the payload of every `EXPORTED` event."""
+
+    def __init__(self):
+        """Constructor."""
+        self.seen: list[dict] = []
+
+    def on(self, event):
+        """Record an export.
+
+        Args:
+            event: What the runner just did.
+        """
+        if event.type is EventType.EXPORTED:
+            self.seen.append(dict(event.payload))
+        return Signal.GO
+
+
+def test_a_weights_export_announces_its_file(tmp_path):
+    """The file lands under its own name, not the scratch one it was written to."""
+    exports = Exports()
+    path = tmp_path / "w.safetensors"
+    program = Program(
+        [WeightsExport("out", path=path)], provide={"model": nn.Linear(2, 2)}
+    )
+    Runner(program, hooks=(exports,)).run()
+    assert exports.seen == [
+        {"files": [str(path)], "kind": "weights", "source": "model"}
+    ]
+
+
+def test_an_image_export_announces_every_image(tmp_path):
+    """One target stem becomes several files, and each is named."""
+    exports = Exports()
+    program = Program(
+        [ImageExport("preview", path=tmp_path / "s.png", source="images")],
+        provide={"images": torch.rand(2, 1, 8, 8)},
+    )
+    Runner(program, hooks=(exports,)).run()
+    (seen,) = exports.seen
+    assert seen["kind"] == "image"
+    assert seen["source"] == "images"
+    assert seen["files"] == [str(tmp_path / f"s_{i}.png") for i in range(2)]
+    assert all(Path(f).is_file() for f in seen["files"])

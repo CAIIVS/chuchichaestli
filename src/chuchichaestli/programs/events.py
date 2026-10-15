@@ -17,6 +17,8 @@ from typing import Any, Literal, get_args
 __all__ = [
     "Signal",
     "UnitTypes",
+    "ArtifactTypes",
+    "ARTIFACT_TYPES",
     "UNIT_MAP",
     "units",
     "counts_toward",
@@ -135,6 +137,7 @@ class EventType(str, Enum):
     EPOCH_ENDED = "epoch.ended"
     STEP_ENDED = "step.ended"
     CHECKPOINT = "checkpoint"
+    EXPORTED = "exported"
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +181,10 @@ class Event:
 
 
 UnitTypes = Literal["advance", "epoch", "step"]
+
+# What an exported file holds: plotted images, archived samples, or weights.
+ArtifactTypes = Literal["image", "tensor", "weights"]
+ARTIFACT_TYPES: frozenset[str] = frozenset(get_args(ArtifactTypes))
 
 UNIT_MAP: dict[str, EventType] = {
     "advance": EventType.STAGE_ADVANCED,
