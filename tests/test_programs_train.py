@@ -252,6 +252,69 @@ def test_the_step_payload_carries_the_loss():
     assert payloads and "loss" in payloads[0]
 
 
+class StepPayloads:
+    """Records the payload of every step."""
+
+    def __init__(self):
+        """Constructor."""
+        self.seen: list[dict] = []
+
+    def on(self, event):
+        """Record a step's payload.
+
+        Args:
+            event: What the runner just did.
+        """
+        if event.type is EventType.STEP_ENDED:
+            self.seen.append(event.payload)
+        return Signal.GO
+
+
+def test_a_step_reports_the_rate_it_stepped_at():
+    """Under a per-step schedule, each step names the rate before the decay."""
+    steps = StepPayloads()
+    Runner(
+        Train(
+            "t",
+            model=linear(),
+            data=DataManager(ramp(4), batch_size=1, shuffle=False),
+            loss=nn.MSELoss(),
+            steps=3,
+            optim=OptimSpec.sgd(lr=0.4).with_exponential_schedule(0.5, interval="step"),
+        ),
+        hooks=(steps,),
+    ).run()
+    assert [round(p["lr"], 6) for p in steps.seen] == [0.4, 0.2, 0.1]
+
+
+def test_each_group_reports_its_own_rate():
+    """Several optimizers give one key per group, and no bare `lr`."""
+    steps = StepPayloads()
+    gen, disc = linear(), linear()
+    Runner(
+        Program(
+            [
+                Train(
+                    "t",
+                    model=gen,
+                    data=ramp(),
+                    loss=nn.MSELoss(),
+                    steps=2,
+                    update=Alternating(("disc", "gen")),
+                    optim={
+                        "disc": OptimSpec.sgd(lr=0.3, params="disc"),
+                        "gen": OptimSpec.sgd(lr=0.1, params="model"),
+                    },
+                ),
+            ],
+            provide={"disc": disc},
+        ),
+        hooks=(steps,),
+    ).run()
+    rates = {k: v for k, v in steps.seen[0].items() if k.startswith("lr")}
+    assert rates == {"lr/disc": 0.3, "lr/gen": 0.1}
+
+
 def test_a_reduced_precision_forward_runs_in_that_dtype():
     """Autocast applies on CPU with bfloat16."""
     seen: list[torch.dtype] = []

@@ -1038,6 +1038,7 @@ class StageLoop(ABC):
         self._progress = self._progress.next_step(samples)
         ctx.progress = self._progress
         reported = {} if loss is None else loss.as_floats()
+        reported.update(self.step_summary())
         if self._steps_in_entry:
             reported["total"] = self._steps_in_entry
         signal = ctx.emit(EventType.STEP_ENDED, trains=self.trains, **reported)
@@ -1045,6 +1046,13 @@ class StageLoop(ABC):
             self._finish(ctx)
             return Signal.DONE
         return Signal.DONE if signal.halts else signal
+
+    def step_summary(self) -> dict[str, Any]:
+        """Return what the stage has to report about the step just taken.
+
+        It rides in the step's event, as `summary` does in the closing one.
+        """
+        return {}
 
     def summary(self) -> dict[str, Any]:
         """Return what the stage has to report as it ends.
@@ -1340,6 +1348,7 @@ class Train(StageLoop):
         self._deferred_states: dict[str, Any] | None = None
         self._objective: Objective | None = None
         self._monitors: dict[str | None, str | None] = {}
+        self._rates: dict[str | None, float] = {}
 
     def _build_objective(self, ctx: Context) -> Objective:
         """Return what this stage optimizes.
@@ -1382,10 +1391,20 @@ class Train(StageLoop):
             ctx: Execution context for this entry.
         """
         ctx.clear_cache()
+        self._rates = {
+            group: float(optimizer.param_groups[0]["lr"])
+            for group, optimizer in self.update.optimizers.items()
+        }
         loss = self.update.apply(self._objective, batches, ctx)
         for name, averaged in self._ema.items():
             averaged.update_parameters(ctx.resolve(name))
         return loss
+
+    def step_summary(self) -> dict[str, Any]:
+        """Return the rate each group stepped at, keyed `lr` or `lr/<group>`."""
+        if len(self._rates) == 1:
+            return {"lr": next(iter(self._rates.values()))}
+        return {f"lr/{group}": rate for group, rate in self._rates.items()}
 
     def finalize_sweep(self, ctx: Context) -> None:
         """Run actions at the end of a pass, for instance updating schedulers.
