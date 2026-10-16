@@ -187,8 +187,9 @@ class Event:
 
 UnitTypes = Literal["advance", "epoch", "step"]
 
-# What an exported file holds: plotted images, archived samples, or weights.
-ArtifactTypes = Literal["image", "tensor", "weights"]
+# What an exported file holds: plotted images, archived samples, weights, or a
+# whole checkpoint
+ArtifactTypes = Literal["image", "tensor", "weights", "checkpoint"]
 ARTIFACT_TYPES: frozenset[str] = frozenset(get_args(ArtifactTypes))
 
 UNIT_MAP: dict[str, EventType] = {

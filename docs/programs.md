@@ -250,7 +250,8 @@ with the file is all that separates them.
 Every export is announced with an `EXPORTED` event carrying the `files`
 written, their `kind` and the `source` binding, identical on every rank. A
 `Predict(archive=...)` announces its archive the same way as it ends, with
-kind `tensor`, so hooks such as `Jsonl` see every file a run leaves.
+kind `tensor`, and a `Checkpointer` each checkpoint it writes, with kind
+`checkpoint`, so hooks such as `Jsonl` see every file a run leaves.
 
 A path with an `{epoch}`, `{step}` or `{advance}` field numbers the exports by
 where the run had got to, so a stage entered every few epochs leaves its own

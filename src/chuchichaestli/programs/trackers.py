@@ -7,11 +7,12 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 import torch
 from torch import nn
 from chuchichaestli.__about__ import __version__
@@ -39,10 +40,17 @@ if TYPE_CHECKING:
     from chuchichaestli.programs.runner import Runner
 
 
-__all__ = ["TrackingPolicy", "Tracker", "PresetTypes", "RunStatusTypes"]
+__all__ = [
+    "TrackingPolicy",
+    "Tracker",
+    "PresetTypes",
+    "RunStatusTypes",
+    "CheckpointUploadTypes",
+]
 
 PresetTypes = Literal["minimal", "default", "full"]
 RunStatusTypes = Literal["finished", "failed", "cancelled"]
+CheckpointUploadTypes = Literal["best", "last", "all"]
 
 
 @dataclass(frozen=True)
@@ -69,7 +77,15 @@ class TrackingPolicy:
             world size and the working directory's commit.
         checkpoints: Record each checkpoint's index, step and score.
         artifacts: The kinds of exported file uploaded: `True` for every kind,
-            `False` for none, or a sequence of kinds.
+            `False` for none, or a sequence of kinds: `"image"` (an
+            `ImageExport`'s plots), `"tensor"` (an `ArchiveExport`'s or a
+            `Predict` archive's samples), `"weights"` (a `WeightsExport`'s
+            file) and `"checkpoint"` (a `Checkpointer`'s checkpoints).
+        checkpoint_uploads: Which checkpoints are uploaded: each that becomes
+            the best as it is written (`"best"`, falling back to `"last"`
+            without a monitored score), the latest one as the run ends
+            (`"last"`), or each one as it is written (`"all"`). A checkpoint
+            is uploaded whole, so the run can be resumed from it.
     """
 
     metrics: bool = True
@@ -83,6 +99,7 @@ class TrackingPolicy:
     environment: bool = True
     checkpoints: bool = True
     artifacts: bool | Sequence[ArtifactTypes] = ("image", "tensor")
+    checkpoint_uploads: CheckpointUploadTypes = "best"
 
     def __post_init__(self) -> None:
         """Reject a cadence or an artifact kind that cannot be honoured.
@@ -95,6 +112,7 @@ class TrackingPolicy:
         if not isinstance(self.artifacts, bool):
             for kind in self.artifacts:
                 require(kind, ARTIFACT_TYPES, "artifact kind")
+        require(self.checkpoint_uploads, get_args(CheckpointUploadTypes), "upload mode")
 
     @property
     def kinds(self) -> frozenset[str]:
@@ -214,6 +232,8 @@ class Tracker(ABC):
         self._on_main = True
         self._memory: Any = None
         self._samples: dict[str, int] = {}
+        self._uploaded_best = False
+        self._latest: tuple[list[Path], int, tuple[str, ...]] | None = None
         self._names: dict[str, str | None] = {}
         self._run: dict[str, Any] = {}
         self._resumed = False
@@ -285,16 +305,56 @@ class Tracker(ABC):
                 path = Path(payload["path"])
                 self._log_checkpoint(payload["index"], path, step, payload.get("score"))
         elif event.type is EventType.EXPORTED:
-            if event.payload.get("kind") in self.log.kinds:
+            kind = event.payload.get("kind")
+            if kind == "checkpoint":
+                if kind in self.log.kinds:
+                    self._checkpoint_written(event, step)
+            elif kind in self.log.kinds:
                 self._ensure_open()
                 paths = [Path(f) for f in event.payload.get("files", ())]
-                kind, key = event.payload["kind"], stage_name(event.path)
-                self._log_artifacts(kind, key, paths, step)
+                self._log_artifacts(kind, stage_name(event.path), paths, step)
         elif event.type is EventType.RUN_ENDED:
+            self._upload_latest()
             if self._opened:
                 self._close(self._status(event))
             self._opened, self._closed = False, True
         return Signal.GO
+
+    def _checkpoint_written(self, event: Event, step: int) -> None:
+        """Upload a checkpoint now, or keep it for the run's end, per the policy.
+
+        Args:
+            event: The `EXPORTED` event of a checkpoint.
+            step: Training step it was taken at.
+        """
+        payload = event.payload
+        paths = [Path(f) for f in payload.get("files", ())]
+        best = bool(payload.get("best"))
+        tags = ("best",) if best else ()
+        mode = self.log.checkpoint_uploads
+        if mode == "all" or (mode == "best" and best):
+            self._uploaded_best = self._uploaded_best or best
+            self._latest = None
+            self._ensure_open()
+            self._log_artifacts("checkpoint", "checkpoint", paths, step, tags)
+        else:
+            self._latest = (paths, step, tags)
+
+    def _upload_latest(self) -> None:
+        """Upload the latest checkpoint kept back, unless a best one was uploaded."""
+        if self._latest is None or self._uploaded_best:
+            return
+        paths, step, tags = self._latest
+        self._latest = None
+        if not all(p.is_file() for p in paths):
+            warnings.warn(
+                "The latest checkpoint was pruned before it could be uploaded; "
+                "keep more than one, or list the tracker before the Checkpointer.",
+                stacklevel=2,
+            )
+            return
+        self._ensure_open()
+        self._log_artifacts("checkpoint", "checkpoint", paths, step, tags)
 
     @staticmethod
     def _status(event: Event) -> RunStatusTypes:
@@ -469,15 +529,21 @@ class Tracker(ABC):
 
     @abstractmethod
     def _log_artifacts(
-        self, kind: ArtifactTypes, key: str, paths: Sequence[Path], step: int
+        self,
+        kind: ArtifactTypes,
+        key: str,
+        paths: Sequence[Path],
+        step: int,
+        tags: Sequence[str] = (),
     ) -> None:
-        """Log files a stage wrote.
+        """Log files a stage or a checkpointer wrote.
 
         Args:
             kind: What the files hold.
-            key: Name of the stage that wrote them.
+            key: Name of the stage that wrote them, or `"checkpoint"`.
             paths: The files.
             step: Training step they belong to.
+            tags: Labels for the backend to version them by, e.g. `"best"`.
         """
 
     @abstractmethod

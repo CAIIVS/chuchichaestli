@@ -762,7 +762,7 @@ class Calls(Tracker):
         """Count a log."""
         self.calls.append("log")
 
-    def _log_artifacts(self, kind, key, paths, step):
+    def _log_artifacts(self, kind, key, paths, step, tags=()):
         """Count an artifact log."""
         self.calls.append("artifacts")
 

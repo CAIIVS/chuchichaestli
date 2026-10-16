@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the experiment tracker base, through a recording backend."""
 
+from pathlib import Path
+
 import pytest
 import torch
 from torch import nn
@@ -47,6 +49,7 @@ class Recording(Tracker):
         self.opens: list[tuple[dict, str | None, bool]] = []
         self.logs: list[tuple[dict, int]] = []
         self.files: list[tuple[str, str, list[str], int]] = []
+        self.tags: list[tuple[str, ...]] = []
         self.configs: list[dict] = []
         self.checkpoints: list[tuple[int, int, dict | None]] = []
         self.closes: list[str] = []
@@ -60,9 +63,10 @@ class Recording(Tracker):
         """Record the numbers."""
         self.logs.append((dict(metrics), step))
 
-    def _log_artifacts(self, kind, key, paths, step):
-        """Record the files by name."""
+    def _log_artifacts(self, kind, key, paths, step, tags=()):
+        """Record the files by name, and their tags."""
         self.files.append((kind, key, [p.name for p in paths], step))
+        self.tags.append(tuple(tags))
 
     def _log_config(self, config):
         """Record the config."""
@@ -327,6 +331,7 @@ def test_artifacts_arrive_by_kind_under_their_stage(tmp_path):
         ({"artifacts": ("image",)}, ["image"]),
         ({"artifacts": False}, []),
         ({"log": "full"}, ["image", "tensor", "weights"]),
+        ({"artifacts": ("checkpoint",)}, []),
     ],
 )
 def test_artifacts_selects_the_kinds_uploaded(tmp_path, options, kinds):
@@ -417,7 +422,12 @@ def test_a_resumed_run_reopens_its_backend_run_and_continues_the_axis(tmp_path):
 def test_a_policy_resolves_from_a_preset_and_options():
     """Options change fields on top of the preset they are given with."""
     assert TrackingPolicy.resolve() == TrackingPolicy()
-    assert TrackingPolicy.resolve("full").kinds == {"image", "tensor", "weights"}
+    assert TrackingPolicy.resolve("full").kinds == {
+        "image",
+        "tensor",
+        "weights",
+        "checkpoint",
+    }
     minimal = TrackingPolicy.resolve("minimal", timing=True)
     assert (minimal.timing, minimal.runner) == (True, False)
     shared = TrackingPolicy(every=10)
@@ -436,6 +446,7 @@ def test_a_tracker_shows_how_it_was_configured():
     [
         ({"every": 0}, "every"),
         ({"artifacts": ("video",)}, "artifact kind"),
+        ({"checkpoint_uploads": "first"}, "upload mode"),
         ({"memroy": False}, "tracking option"),
         ({"log": "everything"}, "tracking preset"),
     ],
@@ -444,3 +455,87 @@ def test_a_tracker_refuses_what_it_cannot_honour(kwargs, match):
     """Typos fail at construction, not silently log nothing."""
     with pytest.raises(ValueError, match=match):
         Recording(**kwargs)
+
+
+def uploads(store, *kinds, **options) -> Recording:
+    """Train with a scoring checkpointer and return what the tracker uploaded.
+
+    Args:
+        store: Directory the checkpoints are written to.
+        kinds: Artifact kinds to upload besides checkpoints.
+        options: Further `TrackingPolicy` fields.
+    """
+    hook = Checkpointer(every=1, unit="epoch", monitor=options.pop("monitor", "mse"))
+    tracker = Recording(artifacts=(*kinds, "checkpoint"), **options)
+    run(fitted(), hook, tracker, store=store)
+    return tracker
+
+
+def test_a_checkpointer_announces_each_checkpoint_it_writes(tmp_path):
+    """Every file of the directory, and whether it is the best so far."""
+    seen: list[dict] = []
+
+    class Exports:
+        """Records `EXPORTED` payloads."""
+
+        def on(self, event):
+            """Record a checkpoint's announcement.
+
+            Args:
+                event: What the runner just did.
+            """
+            if event.type is EventType.EXPORTED:
+                seen.append(dict(event.payload))
+            return Signal.GO
+
+    hook = Checkpointer(every=1, unit="epoch", monitor="mse")
+    run(fitted(), hook, Exports(), store=tmp_path / "run")
+    assert seen and all(p["kind"] == "checkpoint" for p in seen)
+    first = seen[0]
+    names = {Path(f).name for f in first["files"]}
+    assert {"state.safetensors", "model.safetensors"} <= names
+    assert any(p["best"] for p in seen)
+
+
+def test_checkpoints_are_not_uploaded_by_default(tmp_path):
+    """Optimizer state makes them large, so they are opt-in like weights."""
+    tracker = Recording()
+    run(fitted(), Checkpointer(every=1, unit="epoch"), tracker, store=tmp_path)
+    assert tracker.files == []
+
+
+def test_all_uploads_each_checkpoint_as_it_is_written(tmp_path):
+    """One upload per checkpoint recorded, at the step it was taken."""
+    tracker = uploads(tmp_path, checkpoint_uploads="all")
+    assert [step for *_, step in tracker.files] == [
+        s for _, s, _ in tracker.checkpoints
+    ]
+
+
+def test_best_uploads_each_new_best_and_tags_it(tmp_path):
+    """Only improvements go up, and the backend is told which they are."""
+    tracker = uploads(tmp_path)
+    assert tracker.files and all(tags == ("best",) for tags in tracker.tags)
+
+
+def test_best_without_a_monitor_uploads_the_latest_as_the_run_ends(tmp_path):
+    """Nothing is ever best, so nothing would go up; the latest one does."""
+    tracker = Recording(artifacts=("checkpoint",))
+    run(fitted(), Checkpointer(every=1, unit="epoch"), tracker, store=tmp_path)
+    assert [step for *_, step in tracker.files] == [6]
+    assert tracker.tags == [()]
+
+
+def test_last_uploads_one_checkpoint_as_the_run_ends(tmp_path):
+    """However many were written, one goes up: the latest."""
+    tracker = uploads(tmp_path, checkpoint_uploads="last")
+    assert [step for *_, step in tracker.files] == [6]
+
+
+def test_a_pruned_latest_checkpoint_is_reported_not_uploaded(tmp_path):
+    """The final write prunes what the tracker kept back, if it runs first."""
+    tracker = Recording(artifacts=("checkpoint",), checkpoint_uploads="last")
+    hook = Checkpointer(every=1, unit="epoch", keep=1)
+    with pytest.warns(UserWarning, match="pruned before it could be uploaded"):
+        run(fitted(), hook, tracker, store=tmp_path)
+    assert tracker.files == []
