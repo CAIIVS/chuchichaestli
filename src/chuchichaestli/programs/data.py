@@ -21,6 +21,7 @@ from chuchichaestli.data.batch import BatchType
 from chuchichaestli.data.split import split_dataset
 from chuchichaestli.programs.context import Context
 from chuchichaestli.programs.traits import Topology
+from chuchichaestli.utils.functools import InitArgMixin
 from chuchichaestli.utils.rng import rng_generator
 
 
@@ -31,7 +32,7 @@ class C3liDataError(ValueError):
     """Raised when batches cannot be drawn in a reproducible order."""
 
 
-class DataManager:
+class DataManager(InitArgMixin):
     """Supplies a dataset's batches in an order derived from the seed.
 
     The unit ordered, seeked and sharded is a batch, so a batch size and a

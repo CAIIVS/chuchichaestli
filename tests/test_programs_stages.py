@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the stage vocabulary: blocks, phases and their composition."""
 
+import dataclasses
+import enum
+import json
 from pathlib import Path
 
 import pytest
@@ -30,6 +33,16 @@ from chuchichaestli.programs.stages import (
     When,
 )
 from chuchichaestli.programs.traits import Stage
+from chuchichaestli.metrics import MSE
+from chuchichaestli.programs.data import DataManager
+from chuchichaestli.programs.serialize import (
+    as_loggable,
+    stage_settings,
+    stages_by_path,
+)
+from chuchichaestli.programs.stages import ArchiveExport, Eval
+from chuchichaestli.programs.update import Alternating
+from chuchichaestli.training import OptimSpec
 
 
 class Counting(StageBlock):
@@ -509,3 +522,182 @@ def test_an_image_export_announces_every_image(tmp_path):
     assert seen["source"] == "images"
     assert seen["files"] == [str(tmp_path / f"s_{i}.png") for i in range(2)]
     assert all(Path(f).is_file() for f in seen["files"])
+
+
+def every_kind_of_stage(tmp_path) -> Program:
+    """Build a program holding one stage of each kind.
+
+    Args:
+        tmp_path: Directory any file lands in.
+    """
+    rows = TensorDataset(torch.rand(4, 2), torch.rand(4, 1))
+    return Program(
+        [
+            Call("note", fn=print),
+            Load("in", path=tmp_path / "w.safetensors"),
+            Repeat(
+                2, Train("fit", data=rows, batch_size=2, loss=nn.MSELoss(), steps=1)
+            ),
+            When(
+                lambda ctx: True,
+                Eval("check", data=rows, batch_size=2, metrics=[MSE()]),
+            ),
+            Every(
+                2, Predict("sample", data=rows, batch_size=2, archive=tmp_path / "p.h5")
+            ),
+            ImageExport("plots", path=tmp_path / "i.png", cmap="magma"),
+            ArchiveExport("save", path=tmp_path / "a.h5"),
+            WeightsExport("out", path=tmp_path / "w.safetensors"),
+            Barrier("sync"),
+        ]
+    )
+
+
+def test_every_stage_describes_its_settings_as_strict_json(tmp_path):
+    """A tracker logs them as they are, so nothing may need a custom encoder."""
+    for stage in stages_by_path(every_kind_of_stage(tmp_path)).values():
+        json.dumps(stage_settings(stage), allow_nan=False)
+
+
+def test_settings_are_the_arguments_each_stage_was_built_with(tmp_path):
+    """Wiring and child stages are left out; they are the path and its children."""
+    found = stages_by_path(every_kind_of_stage(tmp_path))
+    by_name = {path.rpartition(":")[2]: stage_settings(s) for path, s in found.items()}
+    assert by_name["note"] == {"fn": "builtins.print"}
+    assert by_name["in"] == {
+        "path": str(tmp_path / "w.safetensors"),
+        "target": "model",
+        "strict": True,
+    }
+    assert by_name["repeat"] == {"times": 2}
+    assert by_name["check"]["metrics"] == ["MSE"]
+    assert by_name["sample"]["archive"] == str(tmp_path / "p.h5")
+    assert by_name["plots"]["cmap"] == "magma"
+    assert by_name["save"]["key"] == "data"
+    assert by_name["sync"] == {}
+    assert by_name["program"] == {"provide": None}
+
+
+def test_train_settings_are_as_given():
+    """What you would write to run it again; the rate in effect is logged per step."""
+    stage = Train(
+        "fit",
+        data=DataManager(TensorDataset(torch.rand(4, 2)), batch_size=2, shuffle=False),
+        loss=nn.MSELoss(),
+        epochs=3,
+        optim=OptimSpec.sgd(lr=0.1).with_exponential_schedule(0.5),
+        lr=0.3,
+        clip=1.0,
+        precision=torch.bfloat16,
+    )
+    settings = stage_settings(stage)
+    assert settings["data"]["cls"] == "DataManager"
+    assert settings["data"]["kwargs"]["batch_size"] == 2
+    assert settings["data"]["kwargs"]["shuffle"] is False
+    assert settings["epochs"] == 3
+    assert settings["loss"] == "MSELoss"
+    assert (settings["optim"]["cls"], settings["optim"]["lr"], settings["lr"]) == (
+        "sgd",
+        0.1,
+        0.3,
+    )
+    assert settings["optim"]["scheduler"]["cls"] == "exponential"
+    assert (settings["clip"], settings["clip_mode"]) == (1.0, None)
+    assert settings["precision"] == "bfloat16"
+    assert settings["update"] is None
+
+
+def test_train_settings_list_one_optimizer_per_group():
+    """Groups each own an optimizer, so each is named under its group."""
+    stage = Train(
+        "fit",
+        data=TensorDataset(torch.rand(4, 2)),
+        loss=nn.MSELoss(),
+        epochs=4,
+        update=Alternating(("disc", "gen")),
+        optim={
+            "disc": OptimSpec.sgd(lr=0.3, params="disc"),
+            "gen": OptimSpec.adam(lr=0.1, params="model"),
+        },
+        swa=True,
+    )
+    settings = stage_settings(stage)
+    assert {g: o["cls"] for g, o in settings["optim"].items()} == {
+        "disc": "sgd",
+        "gen": "adam",
+    }
+    assert settings["update"] == "Alternating"
+    assert settings["swa"] is True
+
+
+def test_a_stage_of_your_own_reports_its_arguments():
+    """Recording is inherited, so a new stage needs no code to be described."""
+
+    class Scale(StageBlock):
+        """Multiply a binding by a factor."""
+
+        def __init__(self, name=None, *, factor: float = 2.0, requires=("x",)):
+            """Constructor.
+
+            Args:
+                name: Identifies the stage within its parent.
+                factor: What the binding is multiplied by.
+                requires: Binding names that must resolve first.
+            """
+            super().__init__(name, requires=requires)
+            self.factor = factor
+
+        def core(self, ctx):
+            """Scale the binding.
+
+            Args:
+                ctx: Execution context for this entry.
+            """
+            ctx.publish("x", ctx["x"] * self.factor)
+
+    assert stage_settings(Scale("scale", factor=3.0)) == {"factor": 3.0}
+
+
+def test_a_stage_recording_nothing_has_no_settings():
+    """A stage written against the protocol alone still describes, as empty."""
+
+    class Bare:
+        name = "bare"
+
+    assert stage_settings(Bare()) == {}
+
+
+class Colour(enum.Enum):
+    """A small enum."""
+
+    RED = 1
+
+
+@dataclasses.dataclass
+class Spot:
+    """A small dataclass."""
+
+    weight: float
+    where: Path
+
+
+@pytest.mark.parametrize(
+    ("value", "described"),
+    [
+        (None, None),
+        (Path("a/b"), "a/b"),
+        (torch.float16, "float16"),
+        (torch.device("cpu"), "cpu"),
+        (Colour.RED, "RED"),
+        (torch.zeros(2, 3), "tensor(shape=[2, 3], dtype=float32)"),
+        (nn.Linear(1, 1), "Linear"),
+        ((1, "a"), [1, "a"]),
+        ({1: {2}}, {"1": [2]}),
+        (Spot(1.5, Path("x")), {"weight": 1.5, "where": "x"}),
+        (len, "builtins.len"),
+        (object(), "object"),
+    ],
+)
+def test_as_loggable_is_readable_and_never_refuses(value, described):
+    """Lossy on purpose: a setting is read by people, not rebuilt."""
+    assert as_loggable(value) == described

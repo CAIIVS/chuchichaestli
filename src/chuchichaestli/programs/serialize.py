@@ -4,10 +4,15 @@
 """Turning what a run holds into a storable form, and back again."""
 
 from __future__ import annotations
+import dataclasses
+import functools
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
+from enum import Enum
+from pathlib import Path
 from typing import Any
 import torch
+from torch import nn
 from chuchichaestli.models.spec import ModelSpec
 from chuchichaestli.programs.context import split_segment
 from chuchichaestli.programs.traits import Stage, Stateful
@@ -23,10 +28,16 @@ __all__ = [
     "hook_keys",
     "hook_states",
     "writable_spec",
+    "as_loggable",
+    "stage_settings",
 ]
 
 
 _TENSOR_TAG = "__tensor__"
+# longer sequences are summarised by their length rather than listed
+_DESCRIBED_ITEMS = 32
+# constructor arguments that identify a stage or wire it, rather than set it up
+_WIRING = frozenset({"name", "requires", "provides"})
 _PAIRS_TAG = "__pairs__"
 
 
@@ -234,3 +245,75 @@ def writable_spec(value: Any) -> ModelSpec | None:
         )
         return None
     return spec
+
+
+def as_loggable(value: Any) -> Any:
+    """Return a readable, JSON-safe account of a value, lossy where it must be.
+
+    Args:
+        value: What to log; anything unrecognised is named by its class.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (Path, torch.device)):
+        return str(value)
+    if isinstance(value, torch.dtype):
+        return str(value).removeprefix("torch.")
+    if isinstance(value, Enum):
+        return value.name
+    if isinstance(value, torch.Tensor):
+        dtype = str(value.dtype).removeprefix("torch.")
+        return f"tensor(shape={list(value.shape)}, dtype={dtype})"
+    recorded = getattr(value, "init_args", None)
+    if isinstance(recorded, Mapping):
+        return {"cls": type(value).__name__, "kwargs": as_loggable(recorded)}
+    if isinstance(value, nn.Module):
+        return type(value).__name__
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            f.name: as_loggable(getattr(value, f.name))
+            for f in dataclasses.fields(value)
+        }
+    if isinstance(value, Mapping):
+        return {str(k): as_loggable(v) for k, v in value.items()}
+    if isinstance(value, Set):
+        return sorted((as_loggable(v) for v in value), key=str)
+    if isinstance(value, Sequence) and not isinstance(value, bytes):
+        if len(value) > _DESCRIBED_ITEMS:
+            return f"{type(value).__name__} of {len(value)} items"
+        return [as_loggable(v) for v in value]
+    if isinstance(value, functools.partial):
+        return as_loggable(value.func)
+    if callable(value) and hasattr(value, "__qualname__"):
+        return f"{getattr(value, '__module__', '')}.{value.__qualname__}".lstrip(".")
+    return type(value).__name__
+
+
+def stage_settings(stage: Stage) -> dict[str, Any]:
+    """Return the arguments a stage was constructed with, readable and JSON-safe.
+
+    Args:
+        stage: The stage to describe; one recording nothing gives `{}`.
+    """
+    recorded = getattr(stage, "init_args", None) or {}
+    return {
+        key: as_loggable(value)
+        for key, value in recorded.items()
+        if key not in _WIRING and not _holds_stages(value)
+    }
+
+
+def _holds_stages(value: Any) -> bool:
+    """Whether a value is a stage or a sequence of them, which report their own.
+
+    Args:
+        value: Constructor argument to check.
+    """
+    if isinstance(value, Stage):
+        return True
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, str)
+        and bool(value)
+        and all(isinstance(v, Stage) for v in value)
+    )

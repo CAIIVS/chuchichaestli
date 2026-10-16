@@ -59,7 +59,7 @@ from chuchichaestli.training.update import (
     UpdatePolicy,
     average_targets,
 )
-from chuchichaestli.utils.functools import partialclass
+from chuchichaestli.utils.functools import InitArgMixin, partialclass
 from chuchichaestli.utils.io import read_state, staged, writer_for
 from chuchichaestli.utils.registry import require
 
@@ -88,7 +88,7 @@ __all__ = [
 ]
 
 
-class StageBlock(ABC):
+class StageBlock(InitArgMixin, ABC):
     """A stage that performs its work in a single event.
 
     Subclasses implement `core`, the stage's main function.
@@ -523,7 +523,7 @@ class Barrier(StageBlock):
         ctx.topology.barrier()
 
 
-class Phase:
+class Phase(InitArgMixin):
     """A stage made of stages.
 
     Nesting is unbounded: checkpoint state, random streams and event labels
@@ -899,7 +899,7 @@ class Every(Phase):
         self._visits = int(state.get("visits", 0))
 
 
-class StageLoop(ABC):
+class StageLoop(InitArgMixin, ABC):
     """A stage that repeats a unit of work until it has done enough.
 
     One `execute` is one unit (for training, one optimizer step over
