@@ -944,4 +944,5 @@ class Checkpointer:
                 EventType.CHECKPOINT,
                 path=str(checkpoint.path),
                 index=checkpoint.index,
+                score=checkpoint.score,
             )

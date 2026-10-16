@@ -1,0 +1,512 @@
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Experiment trackers: a run's numbers, artifacts and config sent to a backend."""
+
+from __future__ import annotations
+import os
+import platform
+import subprocess
+from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, fields, replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
+import torch
+from torch import nn
+from chuchichaestli.__about__ import __version__
+from chuchichaestli.programs.context import stage_name
+from chuchichaestli.programs.events import (
+    ARTIFACT_TYPES,
+    ArtifactTypes,
+    Event,
+    EventType,
+    Signal,
+    counts_toward,
+)
+from chuchichaestli.programs.hooks import Timer
+from chuchichaestli.programs.serialize import (
+    as_loggable,
+    stage_settings,
+    stage_signature,
+    stages_by_path,
+)
+from chuchichaestli.utils.functools import numbers
+from chuchichaestli.utils.registry import require
+
+if TYPE_CHECKING:
+    from chuchichaestli.programs.context import Context
+    from chuchichaestli.programs.runner import Runner
+
+
+__all__ = ["TrackingPolicy", "Tracker", "PresetTypes", "RunStatusTypes"]
+
+PresetTypes = Literal["minimal", "default", "full"]
+RunStatusTypes = Literal["finished", "failed", "cancelled"]
+
+
+@dataclass(frozen=True)
+class TrackingPolicy:
+    """What a tracker logs; the default is rich without uploading weights.
+
+    The run's configuration is logged once, as a fresh run opens. A tracker's
+    own `config=` is always logged.
+
+    Attributes:
+        metrics: Log each training step's losses and rate, and the numbers a
+            stage reports as it ends, e.g. an `Eval`'s scores.
+        every: Log the step metrics every nth training step.
+        epochs: Log the count of training passes as each one ends.
+        timing: Log each training pass's seconds and samples per second.
+        memory: Log each training pass's peak accelerator memory, in MiB;
+            nothing on a device without a peak counter, such as the CPU.
+        runner: Log the run's seed and backend settings.
+        stages: Log the program stages' paths and classes, and each stage's
+            constructor arguments.
+        model: Log each bound model's class, constructor arguments, and total
+            and trainable parameter counts.
+        environment: Log the package, torch and Python versions, device,
+            world size and the working directory's commit.
+        checkpoints: Record each checkpoint's index, step and score.
+        artifacts: The kinds of exported file uploaded: `True` for every kind,
+            `False` for none, or a sequence of kinds.
+    """
+
+    metrics: bool = True
+    every: int = 1
+    epochs: bool = True
+    timing: bool = True
+    memory: bool = True
+    runner: bool = True
+    stages: bool = True
+    model: bool = True
+    environment: bool = True
+    checkpoints: bool = True
+    artifacts: bool | Sequence[ArtifactTypes] = ("image", "tensor")
+
+    def __post_init__(self) -> None:
+        """Reject a cadence or an artifact kind that cannot be honoured.
+
+        Raises:
+            ValueError: If `every` is not positive or a kind is unknown.
+        """
+        if self.every < 1:
+            raise ValueError(f"A tracker logs every n >= 1 steps, got {self.every!r}.")
+        if not isinstance(self.artifacts, bool):
+            for kind in self.artifacts:
+                require(kind, ARTIFACT_TYPES, "artifact kind")
+
+    @property
+    def kinds(self) -> frozenset[str]:
+        """The artifact kinds this policy uploads."""
+        if isinstance(self.artifacts, bool):
+            return ARTIFACT_TYPES if self.artifacts else frozenset()
+        return frozenset(self.artifacts)
+
+    @classmethod
+    def minimal(cls) -> TrackingPolicy:
+        """Return a policy logging the metrics, how the run ended and your config."""
+        return cls(
+            epochs=False,
+            timing=False,
+            memory=False,
+            runner=False,
+            stages=False,
+            model=False,
+            environment=False,
+            checkpoints=False,
+            artifacts=False,
+        )
+
+    @classmethod
+    def full(cls) -> TrackingPolicy:
+        """Return a policy logging everything, weights included."""
+        return cls(artifacts=True)
+
+    @classmethod
+    def resolve(
+        cls, log: TrackingPolicy | PresetTypes = "default", **options: Any
+    ) -> TrackingPolicy:
+        """Return a preset or policy with some of its fields changed.
+
+        Args:
+            log: A preset's name, or a policy.
+            options: Fields to change, e.g. `memory=False`.
+
+        Raises:
+            ValueError: If the preset or an option is unknown.
+        """
+        if isinstance(log, TrackingPolicy):
+            base = log
+        else:
+            presets = {"minimal": cls.minimal, "default": cls, "full": cls.full}
+            base = require(log, presets, "tracking preset")()
+        names = {f.name for f in fields(cls)}
+        for name in options:
+            require(name, names, "tracking option")
+        return replace(base, **options)
+
+
+def _memory_api(device: torch.device) -> Any:
+    """Return what reports a device's peak memory, or `None` on the CPU.
+
+    Args:
+        device: The device the run computes on.
+    """
+    if device.type == "cpu":
+        return None
+    accelerator = getattr(torch, "accelerator", None)
+    if hasattr(accelerator, "max_memory_allocated"):
+        return accelerator
+    module = getattr(torch, device.type, None)
+    has_peak = hasattr(module, "max_memory_allocated")
+    return module if has_peak and hasattr(module, "reset_peak_memory_stats") else None
+
+
+def _git_commit() -> str | None:
+    """Return the commit checked out where the run started, if it is a repository."""
+    try:
+        found = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return found.stdout.strip() if found.returncode == 0 else None
+
+
+class Tracker(ABC):
+    """Send a run's metrics, artifacts and config to an experiment tracker."""
+
+    critical: bool = False
+    needs_store: bool = False
+
+    def __init__(
+        self,
+        log: TrackingPolicy | PresetTypes = "default",
+        config: Mapping[str, Any] | None = None,
+        **options: Any,
+    ):
+        """Constructor.
+
+        Args:
+            log: What to log: a preset (`"minimal"`, `"default"`, `"full"`) or
+                a `TrackingPolicy`.
+            config: Your own configuration, e.g. hyperparameters, logged as
+                the `config` section whenever one is given.
+            options: `TrackingPolicy` fields changed on top of `log`, e.g.
+                `memory=False` or `every=10`.
+
+        Raises:
+            ValueError: If the preset, an option or an artifact kind is unknown.
+        """
+        self.log = TrackingPolicy.resolve(log, **options)
+        self.config = dict(config or {})
+        self.store: Path | None = None
+        self.run_id: str | None = None
+        self._given = ({} if log == "default" else {"log": log}) | options
+        self._timer = Timer(report=False) if self.log.timing else None
+        self._ctx: Context | None = None
+        self._runner: Runner | None = None
+        self._on_main = True
+        self._memory: Any = None
+        self._samples: dict[str, int] = {}
+        self._names: dict[str, str | None] = {}
+        self._run: dict[str, Any] = {}
+        self._resumed = False
+        self._opened = False
+        self._closed = False
+
+    def __repr__(self) -> str:
+        """Return the tracker as it was configured."""
+        given = ", ".join(f"{k}={v!r}" for k, v in self._given.items())
+        return f"{type(self).__name__}({given})"
+
+    def attach(self, runner: Runner, ctx: Context) -> None:
+        """Receive the run this tracker logs.
+
+        Args:
+            runner: The engine executing the program.
+            ctx: Root context of the run, whose counters give the step axis.
+        """
+        self._ctx = ctx
+        self._runner = runner
+        self._on_main = ctx.topology.is_main
+        self._memory = _memory_api(ctx.device) if self.log.memory else None
+        if self.store is None and runner.store is not None:
+            self.store = Path(runner.store)
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return the backend run to reattach to, opening it if not yet open."""
+        if self._on_main and not self._opened and not self._closed:
+            self._ensure_open()
+        return {"run_id": self.run_id}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Mark the run as resumed, to reattach to the backend run it names.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+        """
+        self.run_id = state.get("run_id")
+        self._resumed = self.run_id is not None
+
+    def on(self, event: Event) -> Signal:
+        """Log what the event reports, on the main process only.
+
+        Args:
+            event: What the runner just did.
+        """
+        if not self._on_main:
+            return Signal.GO
+        if self._timer is not None:
+            self._timer.on(event)
+        step = self._count("step")
+        if event.type is EventType.RUN_BEGAN:
+            self._began(event)
+        elif event.type is EventType.EPOCH_BEGAN:
+            self._samples[event.path] = event.progress.samples
+            self._reset_memory()
+        elif counts_toward(event, "step"):
+            if self.log.metrics and step % self.log.every == 0:
+                self._metrics(event, step)
+        elif counts_toward(event, "epoch"):
+            self._epoch(event, step)
+        elif event.type is EventType.STAGE_ENDED:
+            if self.log.metrics:
+                self._metrics(event, step)
+        elif event.type is EventType.CHECKPOINT:
+            if self.log.checkpoints:
+                self._ensure_open()
+                payload = event.payload
+                path = Path(payload["path"])
+                self._log_checkpoint(payload["index"], path, step, payload.get("score"))
+        elif event.type is EventType.EXPORTED:
+            if event.payload.get("kind") in self.log.kinds:
+                self._ensure_open()
+                paths = [Path(f) for f in event.payload.get("files", ())]
+                kind, key = event.payload["kind"], stage_name(event.path)
+                self._log_artifacts(kind, key, paths, step)
+        elif event.type is EventType.RUN_ENDED:
+            if self._opened:
+                self._close(self._status(event))
+            self._opened, self._closed = False, True
+        return Signal.GO
+
+    @staticmethod
+    def _status(event: Event) -> RunStatusTypes:
+        """Return how a run ended, from its closing event.
+
+        Args:
+            event: The `RUN_ENDED` event.
+        """
+        if event.payload.get("cancelled"):
+            return "cancelled"
+        return "failed" if event.payload.get("aborted") is not None else "finished"
+
+    def _count(self, unit: str) -> int:
+        """Return how many of a unit the run has completed.
+
+        Args:
+            unit: `"advance"`, `"epoch"` or `"step"`.
+        """
+        return self._ctx.count(unit) if self._ctx is not None else 0
+
+    def _began(self, event: Event) -> None:
+        """Keep the run's names, and what it was started with, for opening.
+
+        Args:
+            event: The `RUN_BEGAN` event.
+        """
+        payload = event.payload
+        self._names = {
+            key: payload.get(key) for key in ("project", "experiment", "run_name")
+        }
+        self._run = {"seed": payload.get("seed"), "backends": payload.get("backends")}
+        self._closed = False
+
+    def _metrics(self, event: Event, step: int) -> None:
+        """Log an event's numbers under its stage's name, if it has any.
+
+        Args:
+            event: The event to read.
+            step: Training step the numbers belong to.
+        """
+        values = numbers(event.payload, skip=("total",))
+        if values:
+            stage = stage_name(event.path)
+            self._ensure_open()
+            self._log({f"{stage}/{k}": v for k, v in values.items()}, step)
+
+    def _epoch(self, event: Event, step: int) -> None:
+        """Log a training pass: its count, duration, throughput and peak memory.
+
+        Args:
+            event: The `EPOCH_ENDED` event of a training pass.
+            step: Training step the pass ended at.
+        """
+        stage = stage_name(event.path)
+        metrics: dict[str, float | int] = {}
+        if self.log.epochs:
+            metrics["epoch"] = self._count("epoch")
+        taken = self._timer.passes.get(event.path) if self._timer is not None else None
+        if taken:
+            metrics[f"{stage}/pass_seconds"] = taken[-1]
+            samples = event.progress.samples - self._samples.pop(event.path, 0)
+            if samples > 0 and taken[-1] > 0:
+                metrics[f"{stage}/samples_per_second"] = samples / taken[-1]
+        peak = self._peak_memory()
+        if peak is not None:
+            metrics[f"{stage}/peak_memory_mb"] = peak / 2**20
+        if metrics:
+            self._ensure_open()
+            self._log(metrics, step)
+
+    def _reset_memory(self) -> None:
+        """Start measuring a pass's peak memory afresh."""
+        if self._memory is None or self._ctx is None:
+            return
+        try:
+            self._memory.reset_peak_memory_stats(self._ctx.device)
+        except Exception:  # noqa: BLE001 - a device without the counter logs none
+            self._memory = None
+
+    def _peak_memory(self) -> int | None:
+        """Return the bytes allocated at most since the pass began, if measurable."""
+        if self._memory is None or self._ctx is None:
+            return None
+        try:
+            return int(self._memory.max_memory_allocated(self._ctx.device))
+        except Exception:  # noqa: BLE001 - a device without the counter logs none
+            self._memory = None
+            return None
+
+    def _ensure_open(self) -> None:
+        """Open the backend run before its first log; a fresh one logs its config."""
+        if self._opened:
+            return
+        self.run_id = self._open(dict(self._names), self.run_id, self._resumed)
+        self._opened = True
+        if not self._resumed:
+            config = self._run_config()
+            if config:
+                self._log_config(config)
+
+    def _run_config(self) -> dict[str, Any]:
+        """Return the sections of the run's configuration the policy asks for."""
+        config: dict[str, Any] = {}
+        if self.config:
+            config["config"] = as_loggable(self.config)
+        if self.log.runner:
+            config["runner"] = as_loggable(self._run)
+        if self.log.stages and self._runner is not None:
+            program = self._runner.program
+            config["program"] = stage_signature(program)
+            config["stages"] = {
+                path: stage_settings(stage)
+                for path, stage in stages_by_path(program).items()
+            }
+        if self.log.model and self._ctx is not None:
+            config["models"] = self._models(self._ctx)
+        if self.log.environment and self._ctx is not None:
+            config["environment"] = {
+                "chuchichaestli": __version__,
+                "torch": torch.__version__,
+                "python": platform.python_version(),
+                "device": str(self._ctx.device),
+                "world_size": self._ctx.topology.world_size,
+                "git_commit": _git_commit(),
+            }
+        return config
+
+    @staticmethod
+    def _models(ctx: Context) -> dict[str, Any]:
+        """Return each bound model's class, arguments and parameter counts.
+
+        Args:
+            ctx: Root context of the run.
+        """
+        models: dict[str, Any] = {}
+        for name, value in ctx.run_stateful().items():
+            module = (
+                ctx.topology.unwrap(value) if isinstance(value, nn.Module) else None
+            )
+            if not isinstance(module, nn.Module):
+                continue
+            params = list(module.parameters())
+            models[name] = {
+                "cls": type(module).__name__,
+                "kwargs": as_loggable(getattr(module, "init_args", None)),
+                "parameters": sum(p.numel() for p in params),
+                "trainable": sum(p.numel() for p in params if p.requires_grad),
+            }
+        return models
+
+    @abstractmethod
+    def _open(
+        self, names: Mapping[str, str | None], run_id: str | None, resumed: bool
+    ) -> str:
+        """Start or reattach to the backend run and return its identifier.
+
+        Args:
+            names: The run's `project`, `experiment` and `run_name`; the first
+                two may be `None`.
+            run_id: Identifier of the run to reattach to, when resumed.
+            resumed: Whether the run continues one a checkpoint recorded.
+        """
+
+    @abstractmethod
+    def _log(self, metrics: Mapping[str, float | int], step: int) -> None:
+        """Log numbers at a training step.
+
+        Args:
+            metrics: Values keyed `<stage>/<name>`, or `epoch`.
+            step: Training step they belong to.
+        """
+
+    @abstractmethod
+    def _log_artifacts(
+        self, kind: ArtifactTypes, key: str, paths: Sequence[Path], step: int
+    ) -> None:
+        """Log files a stage wrote.
+
+        Args:
+            kind: What the files hold.
+            key: Name of the stage that wrote them.
+            paths: The files.
+            step: Training step they belong to.
+        """
+
+    @abstractmethod
+    def _log_config(self, config: Mapping[str, Any]) -> None:
+        """Log the run's configuration, once, for a fresh run.
+
+        Args:
+            config: Nested and JSON-safe: `config` when one was given, and
+                `runner`, `program`, `stages`, `models` and `environment` when
+                the policy asks for them.
+        """
+
+    def _log_checkpoint(
+        self, index: int, path: Path, step: int, score: Mapping[str, Any] | None
+    ) -> None:
+        """Record a checkpoint the run wrote; nothing is uploaded.
+
+        Args:
+            index: The checkpoint's index in its store.
+            path: Directory it was written to.
+            step: Training step it was taken at.
+            score: Its monitored value, with `monitor` and `mode`, if any.
+        """
+
+    @abstractmethod
+    def _close(self, status: RunStatusTypes) -> None:
+        """Finish the backend run.
+
+        Args:
+            status: `"finished"`, `"failed"`, or `"cancelled"` by a signal or
+                an interrupt.
+        """

@@ -28,6 +28,7 @@ from chuchichaestli.programs.objective import (
     Output,
     Reconstruction,
 )
+from chuchichaestli.programs.trackers import Tracker, TrackingPolicy
 from chuchichaestli.programs.events import (
     ArtifactTypes,
     C3liRunCancelled,
@@ -151,6 +152,8 @@ __all__ = [
     "Timer",
     "EarlyStop",
     "GracefulStop",
+    "Tracker",
+    "TrackingPolicy",
     "Checkpoint",
     "CheckpointStore",
     "CheckpointFormats",

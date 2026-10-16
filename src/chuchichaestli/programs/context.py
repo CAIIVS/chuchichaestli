@@ -21,7 +21,7 @@ from chuchichaestli.programs.topology import Local
 from chuchichaestli.programs.traits import Stateful, Topology
 
 
-__all__ = ["Context", "C3liContextError", "join_path", "split_segment"]
+__all__ = ["Context", "C3liContextError", "join_path", "split_segment", "stage_name"]
 
 
 def join_path(path: str, index: int, name: str) -> str:
@@ -43,6 +43,15 @@ def split_segment(segment: str) -> tuple[int | None, str]:
     """
     index, sep, name = segment.partition(":")
     return (int(index), name) if sep else (None, segment)
+
+
+def stage_name(path: str) -> str:
+    """Return the name of the stage a path ends in.
+
+    Args:
+        path: A stage's path, e.g. `"program/1:cycle/0:fit"`.
+    """
+    return split_segment(path.rpartition("/")[2])[1]
 
 
 class C3liContextError(KeyError):

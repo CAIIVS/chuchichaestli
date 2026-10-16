@@ -26,6 +26,7 @@ from chuchichaestli.programs import (
     Repeat,
     Runner,
     Signal,
+    Tracker,
     Train,
     WeightsExport,
 )
@@ -742,6 +743,65 @@ def test_every_rank_announces_the_same_files(tmp_path, merge):
         ("weights", ["w.safetensors"]),
     ]
     assert all(Path(f).is_file() for seen in reported[0] for f in seen["files"])
+
+
+class Calls(Tracker):
+    """A tracker counting the backend calls this process made."""
+
+    def __init__(self):
+        """Constructor."""
+        super().__init__()
+        self.calls: list[str] = []
+
+    def _open(self, names, run_id, resumed):
+        """Count the open."""
+        self.calls.append("open")
+        return "run"
+
+    def _log(self, metrics, step):
+        """Count a log."""
+        self.calls.append("log")
+
+    def _log_artifacts(self, kind, key, paths, step):
+        """Count an artifact log."""
+        self.calls.append("artifacts")
+
+    def _log_config(self, config):
+        """Count the config."""
+        self.calls.append("config")
+
+    def _close(self, status):
+        """Count the close."""
+        self.calls.append("close")
+
+
+def _tracks(rank, world, results, port):
+    """Train on every rank with a tracker, and report the calls each made.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+    """
+    topology = join_group(rank, world, port)
+    try:
+        tracker = Calls()
+        program = Program(provide={"model": model()}, stages=[stage(topology)])
+        Runner(program, seed=42, topology=topology, hooks=[tracker]).run()
+        results[rank] = tracker.calls
+    finally:
+        topology.close()
+
+
+def test_only_the_main_rank_talks_to_the_tracker():
+    """A backend run per process would split the run into copies of itself."""
+    reported = under_ddp(_tracks, free_port())
+    assert reported[1] == []
+    calls = reported[0]
+    assert calls[:2] == ["open", "config"]
+    assert calls[-1] == "close"
+    assert calls.count("open") == 1 and "log" in calls
 
 
 def test_every_rank_agrees_on_the_weights():

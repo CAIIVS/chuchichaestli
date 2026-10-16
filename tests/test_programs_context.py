@@ -11,6 +11,7 @@ from chuchichaestli.programs.context import (
     C3liContextError,
     join_path,
     split_segment,
+    stage_name,
 )
 from chuchichaestli.programs.events import EventType, Progress, Signal
 
@@ -160,3 +161,16 @@ def test_a_segment_splits_back_into_what_joined_it():
 def test_the_root_segment_has_no_position():
     """The root is named, not numbered."""
     assert split_segment("program") == (None, "program")
+
+
+@pytest.mark.parametrize(
+    ("path", "name"),
+    [
+        ("program/0:epoch/0:fit", "fit"),
+        ("program/1:check", "check"),
+        ("program", "program"),
+    ],
+)
+def test_a_path_names_the_stage_it_ends_in(path, name):
+    """Visits of one stage under `each_pass` share its name, whatever the visit."""
+    assert stage_name(path) == name
