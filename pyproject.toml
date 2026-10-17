@@ -62,6 +62,10 @@ jit = [
     "ninja>=1.11",
     "setuptools>=49.4",
 ]
+# For recording a run's repository state: commit, dirtiness and diff
+git = [
+    "GitPython>=3.1.40",
+]
 all = [
     "ruff==0.16.6",
     "pre-commit>=3.7.0",
@@ -74,6 +78,7 @@ all = [
     "mkdocstrings[python]>=0.30.0",
     "torch>=2.2.2",
     "matplotlib>=3.7",
+    "GitPython>=3.1.40",
 ]
 
 [dependency-groups]
