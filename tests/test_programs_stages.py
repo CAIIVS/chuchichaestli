@@ -33,6 +33,7 @@ from chuchichaestli.programs.stages import (
     When,
 )
 from chuchichaestli.programs.traits import Stage
+from chuchichaestli.models.spec import ModelSpecMixin, load_model
 from chuchichaestli.metrics import MSE
 from chuchichaestli.programs.data import DataManager
 from chuchichaestli.programs.serialize import (
@@ -701,3 +702,37 @@ class Spot:
 def test_as_loggable_is_readable_and_never_refuses(value, described):
     """Lossy on purpose: a setting is read by people, not rebuilt."""
     assert as_loggable(value) == described
+
+
+class Small(ModelSpecMixin, nn.Module):
+    """A model that records how to rebuild it."""
+
+    def __init__(self, width: int = 3):
+        """Constructor.
+
+        Args:
+            width: Features in and out.
+        """
+        super().__init__()
+        self.lin = nn.Linear(width, width)
+
+
+@pytest.mark.parametrize("suffix", [".safetensors", ".pt"])
+def test_exported_weights_rebuild_their_model(tmp_path, suffix):
+    """The file says which architecture built it, as a checkpoint's weights do."""
+    model = Small(width=5)
+    path = tmp_path / f"small{suffix}"
+    drive(Program([WeightsExport("out", path=path)], provide={"model": model}))
+    rebuilt = load_model(path)
+    assert isinstance(rebuilt, Small) and rebuilt.lin.in_features == 5
+    assert torch.equal(rebuilt.lin.weight, model.lin.weight)
+
+
+def test_a_module_without_a_spec_exports_its_weights_alone(tmp_path):
+    """Nothing says how to rebuild it, so loading it as a model still refuses."""
+    path = tmp_path / "plain.safetensors"
+    drive(
+        Program([WeightsExport("out", path=path)], provide={"model": nn.Linear(2, 2)})
+    )
+    with pytest.raises(ValueError, match="No model spec"):
+        load_model(path)

@@ -61,6 +61,8 @@ from chuchichaestli.training.update import (
 )
 from chuchichaestli.utils.functools import InitArgMixin, partialclass
 from chuchichaestli.utils.io import read_state, staged, writer_for
+from chuchichaestli.models.spec import write_model_state
+from chuchichaestli.programs.serialize import writable_spec
 from chuchichaestli.utils.registry import require
 
 
@@ -350,7 +352,8 @@ class Exporter(StageBlock, ABC):
 class WeightsExport(Exporter):
     """Write a binding's weights out, from rank 0 only.
 
-    The suffix picks the format (.safetensors or .pt/.pth).
+    The suffix picks the format (.safetensors or .pt/.pth). A model that
+    records its spec stores it beside the weights, so `load_model` rebuilds it.
     """
 
     kind = "weights"
@@ -374,7 +377,9 @@ class WeightsExport(Exporter):
             artifact: The module being exported.
             ctx: Execution context for this entry.
         """
-        writer_for(target)(target, ctx.topology.state_of(artifact))
+        state = ctx.topology.state_of(artifact)
+        spec = writable_spec(ctx.topology.unwrap(artifact))
+        write_model_state(target, state, spec=spec)
 
 
 class ImageExport(Exporter):

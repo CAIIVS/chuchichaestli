@@ -243,7 +243,7 @@ with the file is all that separates them.
 
 | stage | writes | kind | suffix picks |
 |---|---|---|---|
-| `WeightsExport` | a binding's `state_dict`, atomically | `weights` | `.safetensors`, `.pt`, `.pth` |
+| `WeightsExport` | a binding's `state_dict`, with its model spec when it records one, atomically | `weights` | `.safetensors`, `.pt`, `.pth` |
 | `ImageExport` | one file per image | `image` | `.png`, `.jpg`, `.webp`, `.tif`, `.pdf`, `.svg` |
 | `ArchiveExport` | samples, and their truths beside them | `tensor` | any suffix under [Archives](#archives) |
 
