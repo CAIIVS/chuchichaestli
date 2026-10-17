@@ -7,7 +7,7 @@ from __future__ import annotations
 import platform
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, get_args
@@ -63,6 +63,8 @@ class TrackingPolicy:
         metrics: Log each training step's losses and rate, and the numbers a
             stage reports as it ends, e.g. an `Eval`'s scores.
         every: Log the step metrics every nth training step.
+        grad_norm: Log each logged step's gradient norm, before clipping, per
+            update group; with `metrics` only.
         epochs: Log the count of training passes as each one ends.
         timing: Log each training pass's seconds and samples per second.
         memory: Log each training pass's peak accelerator memory, in MiB;
@@ -91,6 +93,7 @@ class TrackingPolicy:
 
     metrics: bool = True
     every: int = 1
+    grad_norm: bool = True
     epochs: bool = True
     timing: bool = True
     memory: bool = True
@@ -126,6 +129,7 @@ class TrackingPolicy:
     def minimal(cls) -> TrackingPolicy:
         """Return a policy logging the metrics, how the run ended and your config."""
         return cls(
+            grad_norm=False,
             epochs=False,
             timing=False,
             memory=False,
@@ -218,6 +222,7 @@ class Tracker(ABC):
         self._on_main = True
         self._memory: Any = None
         self._samples: dict[str, int] = {}
+        self._norms: dict[str, float] = {}
         self._uploaded_best = False
         self._latest: tuple[list[Path], int, tuple[str, ...]] | None = None
         self._names: dict[str, str | None] = {}
@@ -230,6 +235,33 @@ class Tracker(ABC):
         """Return the tracker as it was configured."""
         given = ", ".join(f"{k}={v!r}" for k, v in self._given.items())
         return f"{type(self).__name__}({given})"
+
+    @property
+    def watches_gradients(self) -> bool:
+        """Whether the tracker watches each step's gradients, for their norm."""
+        return self.log.metrics and self.log.grad_norm
+
+    def on_gradients(
+        self,
+        params: Sequence[nn.Parameter],
+        norm: Callable[[], torch.Tensor],
+        group: str | None,
+        path: str,
+    ) -> None:
+        """Keep an update group's gradient norm, for the step's own log call.
+
+        Nothing is computed off the main process or on a step `every` skips.
+
+        Args:
+            params: The group's parameters, holding the gradients.
+            norm: Returns the gradients' total norm, computed once.
+            group: Update group the gradients belong to, or `None`.
+            path: Path of the stage taking the step.
+        """
+        if not self._on_main or (self._count("step") + 1) % self.log.every:
+            return
+        key = f"{stage_name(path)}/grad_norm"
+        self._norms[key if group is None else f"{key}/{group}"] = float(norm())
 
     def attach(self, runner: Runner, ctx: Context) -> None:
         """Receive the run this tracker logs.
@@ -277,8 +309,9 @@ class Tracker(ABC):
             self._samples[event.path] = event.progress.samples
             self._reset_memory()
         elif counts_toward(event, "step"):
+            norms, self._norms = self._norms, {}
             if self.log.metrics and step % self.log.every == 0:
-                self._metrics(event, step)
+                self._metrics(event, step, norms)
         elif counts_toward(event, "epoch"):
             self._epoch(event, step)
         elif event.type is EventType.STAGE_ENDED:
@@ -374,18 +407,23 @@ class Tracker(ABC):
         self._run = {"seed": payload.get("seed"), "backends": payload.get("backends")}
         self._closed = False
 
-    def _metrics(self, event: Event, step: int) -> None:
-        """Log an event's numbers under its stage's name, if it has any.
+    def _metrics(
+        self, event: Event, step: int, extra: Mapping[str, float] | None = None
+    ) -> None:
+        """Log an event's numbers under its stage's name, if there are any.
 
         Args:
             event: The event to read.
             step: Training step the numbers belong to.
+            extra: Numbers already keyed, logged in the same call, e.g. the
+                step's gradient norms.
         """
+        stage = stage_name(event.path)
         values = numbers(event.payload, skip=("total",))
-        if values:
-            stage = stage_name(event.path)
+        metrics = {f"{stage}/{k}": v for k, v in values.items()} | dict(extra or {})
+        if metrics:
             self._ensure_open()
-            self._log({f"{stage}/{k}": v for k, v in values.items()}, step)
+            self._log(metrics, step)
 
     def _epoch(self, event: Event, step: int) -> None:
         """Log a training pass: its count, duration, throughput and peak memory.

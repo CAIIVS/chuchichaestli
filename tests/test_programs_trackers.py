@@ -628,3 +628,83 @@ def test_no_git_state_is_read_without_the_environment_section(tmp_path, monkeypa
     tracker = Recording(environment=False)
     run(fitted(), tracker)
     assert tracker.texts == []
+
+
+class SeenNorms:
+    """A gradient hook keeping each step's norm, to compare the tracker with."""
+
+    watches_gradients = True
+
+    def __init__(self):
+        """Constructor."""
+        self.norms: list[float] = []
+
+    def on(self, event):
+        """Ignore events.
+
+        Args:
+            event: What the runner just did.
+        """
+        return Signal.GO
+
+    def on_gradients(self, params, norm, group, path):
+        """Keep the norm.
+
+        Args:
+            params: The group's parameters.
+            norm: Returns their gradients' total norm.
+            group: The update group.
+            path: The stage's path.
+        """
+        self.norms.append(float(norm()))
+
+
+def test_each_logged_step_carries_its_gradient_norm():
+    """In the same call as the step's loss, and the norm the step really had."""
+    tracker, seen = Recording(), SeenNorms()
+    run(fitted(), tracker, seen)
+    logged = tracker.series("fit/grad_norm")
+    assert [step for step, _ in logged] == [1, 2, 3, 4, 5, 6]
+    assert [norm for _, norm in logged] == pytest.approx(seen.norms)
+    assert all("fit/loss" in m for m, _ in tracker.logs if "fit/grad_norm" in m)
+
+
+def test_the_gradient_norm_follows_every():
+    """A step that is not logged has its norm left uncomputed."""
+    tracker = Recording(every=2)
+    run(fitted(), tracker)
+    assert [step for step, _ in tracker.series("fit/grad_norm")] == [2, 4, 6]
+
+
+@pytest.mark.parametrize(
+    "options", [{"grad_norm": False}, {"log": "minimal"}, {"metrics": False}]
+)
+def test_the_gradient_norm_can_be_left_out(options):
+    """Switched off, the tracker does not even ask for the gradients."""
+    tracker = Recording(**options)
+    assert not tracker.watches_gradients
+    run(fitted(), tracker)
+    assert "fit/grad_norm" not in tracker.keys()
+
+
+def test_several_update_groups_each_log_their_norm():
+    """Keyed by group, as the rates are."""
+    from chuchichaestli.programs import Alternating
+
+    tracker = Recording()
+    gen, disc = nn.Linear(2, 1), nn.Linear(2, 1)
+    stage = Train(
+        "fit",
+        model=gen,
+        data=rows(),
+        batch_size=4,
+        loss=nn.MSELoss(),
+        steps=2,
+        update=Alternating(("disc", "gen")),
+        optim={
+            "disc": OptimSpec.sgd(lr=0.1, params="disc"),
+            "gen": OptimSpec.sgd(lr=0.1, params="model"),
+        },
+    )
+    run(Program([stage], provide={"disc": disc}), tracker)
+    assert {"fit/grad_norm/disc", "fit/grad_norm/gen"} <= tracker.keys()
