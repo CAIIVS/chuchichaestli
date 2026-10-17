@@ -4,9 +4,7 @@
 """Experiment trackers: a run's numbers, artifacts and config sent to a backend."""
 
 from __future__ import annotations
-import os
 import platform
-import subprocess
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
@@ -33,6 +31,7 @@ from chuchichaestli.programs.serialize import (
     stages_by_path,
 )
 from chuchichaestli.utils.functools import numbers
+from chuchichaestli.utils.git import GitState, git_state
 from chuchichaestli.utils.registry import require
 
 if TYPE_CHECKING:
@@ -74,7 +73,9 @@ class TrackingPolicy:
         model: Log each bound model's class, constructor arguments, and total
             and trainable parameter counts.
         environment: Log the package, torch and Python versions, device,
-            world size and the working directory's commit.
+            world size, and the repository's commit and whether it is dirty;
+            a dirty repository's diff is stored as `git.patch`. The
+            repository needs GitPython (`chuchichaestli[git]`).
         checkpoints: Record each checkpoint's index, step and score.
         artifacts: The kinds of exported file uploaded: `True` for every kind,
             `False` for none, or a sequence of kinds: `"image"` (an
@@ -179,21 +180,6 @@ def _memory_api(device: torch.device) -> Any:
     module = getattr(torch, device.type, None)
     has_peak = hasattr(module, "max_memory_allocated")
     return module if has_peak and hasattr(module, "reset_peak_memory_stats") else None
-
-
-def _git_commit() -> str | None:
-    """Return the commit checked out where the run started, if it is a repository."""
-    try:
-        found = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=os.getcwd(),
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return found.stdout.strip() if found.returncode == 0 else None
 
 
 class Tracker(ABC):
@@ -451,12 +437,31 @@ class Tracker(ABC):
         self.run_id = self._open(dict(self._names), self.run_id, self._resumed)
         self._opened = True
         if not self._resumed:
-            config = self._run_config()
+            repository = self._repository() if self.log.environment else None
+            config = self._run_config(repository)
             if config:
                 self._log_config(config)
+            if repository is not None and repository.diff:
+                self._log_text("git.patch", repository.diff)
 
-    def _run_config(self) -> dict[str, Any]:
-        """Return the sections of the run's configuration the policy asks for."""
+    @staticmethod
+    def _repository() -> GitState | None:
+        """Return the state of the repository the run started in, if readable."""
+        state = git_state()
+        if state is not None and state.dirty is None:
+            warnings.warn(
+                "Only the repository's commit is recorded; install "
+                "'chuchichaestli[git]' to record whether it is dirty, and its diff.",
+                stacklevel=2,
+            )
+        return state
+
+    def _run_config(self, repository: GitState | None = None) -> dict[str, Any]:
+        """Return the sections of the run's configuration the policy asks for.
+
+        Args:
+            repository: The state of the repository the run started in.
+        """
         config: dict[str, Any] = {}
         if self.config:
             config["config"] = as_loggable(self.config)
@@ -478,8 +483,12 @@ class Tracker(ABC):
                 "python": platform.python_version(),
                 "device": str(self._ctx.device),
                 "world_size": self._ctx.topology.world_size,
-                "git_commit": _git_commit(),
             }
+            if repository is not None:
+                git = {"commit": repository.commit, "dirty": repository.dirty}
+                config["environment"]["git"] = {
+                    k: v for k, v in git.items() if v is not None
+                }
         return config
 
     @staticmethod
@@ -554,6 +563,14 @@ class Tracker(ABC):
             config: Nested and JSON-safe: `config` when one was given, and
                 `runner`, `program`, `stages`, `models` and `environment` when
                 the policy asks for them.
+        """
+
+    def _log_text(self, name: str, text: str) -> None:
+        """Store a text file with the run, e.g. the repository's uncommitted diff.
+
+        Args:
+            name: File name to store it under, e.g. `"git.patch"`.
+            text: Its contents.
         """
 
     def _log_checkpoint(

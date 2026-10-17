@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the experiment tracker base, through a recording backend."""
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,7 @@ class Recording(Tracker):
         self.configs: list[dict] = []
         self.checkpoints: list[tuple[int, int, dict | None]] = []
         self.closes: list[str] = []
+        self.texts: list[tuple[str, str]] = []
 
     def _open(self, names, run_id, resumed):
         """Record the open and return the run's identifier."""
@@ -75,6 +77,10 @@ class Recording(Tracker):
     def _log_checkpoint(self, index, path, step, score):
         """Record the checkpoint."""
         self.checkpoints.append((index, step, score))
+
+    def _log_text(self, name, text):
+        """Record a stored text file."""
+        self.texts.append((name, text))
 
     def _close(self, status):
         """Record how the run ended."""
@@ -539,3 +545,86 @@ def test_a_pruned_latest_checkpoint_is_reported_not_uploaded(tmp_path):
     with pytest.warns(UserWarning, match="pruned before it could be uploaded"):
         run(fitted(), hook, tracker, store=tmp_path)
     assert tracker.files == []
+
+
+def committed(root):
+    """Make a repository with one committed file, and return it.
+
+    Args:
+        root: Directory the repository is made in.
+    """
+    git = pytest.importorskip("git")
+    author = git.Actor("Test", "test@example.com")
+    repo = git.Repo.init(root)
+    (root / "a.txt").write_text("one\n")
+    repo.index.add(["a.txt"])
+    repo.index.commit("init", author=author, committer=author)
+    return repo
+
+
+def test_the_repository_s_commit_and_dirtiness_are_logged(tmp_path, monkeypatch):
+    """A clean repository: the commit identifies the code, and no patch is stored."""
+    repo = committed(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    tracker = Recording()
+    run(fitted(), tracker)
+    git = tracker.configs[0]["environment"]["git"]
+    assert git == {"commit": repo.head.commit.hexsha, "dirty": False}
+    assert tracker.texts == []
+
+
+def test_a_dirty_repository_s_diff_is_stored_as_a_patch(tmp_path, monkeypatch):
+    """The commit alone would not say what ran; the patch does."""
+    committed(tmp_path)
+    (tmp_path / "a.txt").write_text("one\ntwo\n")
+    monkeypatch.chdir(tmp_path)
+    tracker = Recording()
+    run(fitted(), tracker)
+    assert tracker.configs[0]["environment"]["git"]["dirty"] is True
+    ((name, patch),) = tracker.texts
+    assert name == "git.patch" and "+two" in patch
+
+
+def test_outside_a_repository_no_git_state_is_logged(tmp_path, monkeypatch):
+    """Nothing known, so nothing logged, rather than a commit of None."""
+    monkeypatch.chdir(tmp_path)
+    tracker = Recording()
+    run(fitted(), tracker)
+    assert "git" not in tracker.configs[0]["environment"]
+
+
+def test_without_gitpython_the_commit_alone_is_logged(tmp_path, monkeypatch):
+    """Read from the repository's files; the warning says what is missing."""
+    sha = "a" * 40
+    (tmp_path / ".git" / "refs" / "heads").mkdir(parents=True)
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (tmp_path / ".git" / "refs" / "heads" / "main").write_text(sha + "\n")
+    monkeypatch.setitem(sys.modules, "git", None)
+    monkeypatch.chdir(tmp_path)
+    tracker = Recording()
+    with pytest.warns(UserWarning, match=r"chuchichaestli\[git\]"):
+        run(fitted(), tracker)
+    assert tracker.configs[0]["environment"]["git"] == {"commit": sha}
+    assert tracker.texts == []
+
+
+def test_without_gitpython_outside_a_repository_nothing_is_missed(
+    tmp_path, monkeypatch, recwarn
+):
+    """No repository, so nothing is lost and there is nothing to warn about."""
+    monkeypatch.setitem(sys.modules, "git", None)
+    monkeypatch.chdir(tmp_path)
+    tracker = Recording()
+    run(fitted(), tracker)
+    assert "git" not in tracker.configs[0]["environment"]
+    assert not [w for w in recwarn if "chuchichaestli[git]" in str(w.message)]
+
+
+def test_no_git_state_is_read_without_the_environment_section(tmp_path, monkeypatch):
+    """Switched off means not looked at, the patch included."""
+    committed(tmp_path)
+    (tmp_path / "a.txt").write_text("changed\n")
+    monkeypatch.chdir(tmp_path)
+    tracker = Recording(environment=False)
+    run(fitted(), tracker)
+    assert tracker.texts == []
