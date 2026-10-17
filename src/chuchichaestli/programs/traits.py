@@ -4,7 +4,7 @@
 """Structural interfaces the runner expects of its components."""
 
 from __future__ import annotations
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from chuchichaestli.data.batch import BatchType
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -28,8 +28,10 @@ __all__ = [
     "CriticalHook",
     "StoreWriterHook",
     "RunAwareHook",
+    "GradientHook",
     "is_critical",
     "needs_store",
+    "watches_gradients",
     "Topology",
 ]
 
@@ -201,6 +203,41 @@ class RunAwareHook(Hook, Protocol):
         ...
 
 
+@runtime_checkable
+class GradientHook(Hook, Protocol):
+    """A hook that also watches each training step's gradients.
+
+    It sees an update group's gradients once accumulated, averaged across
+    processes and unscaled, before they are clipped and applied. Optimizers
+    stepping through their own closure, such as L-BFGS, are not watched.
+    Nothing is emitted, so traces stay as they are.
+
+    Attributes:
+        watches_gradients: Whether the hook wants them; with none wanting
+            them, a step neither builds nor computes anything for it.
+    """
+
+    watches_gradients: bool
+
+    def on_gradients(
+        self,
+        params: Sequence[nn.Parameter],
+        norm: Callable[[], torch.Tensor],
+        group: str | None,
+        path: str,
+    ) -> None:
+        """Inspect an update group's gradients, without changing them.
+
+        Args:
+            params: The group's parameters, holding the gradients.
+            norm: Returns the gradients' total norm, computed once for all
+                who ask, clipping included.
+            group: Update group the gradients belong to, or `None`.
+            path: Path of the stage taking the step.
+        """
+        ...
+
+
 def is_critical(hook: Hook) -> bool:
     """Whether a hook's own failure should stop the run.
 
@@ -217,6 +254,15 @@ def needs_store(hook: Hook) -> bool:
         hook: The hook to ask.
     """
     return isinstance(hook, StoreWriterHook) and hook.needs_store
+
+
+def watches_gradients(hook: Hook) -> bool:
+    """Whether a hook watches each step's gradients.
+
+    Args:
+        hook: The hook to ask.
+    """
+    return isinstance(hook, GradientHook) and hook.watches_gradients
 
 
 @runtime_checkable

@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the training loop: one execute is one optimizer step."""
 
+import math
+
 import pytest
 import torch
 from torch import nn
@@ -1208,3 +1210,144 @@ def test_nonfinite_belongs_to_the_update_when_one_is_given():
     """Setting it on the stage as well would leave one of the two ignored."""
     with pytest.raises(ValueError, match="nonfinite"):
         Train(loss=nn.MSELoss(), update=Step(), nonfinite="skip")
+
+
+class Norms:
+    """A gradient hook keeping each step's path, group and norm."""
+
+    def __init__(self, watches: bool = True):
+        """Constructor.
+
+        Args:
+            watches: Whether it asks for the gradients at all.
+        """
+        self.watches_gradients = watches
+        self.seen: list[tuple[str, str | None, float]] = []
+
+    def on(self, event):
+        """Ignore events.
+
+        Args:
+            event: What the runner just did.
+        """
+        return Signal.GO
+
+    def on_gradients(self, params, norm, group, path):
+        """Keep the norm, with where it came from.
+
+        Args:
+            params: The group's parameters.
+            norm: Returns their gradients' total norm.
+            group: The update group.
+            path: The stage's path.
+        """
+        self.seen.append((path, group, float(norm())))
+
+
+def watched(hook, accumulate: int = 1, batch_size: int = 4, **kwargs) -> Train:
+    """Train on the ramp with a gradient hook attached, and return the stage.
+
+    Args:
+        hook: The gradient hook.
+        accumulate: Micro-batches per step.
+        batch_size: Samples per micro-batch.
+        kwargs: Passed to `Train`.
+    """
+    kwargs.setdefault("loss", nn.MSELoss())
+    stage = Train(
+        "fit",
+        model=linear(fill=0.5),
+        data=DataManager(ramp(4), batch_size=batch_size, shuffle=False),
+        accumulate=accumulate,
+        optim=OptimSpec.sgd(lr=0.0),
+        **kwargs,
+    )
+    Runner(stage, hooks=[hook], device="cpu").run()
+    return stage
+
+
+def test_a_gradient_hook_sees_each_step_once_its_micro_batches_are_in():
+    """Two micro-batches of two give the gradient one batch of four gives."""
+    whole, split = Norms(), Norms()
+    watched(whole, steps=1)
+    watched(split, accumulate=2, batch_size=2, steps=1)
+    ((path, group, norm),) = whole.seen
+    assert (path, group) == ("fit", None)
+    assert split.seen[0][2] == pytest.approx(norm)
+
+
+def test_a_gradient_hook_sees_the_norm_before_clipping():
+    """It is the gradient the loss produced, not the one the clip allowed."""
+    hook = Norms()
+    watched(hook, steps=1, clip=1e-3)
+    assert hook.seen[0][2] > 1e-3
+
+
+def test_each_update_group_is_shown_on_its_own():
+    """An alternating update steps, and shows, one group at a time."""
+    hook = Norms()
+    gen, disc = linear(), linear()
+    Runner(
+        Program(
+            [
+                Train(
+                    "t",
+                    model=gen,
+                    data=ramp(),
+                    loss=nn.MSELoss(),
+                    steps=2,
+                    update=Alternating(("disc", "gen")),
+                    optim={
+                        "disc": OptimSpec.sgd(lr=0.1, params="disc"),
+                        "gen": OptimSpec.sgd(lr=0.1, params="model"),
+                    },
+                )
+            ],
+            provide={"disc": disc},
+        ),
+        hooks=[hook],
+        device="cpu",
+    ).run()
+    assert [group for _, group, _ in hook.seen] == ["disc", "gen", "disc", "gen"]
+
+
+def test_nothing_is_computed_for_gradients_nothing_asks_for(monkeypatch):
+    """No watching hook, no clipping, no check: the norm is never taken."""
+
+    def untaken(params):
+        raise AssertionError("the gradient norm was computed")
+
+    monkeypatch.setattr("chuchichaestli.programs.update.grad_norm", untaken)
+    quiet = Norms(watches=False)
+    watched(quiet, steps=2, nonfinite="ignore")
+    assert quiet.seen == []
+
+
+def test_a_failing_gradient_hook_is_dropped_and_training_goes_on():
+    """As a failing event hook is: one warning, and the run carries on."""
+
+    class Broken(Norms):
+        """A gradient hook that cannot handle what it is shown."""
+
+        def on_gradients(self, params, norm, group, path):
+            """Fail.
+
+            Args:
+                params: The group's parameters.
+                norm: Returns their gradients' total norm.
+                group: The update group.
+                path: The stage's path.
+            """
+            raise RuntimeError("cannot inspect")
+
+    with pytest.warns(UserWarning, match="dropping it"):
+        stage = watched(Broken(), steps=2)
+    assert stage.total_steps == 2
+
+
+def test_a_non_finite_step_is_shown_before_it_is_skipped():
+    """A hook learns the gradients broke, not just that a step went missing."""
+    hook = Norms()
+    watched(hook, batch_size=2, epochs=1, loss=NanOnce(), nonfinite="skip")
+    norms = [norm for *_, norm in hook.seen]
+    assert len(norms) == 2 and not math.isfinite(norms[0]) and math.isfinite(norms[1])

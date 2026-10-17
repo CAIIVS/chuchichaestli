@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for turning gradients into an update, and averaging the result."""
 
+import functools
+
 import pytest
 import torch
 from torch import nn
@@ -13,6 +15,7 @@ from chuchichaestli.training import (
     Swa,
     UpdatePolicy,
     average_targets,
+    grad_norm,
 )
 
 
@@ -274,3 +277,45 @@ def test_finite_grads_tells_a_usable_gradient_from_a_broken_one(scale, finite):
 def test_parameters_without_gradients_are_finite():
     """A parameter the loss did not reach has nothing to corrupt."""
     assert UpdatePolicy.finite_grads(model().parameters())
+
+
+def random_grads() -> list[nn.Parameter]:
+    """Return two parameters holding the same random gradients each time."""
+    generator = torch.Generator().manual_seed(0)
+    params = [nn.Parameter(torch.zeros(3, 4)), nn.Parameter(torch.zeros(5))]
+    for p in params:
+        p.grad = torch.randn(p.shape, generator=generator)
+    return params
+
+
+@pytest.mark.parametrize("torch_helpers", [True, False], ids=["torch", "by-hand"])
+def test_clipping_with_a_shared_norm_matches_torch(monkeypatch, torch_helpers):
+    """The norm is the one norm clipping reports, and clipping by it changes nothing."""
+    if not torch_helpers:
+        monkeypatch.delattr(nn.utils, "get_total_norm", raising=False)
+        monkeypatch.delattr(nn.utils, "clip_grads_with_norm_", raising=False)
+    ours, theirs = random_grads(), random_grads()
+    norm = grad_norm(ours)
+    UpdatePolicy(clip=0.3).clip_grads(ours, lambda: norm)
+    assert torch.allclose(norm, nn.utils.clip_grad_norm_(theirs, 0.3))
+    for a, b in zip(ours, theirs):
+        assert torch.allclose(a.grad, b.grad)
+
+
+def test_one_norm_serves_the_check_and_the_clip():
+    """Computed on first request, then shared."""
+    params, calls = random_grads(), []
+    norm = functools.cache(lambda: calls.append(1) or grad_norm(params))
+    policy = UpdatePolicy(clip=0.1)
+    assert policy.finite_grads(params, norm)
+    policy.clip_grads(params, norm)
+    assert calls == [1]
+
+
+def test_an_overflowing_norm_falls_back_to_checking_each_element():
+    """Huge but finite gradients can overflow the norm; the step is not broken."""
+    big = nn.Parameter(torch.zeros(2, dtype=torch.float16))
+    big.grad = torch.full((2,), 60000.0, dtype=torch.float16)
+    norm = functools.cache(lambda: grad_norm([big]))
+    assert not torch.isfinite(norm())
+    assert UpdatePolicy.finite_grads([big], norm)

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 import warnings
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 import torch
 from chuchichaestli.programs.events import (
@@ -84,6 +84,7 @@ class Context:
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
         dispatch: Callable[[Event], Signal] | None = None,
+        watch: Callable[..., None] | None = None,
         bindings: dict[str, Any] | None = None,
         group: str | None = None,
         counts: dict[str, int] | None = None,
@@ -100,6 +101,8 @@ class Context:
             device: Device tensors created here should land on.
             dtype: Default dtype for tensors created here.
             dispatch: Receives emitted events and returns the hooks' verdict.
+            watch: Receives each step's gradients, or `None` when no hook
+                watches them.
             bindings: Artifacts bound at this level.
             group: Update group currently being applied.
             counts: Units completed so far, shared with every child.
@@ -122,6 +125,7 @@ class Context:
         self._registry = {} if registry is None else registry
         self._watcher = watcher
         self._dispatch = dispatch
+        self._watch = watch
 
     def __repr__(self) -> str:
         """Return a short description of the context."""
@@ -309,6 +313,27 @@ class Context:
         """Drop cached intermediates, before each micro-batch is run."""
         self._cache.clear()
 
+    @property
+    def watches_gradients(self) -> bool:
+        """Whether any hook watches the gradients of each step."""
+        return self._watch is not None
+
+    def watch_gradients(
+        self,
+        params: Sequence[torch.nn.Parameter],
+        norm: Callable[[], torch.Tensor],
+        group: str | None,
+    ) -> None:
+        """Hand an update group's gradients to the hooks watching them, if any.
+
+        Args:
+            params: The group's parameters, holding the gradients.
+            norm: Returns the gradients' total norm, computed once.
+            group: Update group the gradients belong to, or `None`.
+        """
+        if self._watch is not None:
+            self._watch(params, norm, group, self.path)
+
     def emit(self, event_type: EventType, **payload: Any) -> Signal:
         """Report something to the hooks and return their verdict.
 
@@ -361,6 +386,7 @@ class Context:
             device=self.device,
             dtype=self.dtype,
             dispatch=self._dispatch,
+            watch=self._watch,
             group=self.group,
             counts=self._counts,
             registry=self._registry,

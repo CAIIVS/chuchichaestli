@@ -4,6 +4,7 @@
 """Applying one optimizer step, over a single group of parameters or several."""
 
 from __future__ import annotations
+import functools
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
@@ -21,7 +22,12 @@ from chuchichaestli.programs.events import C3liRunError
 from chuchichaestli.programs.traits import Objective
 from chuchichaestli.training.objective import Loss
 from chuchichaestli.training.optim import OptimSpec, SequentialScheduler
-from chuchichaestli.training.update import Swa, UpdatePolicy, average_targets
+from chuchichaestli.training.update import (
+    Swa,
+    UpdatePolicy,
+    average_targets,
+    grad_norm,
+)
 
 
 __all__ = [
@@ -435,7 +441,11 @@ class Updater(ABC):
         return torch.autocast(device_type=ctx.device.type, dtype=self.precision)
 
     def _step_group(self, group: str | None, ctx: Context) -> None:
-        """Clip, step the optimizer and advance its per-step scheduler.
+        """Let hooks watch the gradients, then clip, step and advance the schedule.
+
+        Hooks see them accumulated, averaged across processes and
+        unscaled, before clipping and the non-finite check. The norm these
+        share is computed at most once.
 
         Args:
             group: Update group being applied, or `None`.
@@ -443,27 +453,34 @@ class Updater(ABC):
         """
         optimizer = self.optimizers[group]
         scaler = self._scalers[group]
+        params = self._params[group]
+        norm = functools.cache(lambda: grad_norm(params))
         if scaler.is_enabled():
-            if self.policy.clip is not None:
+            if ctx.watches_gradients or self.policy.clip is not None:
                 scaler.unscale_(optimizer)
-                self.policy.clip_grads(self._params[group])
+                ctx.watch_gradients(params, norm, group)
+                self.policy.clip_grads(params, norm)
             scaler.step(optimizer)
             scaler.update()
-        elif self._finite(group, ctx):
-            self.policy.step(optimizer, self._params[group])
         else:
-            return
+            ctx.watch_gradients(params, norm, group)
+            if not self._finite(group, norm, ctx):
+                return
+            self.policy.step(optimizer, params, norm=norm)
         scheduler = self.schedulers.get(group)
         if scheduler is not None:
             step_schedule(scheduler, self.monitors.get(group), ctx)
 
-    def _finite(self, group: str | None, ctx: Context) -> bool:
+    def _finite(
+        self, group: str | None, norm: Callable[[], torch.Tensor], ctx: Context
+    ) -> bool:
         """Whether a group's gradients are finite, acting on them if not.
 
         Gradients are reduced across processes before this check.
 
         Args:
             group: Update group being applied, or `None`.
+            norm: Returns the gradients' total norm, computed once.
             ctx: Execution context of the stage, named in the report.
 
         Raises:
@@ -471,7 +488,7 @@ class Updater(ABC):
                 raise.
         """
         mode = self.policy.nonfinite
-        if mode == "ignore" or self.policy.finite_grads(self._params[group]):
+        if mode == "ignore" or self.policy.finite_grads(self._params[group], norm):
             return True
         where = ctx.path if group is None else f"{ctx.path} (group {group!r})"
         steps = ctx.progress.global_step

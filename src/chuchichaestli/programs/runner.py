@@ -36,6 +36,7 @@ from chuchichaestli.programs.traits import (
     Topology,
     is_critical,
     needs_store,
+    watches_gradients,
 )
 from chuchichaestli.utils.names import unique_name
 from chuchichaestli.utils.registry import require
@@ -168,6 +169,7 @@ class Runner:
         self._device = torch.device(device) if device is not None else None
         self._topology = topology
         self._muted: set[int] = set()
+        self._watchers: list[Hook] = []
         self._checkpoints: CheckpointStore | None = None
         self._unplaced: dict[str, Any] = {}
 
@@ -327,12 +329,14 @@ class Runner:
         self.check()
         self._provision()
 
+        self._watchers = [hook for hook in self.hooks if watches_gradients(hook)]
         ctx = Context(
             self.program.name,
             self.seed,
             topology=self.topology,
             device=self.device,
             dispatch=self._dispatch,
+            watch=self._watch if self._watchers else None,
         )
         for hook in self.hooks:
             if isinstance(hook, RunAwareHook):
@@ -500,23 +504,46 @@ class Runner:
         Args:
             event: What the runner just did.
         """
-        signals = []
-        for hook in self.hooks:
-            if id(hook) in self._muted:
-                continue
-            try:
-                signals.append(hook.on(event))
-            except C3liRunError:
+        signals = [
+            self._guarded(hook, lambda hook=hook: hook.on(event))
+            for hook in self.hooks
+            if id(hook) not in self._muted
+        ]
+        return filter_priority([s for s in signals if s is not None])
+
+    def _watch(self, *gradients: Any) -> None:
+        """Hand an update group's gradients to every hook watching them.
+
+        Args:
+            gradients: What `GradientHook.on_gradients` takes, in its order.
+        """
+        for hook in self._watchers:
+            if id(hook) not in self._muted:
+                self._guarded(hook, lambda hook=hook: hook.on_gradients(*gradients))
+
+    def _guarded(self, hook: Hook, call: Callable[[], Any]) -> Any:
+        """Call into a hook, dropping it for the rest of the run if it raises.
+
+        A hook that sets `critical` stops the run instead, so a failing
+        console does not end a long training run but a failing canceller does.
+
+        Args:
+            hook: The hook being called.
+            call: The call into it.
+        """
+        try:
+            return call()
+        except C3liRunError:
+            raise
+        except Exception as exc:
+            if is_critical(hook):
                 raise
-            except Exception as exc:
-                if is_critical(hook):
-                    raise
-                self._muted.add(id(hook))
-                warnings.warn(
-                    f"Hook {hook!r} raised {exc!r}; dropping it for this run.",
-                    stacklevel=2,
-                )
-        return filter_priority(signals)
+            self._muted.add(id(hook))
+            warnings.warn(
+                f"Hook {hook!r} raised {exc!r}; dropping it for this run.",
+                stacklevel=2,
+            )
+            return None
 
     def _lockstep(self, call: Callable[[], Signal]) -> Signal:
         """Run a driver call, broadcasting outcomes to every rank.

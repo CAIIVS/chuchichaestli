@@ -103,6 +103,24 @@ naming the stage and step, before the optimizer writes NaN into the weights.
 `nonfinite="ignore"` steps anyway, sparing the check its device sync. Under
 `precision=torch.float16` the grad scaler skips non-finite steps itself.
 
+A hook can also watch each step's gradients. One defining `on_gradients`
+and setting `watches_gradients = True` is a `GradientHook`: it is handed each
+update group's parameters once the micro-batches are in, averaged across
+processes and unscaled, before they are clipped and checked, with a `norm()`
+that returns their total norm, computed once for every hook and the clipping
+alike, and only if one asks. Nothing is emitted, so traces stay as they are.
+
+```python
+class GradNorms:
+    watches_gradients = True
+
+    def on(self, event):
+        return Signal.GO
+
+    def on_gradients(self, params, norm, group, path):
+        print(path, group, float(norm()))
+```
+
 
 ## Adversarial Training
 

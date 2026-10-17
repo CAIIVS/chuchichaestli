@@ -101,6 +101,7 @@ from chuchichaestli.programs.update import (
 from chuchichaestli.programs.traits import (
     DiffusionLike,
     CriticalHook,
+    GradientHook,
     Hook,
     Objective,
     RunAwareHook,
@@ -171,6 +172,7 @@ __all__ = [
     "Stateful",
     "Hook",
     "CriticalHook",
+    "GradientHook",
     "StoreWriterHook",
     "RunAwareHook",
     "is_critical",

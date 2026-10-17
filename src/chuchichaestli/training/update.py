@@ -24,8 +24,9 @@ __all__ = [
     "ClipTypes",
     "ReductionTypes",
     "NonFiniteTypes",
-    "CLIP_FUNCTIONS",
+    "CLIP_MODES",
     "NONFINITE_MODES",
+    "grad_norm",
     "UpdatePolicy",
     "Ema",
     "Swa",
@@ -37,12 +38,44 @@ ClipTypes = Literal["norm", "value"]
 ReductionTypes = Literal["mean", "sum"]
 NonFiniteTypes = Literal["raise", "skip", "ignore"]
 
+CLIP_MODES: frozenset[str] = frozenset(get_args(ClipTypes))
 NONFINITE_MODES: frozenset[str] = frozenset(get_args(NonFiniteTypes))
 
-CLIP_FUNCTIONS: dict[str, Callable[..., torch.Tensor | None]] = {
-    "norm": nn.utils.clip_grad_norm_,
-    "value": nn.utils.clip_grad_value_,
-}
+
+def grad_norm(params: Iterable[nn.Parameter]) -> torch.Tensor:
+    """Return the total 2-norm of the gradients, as norm clipping measures it.
+
+    Args:
+        params: Parameters holding the gradients; those without one are skipped.
+    """
+    grads = [p.grad for p in params if p.grad is not None]
+    if not grads:
+        return torch.zeros(())
+    total = getattr(nn.utils, "get_total_norm", None)
+    if total is not None:
+        return total(grads)
+    device = grads[0].device
+    norms = [torch.linalg.vector_norm(g).to(device) for g in grads]
+    return torch.linalg.vector_norm(torch.stack(norms))
+
+
+def _clip_to_norm(
+    params: list[nn.Parameter], max_norm: float, norm: torch.Tensor
+) -> None:
+    """Scale gradients of a known total norm down to a maximum, in place.
+
+    Args:
+        params: Parameters whose gradients are scaled.
+        max_norm: Norm the gradients may have at most.
+        norm: Their total norm.
+    """
+    clip = getattr(nn.utils, "clip_grads_with_norm_", None)
+    if clip is not None:
+        clip(params, max_norm, norm)
+        return
+    coefficient = torch.clamp(max_norm / (norm + 1e-6), max=1.0)
+    for grad in (p.grad for p in params if p.grad is not None):
+        grad.mul_(coefficient.to(grad.device))
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +102,7 @@ class UpdatePolicy:
             ValueError: If `clip_mode`, `reduction` or `nonfinite` is unknown,
                 or `clip` is not positive.
         """
-        require(self.clip_mode, CLIP_FUNCTIONS, "clip mode")
+        require(self.clip_mode, CLIP_MODES, "clip mode")
         require(self.reduction, ("mean", "sum"), "reduction")
         require(self.nonfinite, NONFINITE_MODES, "non-finite mode")
         if self.clip is not None and self.clip <= 0:
@@ -84,25 +117,38 @@ class UpdatePolicy:
         """
         return loss * fraction if self.reduction == "mean" else loss
 
-    def clip_grads(self, params: Iterable[nn.Parameter]) -> None:
+    def clip_grads(
+        self,
+        params: Iterable[nn.Parameter],
+        norm: Callable[[], torch.Tensor] | None = None,
+    ) -> None:
         """Clip the gradients in place.
 
         Args:
             params: Parameters whose gradients are clipped.
+            norm: Returns their total norm, computed once for whoever asks.
         """
         if self.clip is None:
             return
-        CLIP_FUNCTIONS[self.clip_mode](list(params), self.clip)
+        params = list(params)
+        if self.clip_mode == "value":
+            nn.utils.clip_grad_value_(params, self.clip)
+        else:
+            _clip_to_norm(params, self.clip, norm() if norm else grad_norm(params))
 
     @staticmethod
-    def finite_grads(params: Iterable[nn.Parameter]) -> bool:
-        """Whether every gradient is finite.
+    def finite_grads(
+        params: Iterable[nn.Parameter],
+        norm: Callable[[], torch.Tensor] | None = None,
+    ) -> bool:
+        """Whether every gradient is finite; a finite total norm proves it.
 
         Args:
             params: Parameters whose gradients are checked.
+            norm: Returns their total norm, computed once for whoever asks.
         """
         grads = [p.grad for p in params if p.grad is not None]
-        if not grads:
+        if not grads or (norm is not None and bool(torch.isfinite(norm()))):
             return True
         return bool(torch.stack([torch.isfinite(g).all() for g in grads]).all())
 
@@ -119,6 +165,7 @@ class UpdatePolicy:
         optimizer: Optimizer,
         params: Iterable[nn.Parameter],
         closure: Callable[[], torch.Tensor] | None = None,
+        norm: Callable[[], torch.Tensor] | None = None,
     ) -> torch.Tensor | None:
         """Clip the gradients and step the optimizer.
 
@@ -126,6 +173,7 @@ class UpdatePolicy:
             optimizer: The optimizer to step.
             params: Parameters whose gradients are clipped.
             closure: Recomputes the loss, for optimizers that need it.
+            norm: Returns the gradients' total norm, computed once.
 
         Raises:
             ValueError: If the optimizer needs a closure and none was given.
@@ -136,7 +184,7 @@ class UpdatePolicy:
                     f"{type(optimizer).__name__} re-evaluates the loss, so it "
                     "needs a closure to step through."
                 )
-            self.clip_grads(params)
+            self.clip_grads(params, norm)
             return optimizer.step()
         return optimizer.step(closure)
 

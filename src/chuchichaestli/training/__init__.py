@@ -22,7 +22,8 @@ from chuchichaestli.training.objective import (
     Term,
 )
 from chuchichaestli.training.update import (
-    CLIP_FUNCTIONS,
+    CLIP_MODES,
+    grad_norm,
     NONFINITE_MODES,
     ClipTypes,
     NonFiniteTypes,
@@ -69,7 +70,8 @@ __all__ = [
     "NonFiniteTypes",
     "NONFINITE_MODES",
     "ReductionTypes",
-    "CLIP_FUNCTIONS",
+    "CLIP_MODES",
+    "grad_norm",
     "Loss",
     "Term",
     "Objective",
