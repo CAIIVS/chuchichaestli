@@ -43,6 +43,11 @@
         };
 
         
+        # The default torch also drives Apple's GPU on macOS, which has no ROCm or CUDA
+        isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
+        defaultLabel = if isDarwin then "CPU and MPS" else "CPU-only";
+        gpuHint = pkgs.lib.optionalString (!isDarwin) "  (nix develop .#rocm or .#cuda for GPU support)";
+
         # Common system build inputs
         commonBuildInputs = with pkgs; [
           stdenv.cc.cc.lib
@@ -64,7 +69,6 @@
             numpy
             h5py
             safetensors
-            (matplotlib.override { enableQt = true; })
             torch
             torchvision
             scikit-learn
@@ -75,14 +79,13 @@
             setuptools
             pybind11
             ninja
-          ]);
+          ] ++ (import ./nix/extras.nix { python3Packages = p; qt = true; }).all);
 
         makeRocmPyEnv = dist:
           dist.withPackages (p: with p; [
             numpy
             h5py
             safetensors
-            (matplotlib.override { enableQt = true; })
             torchWithRocm
             (torchvision.override { torch = torchWithRocm; })
             scikit-learn
@@ -93,14 +96,13 @@
             setuptools
             pybind11
             ninja
-          ]);
+          ] ++ (import ./nix/extras.nix { python3Packages = p; qt = true; }).all);
 
         makeCudaPyEnv = dist:
           dist.withPackages (p: with p; [
             numpy
             h5py
             safetensors
-            (matplotlib.override { enableQt = true; })
             torchWithCuda
             (torchvision.override { torch = torchWithCuda; })
             scikit-learn
@@ -111,7 +113,7 @@
             setuptools
             pybind11
             ninja
-          ]);
+          ] ++ (import ./nix/extras.nix { python3Packages = p; qt = true; }).all);
       in {
         
         # Packages built from self (git-tracked source tree)
@@ -139,7 +141,7 @@
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (with pkgs; [
                 stdenv.cc.cc.lib zlib libGL
               ])}:$LD_LIBRARY_PATH"
-              echo "CPU-only environment loaded  (nix develop .#rocm or .#cuda for GPU support)"
+              echo "${defaultLabel} environment loaded${gpuHint}"
             '';
           };
 
@@ -151,7 +153,7 @@
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (with pkgs; [
                 stdenv.cc.cc.lib zlib libGL
               ])}:$LD_LIBRARY_PATH"
-              echo "CPU-only environment loaded"
+              echo "${defaultLabel} environment loaded"
             '';
           };
 
