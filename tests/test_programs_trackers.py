@@ -696,3 +696,15 @@ def test_several_update_groups_each_log_their_norm():
     )
     run(Program([stage], provide={"disc": disc}), tracker)
     assert {"fit/grad_norm/disc", "fit/grad_norm/gen"} <= tracker.keys()
+
+
+def test_no_adapter_shadows_what_the_base_tracker_defines():
+    """An adapter's own state must not overwrite a base method or attribute."""
+    from chuchichaestli.programs import MLflow, TensorBoard, Wandb
+
+    base = set(vars(Recording()))
+    # declared on the base for adapters to set
+    members = (set(dir(Tracker)) | base) - {"needs_store"}
+    for adapter in (TensorBoard(), Wandb(), MLflow()):
+        own = set(vars(adapter)) - base
+        assert not own & members, (type(adapter).__name__, own & members)

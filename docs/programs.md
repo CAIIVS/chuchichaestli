@@ -326,3 +326,62 @@ Everything past `path` and `source` is handed straight to `save_images`, the
 way `OptimSpec.kwargs` reaches the optimizer: `limit` chooses what is written,
 `normalize` scales it, `labels` and `title` name it, `size` and `pad` shape the
 canvas, and `draw` hands the drawing itself back to you.
+
+## Experiment trackers
+
+A tracker is a hook like any other: adding one to `hooks=[...]` logs an
+existing program as it is, with no change to its stages. The diffusion example
+above, sent to TensorBoard as well:
+
+```python
+Runner(
+    program,
+    seed=SEED,
+    hooks=[
+        Console(every=1, timing=True),
+        Timer(stream=sys.stdout, depth=1),
+        ProgressBar(unit="epoch"),
+        Jsonl("trace.jsonl"),
+        Checkpointer(every=32, unit="epoch", keep=2),
+        TensorBoard(),
+    ],
+    store=STORE,
+    device="cpu",
+).run()
+```
+
+Three backends ship with the package, each behind its own extra:
+
+| tracker | install | where runs go by default |
+|---|---|---|
+| `TensorBoard()` | `chuchichaestli[tensorboard]` | `<store>/tensorboard/<project>/<experiment>/<run_name>` |
+| `Wandb(entity=..., mode=...)` | `chuchichaestli[wandb]` | your W&B account; `mode="offline"` keeps it local |
+| `MLflow(tracking_uri=...)` | `chuchichaestli[mlflow]` | one SQLite file, `<store>/mlflow.db` |
+
+The runner names the run once (`project=`, `experiment=`, `run_name=`; a
+`run_name` is drawn when you give none) and every tracker files it under those
+names, so switching backends renames nothing. A run resumed from a checkpoint
+continues the same backend run, on the same step axis.
+
+What is logged is a `TrackingPolicy`. By default that is each training step's
+losses, rate and gradient norm, each pass's duration, throughput and peak
+memory, each stage's closing scores (`check/mse`), a config of the run (its
+seed, every stage's settings, the models' specs and sizes, versions, device and
+the repository's commit, with a dirty repository's diff as `git.patch`), a
+record of each checkpoint, and the images and archives the exporters write.
+Weights and checkpoints are uploaded only when asked for. Any field can be
+changed in place, a preset named, or one policy shared:
+
+```python
+TensorBoard(every=10, memory=False)           # fields changed in place
+Wandb(log="full")                             # everything, checkpoints included
+MLflow(log="minimal", config={"lr": 1e-3})    # the curves, the outcome, your config
+policy = TrackingPolicy(artifacts=("image", "checkpoint"), checkpoint_uploads="best")
+hooks = [TensorBoard(log=policy), MLflow(log=policy)]
+```
+
+Only the main process logs. A tracker whose backend fails is dropped with a
+warning rather than ending the run, and how a run ended (`finished`, `failed`
+or `cancelled`) is the last thing each one records. The repository's commit is
+read without GitPython too; whether it is dirty, and its diff, need
+`chuchichaestli[git]`.

@@ -11,6 +11,7 @@ from chuchichaestli.programs.trackers.base import (
     TrackingPolicy,
 )
 from chuchichaestli.programs.trackers.tensorboard import TensorBoard
+from chuchichaestli.programs.trackers.mlflow import MLflow
 from chuchichaestli.programs.trackers.wandb import Wandb
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "Tracker",
     "TensorBoard",
     "Wandb",
+    "MLflow",
     "PresetTypes",
     "RunStatusTypes",
     "CheckpointUploadTypes",

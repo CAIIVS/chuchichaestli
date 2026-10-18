@@ -29,6 +29,7 @@ from chuchichaestli.programs.objective import (
     Reconstruction,
 )
 from chuchichaestli.programs.trackers import (
+    MLflow,
     TensorBoard,
     Tracker,
     TrackingPolicy,
@@ -162,6 +163,7 @@ __all__ = [
     "TrackingPolicy",
     "TensorBoard",
     "Wandb",
+    "MLflow",
     "Checkpoint",
     "CheckpointStore",
     "CheckpointFormats",
