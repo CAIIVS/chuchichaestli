@@ -14,7 +14,7 @@ from typing import Any
 import torch
 from torch import nn
 from chuchichaestli.models.spec import ModelSpec
-from chuchichaestli.programs.context import split_segment
+from chuchichaestli.programs.context import subpath, split_path
 from chuchichaestli.programs.traits import Stage, Stateful
 
 
@@ -45,16 +45,6 @@ class C3liCheckpointError(ValueError):
     """Raised when a checkpoint cannot be written, found or trusted."""
 
 
-def _child(path: str, key: Any) -> str:
-    """Return the path of a child within the tree.
-
-    Args:
-        path: Path of the parent, empty at the root.
-        key: Mapping key or sequence index of the child.
-    """
-    return f"{path}/{key}" if path else str(key)
-
-
 def _strip_tensors(value: Any, path: str, tensors: dict[str, torch.Tensor]) -> Any:
     """Replace tensors with references and record them under their path.
 
@@ -68,7 +58,7 @@ def _strip_tensors(value: Any, path: str, tensors: dict[str, torch.Tensor]) -> A
         return {_TENSOR_TAG: path}
     if isinstance(value, Mapping):
         items = [
-            (key, _strip_tensors(item, _child(path, key), tensors))
+            (key, _strip_tensors(item, subpath(path, key), tensors))
             for key, item in value.items()
         ]
         if all(isinstance(key, str) for key in value):
@@ -76,7 +66,7 @@ def _strip_tensors(value: Any, path: str, tensors: dict[str, torch.Tensor]) -> A
         return {_PAIRS_TAG: [[key, item] for key, item in items]}
     if isinstance(value, (list, tuple)):
         return [
-            _strip_tensors(item, _child(path, index), tensors)
+            _strip_tensors(item, subpath(path, index), tensors)
             for index, item in enumerate(value)
         ]
     return value
@@ -176,8 +166,7 @@ def _stage_at(root: Stage, path: str) -> Stage | None:
         path: Path as `walk` spells it, e.g. `"program/0:fit"`.
     """
     held = root
-    for step in path.split("/")[1:]:
-        index, _ = split_segment(step)
+    for index, _ in split_path(path)[1:]:
         children = getattr(held, "stages", ())
         if index >= len(children):
             return None

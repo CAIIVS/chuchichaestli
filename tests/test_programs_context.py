@@ -10,6 +10,8 @@ from chuchichaestli.programs.context import (
     Context,
     C3liContextError,
     join_path,
+    subpath,
+    split_path,
     split_segment,
     stage_name,
 )
@@ -174,3 +176,31 @@ def test_the_root_segment_has_no_position():
 def test_a_path_names_the_stage_it_ends_in(path, name):
     """Visits of one stage under `each_pass` share its name, whatever the visit."""
     assert stage_name(path) == name
+
+
+@pytest.mark.parametrize(
+    ("path", "key", "expected"),
+    [
+        ("program/0:fit", "model", "program/0:fit/model"),
+        ("", 3, "3"),
+        ("program", "", "program"),
+    ],
+)
+def test_a_subpath_leaves_empty_parts_out(path, key, expected):
+    """One spelling for bindings, seeds and tree paths alike."""
+    assert subpath(path, key) == expected
+
+
+def test_a_path_splits_into_the_segments_that_built_it():
+    """`split_path` reads back what `join_path` wrote, root included."""
+    path = join_path(join_path("program", 1, "cycle"), 0, "fit")
+    assert split_path(path) == [(None, "program"), (1, "cycle"), (0, "fit")]
+
+
+def test_a_stage_s_seeds_are_derived_from_its_subpaths():
+    """Seeds must not move: a resumed run draws what the interrupted one drew."""
+    from chuchichaestli.utils.rng import derive_seed
+
+    ctx = Context("program/0:fit", 7)
+    assert ctx.seed_for("noise") == derive_seed(7, "program/0:fit/noise")
+    assert ctx.seed_for() == derive_seed(7, "program/0:fit")

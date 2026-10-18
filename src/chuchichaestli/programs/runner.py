@@ -14,7 +14,7 @@ import torch
 from torch import nn
 from chuchichaestli.programs.ckpt import CheckpointStore
 from chuchichaestli.programs.serialize import C3liCheckpointError, hook_keys
-from chuchichaestli.programs.context import Context, join_path
+from chuchichaestli.programs.context import Context, join_path, subpath
 from chuchichaestli.programs.events import (
     C3liRunCancelled,
     C3liRunError,
@@ -310,7 +310,7 @@ class Runner:
             seen = id(model) in provisioned
             stage.model = self._provision_module(model, provisioned)
             if provide is not None and not seen:
-                provide[f"{path}/model"] = stage.model
+                provide[subpath(path, "model")] = stage.model
         for index, child in enumerate(getattr(stage, "stages", ())):
             self._provision_stage(
                 child, provide, join_path(path, index, child.name), provisioned

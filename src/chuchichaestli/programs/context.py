@@ -21,7 +21,25 @@ from chuchichaestli.programs.topology import Local
 from chuchichaestli.programs.traits import Stateful, Topology
 
 
-__all__ = ["Context", "C3liContextError", "join_path", "split_segment", "stage_name"]
+__all__ = [
+    "Context",
+    "C3liContextError",
+    "subpath",
+    "join_path",
+    "split_segment",
+    "split_path",
+    "stage_name",
+]
+
+
+def subpath(path: str, key: object) -> str:
+    """Return the path of a key below a path; an empty part is left out.
+
+    Args:
+        path: The path above, e.g. a stage's.
+        key: What goes below it, e.g. a binding name or a tree index.
+    """
+    return "/".join(part for part in (path, str(key)) if part)
 
 
 def join_path(path: str, index: int, name: str) -> str:
@@ -32,7 +50,7 @@ def join_path(path: str, index: int, name: str) -> str:
         index: Position of the child within it.
         name: The child stage's name.
     """
-    return f"{path}/{index}:{name}"
+    return subpath(path, f"{index}:{name}")
 
 
 def split_segment(segment: str) -> tuple[int | None, str]:
@@ -45,13 +63,22 @@ def split_segment(segment: str) -> tuple[int | None, str]:
     return (int(index), name) if sep else (None, segment)
 
 
+def split_path(path: str) -> list[tuple[int | None, str]]:
+    """Return each segment of a path as its position and stage name.
+
+    Args:
+        path: A stage's path, e.g. `"program/1:cycle/0:fit"`.
+    """
+    return [split_segment(segment) for segment in path.split("/")]
+
+
 def stage_name(path: str) -> str:
     """Return the name of the stage a path ends in.
 
     Args:
         path: A stage's path, e.g. `"program/1:cycle/0:fit"`.
     """
-    return split_segment(path.rpartition("/")[2])[1]
+    return split_path(path)[-1][1]
 
 
 class C3liContextError(KeyError):
@@ -260,21 +287,13 @@ class Context:
         """
         return self[value] if isinstance(value, str) else value
 
-    def _keyed_path(self, key: str) -> str:
-        """Qualify a key with this stage's path.
-
-        Args:
-            key: What the randomness is for, or `""` for the stage itself.
-        """
-        return f"{self.path}/{key}" if key else self.path
-
     def seed_for(self, key: str = "") -> int:
         """Derive a seed for a key at this position.
 
         Args:
             key: What the randomness is for, e.g. `"data/epoch=3"`.
         """
-        return derive_seed(self.seed, self._keyed_path(key))
+        return derive_seed(self.seed, subpath(self.path, key))
 
     def rng(
         self, key: str = "", device: torch.device | str | None = None
@@ -285,7 +304,7 @@ class Context:
             key: What the randomness is for, e.g. `"data/epoch=3"`.
             device: Device the generator draws for; defaults to the CPU.
         """
-        return rng_generator(self.seed, self._keyed_path(key), device)
+        return rng_generator(self.seed, subpath(self.path, key), device)
 
     def seeder(self, key: str = "") -> WorkerSeeder:
         """Build a worker seeder for a key at this position.
@@ -293,7 +312,7 @@ class Context:
         Args:
             key: What the randomness is for, e.g. `"data/epoch=3"`.
         """
-        return WorkerSeeder(self.seed, self._keyed_path(key))
+        return WorkerSeeder(self.seed, subpath(self.path, key))
 
     def cache(self, key: str, fn: Callable[[], Any]) -> Any:
         """Compute a value once per micro-batch, reusing it across terms.
