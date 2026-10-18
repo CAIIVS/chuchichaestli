@@ -44,9 +44,7 @@ def reset_peak_memory(device: torch.device | str) -> bool:
 
 
 def peak_memory_allocated(device: torch.device | str) -> int | None:
-    """Return the bytes a device allocated at most since its counter was reset.
-
-    `None` where it cannot be measured, as on the CPU.
+    """Return a device's peak allocated bytes since its reset, or `None` if unmeasured.
 
     Args:
         device: The device to measure.

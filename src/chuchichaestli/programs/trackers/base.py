@@ -57,10 +57,7 @@ CheckpointUploadTypes = Literal["best", "last", "all"]
 class TrackingPolicy:
     """What a tracker logs; the default is rich without uploading weights.
 
-    The run's configuration is logged once, as a fresh run opens. A tracker's
-    own `config=` is always logged.
-
-    Attributes:
+    Args:
         metrics: Log each training step's losses and rate, and the numbers a
             stage reports as it ends, e.g. an `Eval`'s scores.
         every: Log the step metrics every nth training step.
@@ -232,9 +229,7 @@ class Tracker(ABC):
         group: str | None,
         path: str,
     ) -> None:
-        """Keep an update group's gradient norm, for the step's own log call.
-
-        Nothing is computed off the main process or on a step `every` skips.
+        """Keep a group's gradient norm for the log call of its step, if it is logged.
 
         Args:
             params: The group's parameters, holding the gradients.

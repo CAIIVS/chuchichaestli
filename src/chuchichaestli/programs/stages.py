@@ -1066,10 +1066,7 @@ class StageLoop(InitArgMixin, ABC):
         return Signal.DONE if signal.halts else signal
 
     def step_summary(self) -> dict[str, Any]:
-        """Return what the stage has to report about the step just taken.
-
-        It rides in the step's event, as `summary` does in the closing one.
-        """
+        """Return what the stage reports in the event of the step just taken."""
         return {}
 
     def summary(self) -> dict[str, Any]:

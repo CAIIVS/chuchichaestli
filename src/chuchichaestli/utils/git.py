@@ -15,7 +15,7 @@ __all__ = ["GitState", "git_state"]
 class GitState:
     """A repository's checked-out commit and its uncommitted changes.
 
-    Attributes:
+    Args:
         commit: Hash of the commit checked out.
         dirty: Whether tracked files differ from it, staged or not; untracked
             files do not count, as for `git describe --dirty`. `None` when
@@ -29,14 +29,11 @@ class GitState:
 
 
 def git_state(path: Path | None = None) -> GitState | None:
-    """Return the state of the repository holding a directory, if there is one.
-
-    Without GitPython, or without a usable git, only the commit is read, from
-    the repository's files. `None` outside a repository, on a branch without
-    a commit, or when git cannot be read.
+    """Return the state of the repository holding a directory, or `None` if unreadable.
 
     Args:
         path: Directory inside the repository; the working directory if absent.
+            Without GitPython, only its commit is read, from its files.
     """
     path = path or Path.cwd()
     try:

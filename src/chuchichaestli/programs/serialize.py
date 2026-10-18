@@ -128,10 +128,8 @@ def merge_tree(tensors: Mapping[str, torch.Tensor], skeleton: Any) -> Any:
 def flatten_tree(tree: Mapping[str, Any], path: str = "") -> dict[str, Any]:
     """Return a tree's leaves keyed by their slash-joined position in it.
 
-    Only mappings are descended into; any other value is a leaf.
-
     Args:
-        tree: The nested mapping to flatten.
+        tree: The nested mapping to flatten; only mappings are descended into.
         path: Position of `tree` within the whole, empty at the root.
     """
     flat: dict[str, Any] = {}

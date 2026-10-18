@@ -522,10 +522,7 @@ class Runner:
                 self._guarded(hook, lambda hook=hook: hook.on_gradients(*gradients))
 
     def _guarded(self, hook: Hook, call: Callable[[], Any]) -> Any:
-        """Call into a hook, dropping it for the rest of the run if it raises.
-
-        A hook that sets `critical` stops the run instead, so a failing
-        console does not end a long training run but a failing canceller does.
+        """Call into a hook, dropping it if it raises, unless it is `critical`.
 
         Args:
             hook: The hook being called.

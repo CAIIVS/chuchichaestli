@@ -205,18 +205,9 @@ class RunAwareHook(Hook, Protocol):
 
 @runtime_checkable
 class GradientHook(Hook, Protocol):
-    """A hook that also watches each training step's gradients.
+    """A hook that also watches the gradients of each training step."""
 
-    It sees an update group's gradients once accumulated, averaged across
-    processes and unscaled, before they are clipped and applied. Optimizers
-    stepping through their own closure, such as L-BFGS, are not watched.
-    Nothing is emitted, so traces stay as they are.
-
-    Attributes:
-        watches_gradients: Whether the hook wants them; with none wanting
-            them, a step neither builds nor computes anything for it.
-    """
-
+    # with no hook watching, a step builds and computes nothing for them
     watches_gradients: bool
 
     def on_gradients(
