@@ -28,7 +28,7 @@ from chuchichaestli.programs.objective import (
     Output,
     Reconstruction,
 )
-from chuchichaestli.programs.trackers import Tracker, TrackingPolicy
+from chuchichaestli.programs.trackers import TensorBoard, Tracker, TrackingPolicy
 from chuchichaestli.programs.events import (
     ArtifactTypes,
     C3liRunCancelled,
@@ -155,6 +155,7 @@ __all__ = [
     "GracefulStop",
     "Tracker",
     "TrackingPolicy",
+    "TensorBoard",
     "Checkpoint",
     "CheckpointStore",
     "CheckpointFormats",

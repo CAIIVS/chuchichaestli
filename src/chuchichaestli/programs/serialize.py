@@ -22,6 +22,7 @@ __all__ = [
     "C3liCheckpointError",
     "unpack_tree",
     "merge_tree",
+    "flatten_tree",
     "stage_signature",
     "stages_by_path",
     "component_states",
@@ -122,6 +123,25 @@ def merge_tree(tensors: Mapping[str, torch.Tensor], skeleton: Any) -> Any:
         skeleton: The tree shape, as returned by `unpack_tree`.
     """
     return _restore_tensors(skeleton, tensors)
+
+
+def flatten_tree(tree: Mapping[str, Any], path: str = "") -> dict[str, Any]:
+    """Return a tree's leaves keyed by their slash-joined position in it.
+
+    Only mappings are descended into; any other value is a leaf.
+
+    Args:
+        tree: The nested mapping to flatten.
+        path: Position of `tree` within the whole, empty at the root.
+    """
+    flat: dict[str, Any] = {}
+    for key, value in tree.items():
+        position = subpath(path, key)
+        if isinstance(value, Mapping):
+            flat.update(flatten_tree(value, position))
+        else:
+            flat[position] = value
+    return flat
 
 
 def stage_signature(stage: Stage) -> list[list[str]]:

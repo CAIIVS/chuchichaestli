@@ -10,10 +10,12 @@ from chuchichaestli.programs.trackers.base import (
     Tracker,
     TrackingPolicy,
 )
+from chuchichaestli.programs.trackers.tensorboard import TensorBoard
 
 __all__ = [
     "TrackingPolicy",
     "Tracker",
+    "TensorBoard",
     "PresetTypes",
     "RunStatusTypes",
     "CheckpointUploadTypes",

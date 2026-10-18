@@ -38,6 +38,7 @@ from chuchichaestli.metrics import MSE
 from chuchichaestli.programs.data import DataManager
 from chuchichaestli.programs.serialize import (
     as_loggable,
+    flatten_tree,
     stage_settings,
     stages_by_path,
 )
@@ -736,3 +737,9 @@ def test_a_module_without_a_spec_exports_its_weights_alone(tmp_path):
     )
     with pytest.raises(ValueError, match="No model spec"):
         load_model(path)
+
+
+def test_a_tree_flattens_to_its_leaves_keyed_by_position():
+    """Nested mappings become one level; sequences stay whole, as leaves."""
+    tree = {"config": {"lr": 0.1, "sizes": [1, 2]}, "seed": 3, "empty": {}}
+    assert flatten_tree(tree) == {"config/lr": 0.1, "config/sizes": [1, 2], "seed": 3}
