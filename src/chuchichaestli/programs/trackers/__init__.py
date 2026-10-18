@@ -11,11 +11,13 @@ from chuchichaestli.programs.trackers.base import (
     TrackingPolicy,
 )
 from chuchichaestli.programs.trackers.tensorboard import TensorBoard
+from chuchichaestli.programs.trackers.wandb import Wandb
 
 __all__ = [
     "TrackingPolicy",
     "Tracker",
     "TensorBoard",
+    "Wandb",
     "PresetTypes",
     "RunStatusTypes",
     "CheckpointUploadTypes",

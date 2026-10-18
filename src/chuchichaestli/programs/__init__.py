@@ -28,7 +28,12 @@ from chuchichaestli.programs.objective import (
     Output,
     Reconstruction,
 )
-from chuchichaestli.programs.trackers import TensorBoard, Tracker, TrackingPolicy
+from chuchichaestli.programs.trackers import (
+    TensorBoard,
+    Tracker,
+    TrackingPolicy,
+    Wandb,
+)
 from chuchichaestli.programs.events import (
     ArtifactTypes,
     C3liRunCancelled,
@@ -156,6 +161,7 @@ __all__ = [
     "Tracker",
     "TrackingPolicy",
     "TensorBoard",
+    "Wandb",
     "Checkpoint",
     "CheckpointStore",
     "CheckpointFormats",
