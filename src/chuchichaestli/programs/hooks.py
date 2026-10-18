@@ -59,6 +59,7 @@ __all__ = [
     "Timer",
     "EarlyStop",
     "GracefulStop",
+    "CancelAfter",
     "MonitorModeTypes",
     "ThresholdModeTypes",
     "CheckpointUnitTypes",
@@ -626,6 +627,82 @@ class GracefulStop:
             self._raised = True
             raise C3liRunCancelled(f"cancelled by {self.caught}")
         return Signal.GO
+
+
+class CancelAfter:
+    """Cancel the run at the next program step once a budget is spent."""
+
+    # a muted canceller would silently stop responding
+    critical = True
+
+    def __init__(
+        self,
+        steps: int | None = None,
+        epochs: int | None = None,
+        seconds: float | None = None,
+    ):
+        """Constructor.
+
+        Args:
+            steps: Training steps this run may take, counted from its start.
+            epochs: Training passes this run may make, counted from its start.
+            seconds: Wall-clock time this run may take.
+
+        Raises:
+            ValueError: If no budget is given, or one is not positive.
+        """
+        budgets = {"steps": steps, "epochs": epochs, "seconds": seconds}
+        given = {name: value for name, value in budgets.items() if value is not None}
+        if not given:
+            raise ValueError("CancelAfter needs a budget: steps=, epochs= or seconds=.")
+        spent = sorted(name for name, value in given.items() if value <= 0)
+        if spent:
+            raise ValueError(f"Budgets {spent} must be positive, got {given}.")
+        self.steps = steps
+        self.epochs = epochs
+        self.seconds = seconds
+        self._taken = {"step": 0, "epoch": 0}
+        self._started = time.monotonic()
+        self._spent: str | None = None
+
+    def __repr__(self) -> str:
+        """Return the hook's budgets."""
+        budgets = {"steps": self.steps, "epochs": self.epochs, "seconds": self.seconds}
+        given = ", ".join(f"{k}={v}" for k, v in budgets.items() if v is not None)
+        return f"CancelAfter({given})"
+
+    def on(self, event: Event) -> Signal:
+        """Count what the run spends, and cancel it at the next step once over budget.
+
+        Args:
+            event: What the runner just did.
+
+        Raises:
+            C3liRunCancelled: As the program advances with a budget spent.
+        """
+        if event.type is EventType.RUN_BEGAN:
+            self._taken = {"step": 0, "epoch": 0}
+            self._started = time.monotonic()
+            self._spent = None
+        for unit in self._taken:
+            if counts_toward(event, unit):
+                self._taken[unit] += 1
+        self._spent = self._spent or self._overspent()
+        if event.type is EventType.STAGE_ADVANCED and self._spent is not None:
+            spent, self._spent = self._spent, None
+            raise C3liRunCancelled(f"cancelled after {spent}")
+        return Signal.GO
+
+    def _overspent(self) -> str | None:
+        """Return the budget that has run out, worded for the message, or `None`."""
+        if self.steps is not None and self._taken["step"] >= self.steps:
+            return f"{self._taken['step']} steps"
+        if self.epochs is not None and self._taken["epoch"] >= self.epochs:
+            return f"{self._taken['epoch']} passes"
+        elapsed = time.monotonic() - self._started
+        if self.seconds is not None and elapsed >= self.seconds:
+            return f"{elapsed:.0f} s"
+        return None
 
 
 class ProgressBar:

@@ -218,6 +218,16 @@ child it is in the middle of — so resuming its last checkpoint does nothing.
 To carry on training from finished weights, `Load` them into a `Finetune`
 stage instead, which starts an optimizer of its own.
 
+A run is stopped without losing work by `GracefulStop()`, which turns a
+`scancel`, a job time limit or a Ctrl-C into a stop, and by
+`CancelAfter(steps=, epochs=, seconds=)`, which stops once a budget is spent.
+Both finish the program step in progress and raise `C3liRunCancelled`, so a
+`Checkpointer` writes a whole final state and resuming it carries on exactly
+there. `CancelAfter` counts from the start of each run, so a resumed job gets
+a budget of its own: a long run split across jobs that each stay within a time
+limit is `hooks=[GracefulStop(), CancelAfter(seconds=3.5 * 3600), Checkpointer()]`,
+resumed with `resume="last"` until it finishes.
+
 Randomness is derived from `(seed, stage path)` rather than replayed, so the
 result does not depend on where a run was interrupted, how many dataloader
 workers it used, or how many processes it ran across.
