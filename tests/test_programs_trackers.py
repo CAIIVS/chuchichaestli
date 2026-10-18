@@ -28,7 +28,7 @@ from chuchichaestli.programs import (
     Train,
     WeightsExport,
 )
-from chuchichaestli.programs import trackers
+from chuchichaestli.programs.trackers import base as tracker_base
 from chuchichaestli.programs.ckpt import CheckpointStore
 from chuchichaestli.programs.events import C3liRunCancelled, C3liRunError
 from chuchichaestli.programs.serialize import stage_signature
@@ -210,7 +210,7 @@ def test_memory_is_the_pass_s_peak_where_the_device_reports_one(monkeypatch):
             """Report the peak."""
             return 5 * 2**20
 
-    monkeypatch.setattr(trackers, "_memory_api", lambda device: Counter())
+    monkeypatch.setattr(tracker_base, "_memory_api", lambda device: Counter())
     tracker, unmeasured = Recording(), Recording(memory=False)
     run(fitted(), tracker, unmeasured)
     assert [mb for _, mb in tracker.series("fit/peak_memory_mb")] == [5.0, 5.0, 5.0]

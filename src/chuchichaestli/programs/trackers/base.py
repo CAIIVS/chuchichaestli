@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Experiment trackers: a run's numbers, artifacts and config sent to a backend."""
+"""The tracker base: what a tracker logs, and how a run's events become it."""
 
 from __future__ import annotations
 import platform
