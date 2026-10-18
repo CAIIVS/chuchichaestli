@@ -70,6 +70,10 @@ git = [
 tensorboard = [
     "tensorboard>=2.14",
 ]
+# For logging a run to Weights & Biases
+wandb = [
+    "wandb>=0.17",
+]
 all = [
     "ruff==0.16.6",
     "pre-commit>=3.7.0",
@@ -84,6 +88,7 @@ all = [
     "matplotlib>=3.7",
     "GitPython>=3.1.40",
     "tensorboard>=2.14",
+    "wandb>=0.17",
 ]
 
 [dependency-groups]
