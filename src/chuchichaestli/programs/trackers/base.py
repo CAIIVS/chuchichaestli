@@ -210,7 +210,7 @@ class Tracker(ABC):
         self._uploaded_best = False
         self._latest: tuple[list[Path], int, tuple[str, ...]] | None = None
         self._names: dict[str, str | None] = {}
-        self._run: dict[str, Any] = {}
+        self._runner_settings: dict[str, Any] = {}
         self._resumed = False
         self._opened = False
         self._closed = False
@@ -388,7 +388,10 @@ class Tracker(ABC):
         self._names = {
             key: payload.get(key) for key in ("project", "experiment", "run_name")
         }
-        self._run = {"seed": payload.get("seed"), "backends": payload.get("backends")}
+        self._runner_settings = {
+            "seed": payload.get("seed"),
+            "backends": payload.get("backends"),
+        }
         self._closed = False
 
     def _metrics(
@@ -470,7 +473,7 @@ class Tracker(ABC):
         if self.config:
             config["config"] = as_loggable(self.config)
         if self.log.runner:
-            config["runner"] = as_loggable(self._run)
+            config["runner"] = as_loggable(self._runner_settings)
         if self.log.stages and self._runner is not None:
             program = self._runner.program
             config["program"] = stage_signature(program)
