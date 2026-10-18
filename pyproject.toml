@@ -74,6 +74,10 @@ tensorboard = [
 wandb = [
     "wandb>=0.17",
 ]
+# For logging a run to MLflow; the full package brings its SQLite store
+mlflow = [
+    "mlflow>=2.10",
+]
 all = [
     "ruff==0.16.6",
     "pre-commit>=3.7.0",
@@ -89,6 +93,7 @@ all = [
     "GitPython>=3.1.40",
     "tensorboard>=2.14",
     "wandb>=0.17",
+    "mlflow>=2.10",
 ]
 
 [dependency-groups]
