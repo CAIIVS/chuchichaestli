@@ -196,25 +196,13 @@ def test_timing_logs_each_pass_s_duration_and_throughput():
 
 def test_memory_is_the_pass_s_peak_where_the_device_reports_one(monkeypatch):
     """The counter is reset as each pass begins and read as it ends."""
-
-    class Counter:
-        """A device memory counter peaking at 5 MiB each pass."""
-
-        resets = 0
-
-        def reset_peak_memory_stats(self, device):
-            """Start a new peak."""
-            Counter.resets += 1
-
-        def max_memory_allocated(self, device):
-            """Report the peak."""
-            return 5 * 2**20
-
-    monkeypatch.setattr(tracker_base, "_memory_api", lambda device: Counter())
+    resets = []
+    monkeypatch.setattr(tracker_base, "reset_peak_memory", resets.append)
+    monkeypatch.setattr(tracker_base, "peak_memory_allocated", lambda d: 5 * 2**20)
     tracker, unmeasured = Recording(), Recording(memory=False)
     run(fitted(), tracker, unmeasured)
     assert [mb for _, mb in tracker.series("fit/peak_memory_mb")] == [5.0, 5.0, 5.0]
-    assert Counter.resets >= 3
+    assert len(resets) >= 3
     assert "fit/peak_memory_mb" not in unmeasured.keys()
 
 

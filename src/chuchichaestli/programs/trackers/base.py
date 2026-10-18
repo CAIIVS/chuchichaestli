@@ -32,6 +32,7 @@ from chuchichaestli.programs.serialize import (
 )
 from chuchichaestli.utils.functools import numbers
 from chuchichaestli.utils.git import GitState, git_state
+from chuchichaestli.utils.memory import peak_memory_allocated, reset_peak_memory
 from chuchichaestli.utils.registry import require
 
 if TYPE_CHECKING:
@@ -170,22 +171,6 @@ class TrackingPolicy:
         return replace(base, **options)
 
 
-def _memory_api(device: torch.device) -> Any:
-    """Return what reports a device's peak memory, or `None` on the CPU.
-
-    Args:
-        device: The device the run computes on.
-    """
-    if device.type == "cpu":
-        return None
-    accelerator = getattr(torch, "accelerator", None)
-    if hasattr(accelerator, "max_memory_allocated"):
-        return accelerator
-    module = getattr(torch, device.type, None)
-    has_peak = hasattr(module, "max_memory_allocated")
-    return module if has_peak and hasattr(module, "reset_peak_memory_stats") else None
-
-
 class Tracker(ABC):
     """Send a run's metrics, artifacts and config to an experiment tracker."""
 
@@ -220,7 +205,6 @@ class Tracker(ABC):
         self._ctx: Context | None = None
         self._runner: Runner | None = None
         self._on_main = True
-        self._memory: Any = None
         self._samples: dict[str, int] = {}
         self._norms: dict[str, float] = {}
         self._uploaded_best = False
@@ -273,7 +257,6 @@ class Tracker(ABC):
         self._ctx = ctx
         self._runner = runner
         self._on_main = ctx.topology.is_main
-        self._memory = _memory_api(ctx.device) if self.log.memory else None
         if self.store is None and runner.store is not None:
             self.store = Path(runner.store)
 
@@ -307,7 +290,8 @@ class Tracker(ABC):
             self._began(event)
         elif event.type is EventType.EPOCH_BEGAN:
             self._samples[event.path] = event.progress.samples
-            self._reset_memory()
+            if self.log.memory and self._ctx is not None:
+                reset_peak_memory(self._ctx.device)
         elif counts_toward(event, "step"):
             norms, self._norms = self._norms, {}
             if self.log.metrics and step % self.log.every == 0:
@@ -442,31 +426,13 @@ class Tracker(ABC):
             samples = event.progress.samples - self._samples.pop(event.path, 0)
             if samples > 0 and taken[-1] > 0:
                 metrics[f"{stage}/samples_per_second"] = samples / taken[-1]
-        peak = self._peak_memory()
+        measured = self.log.memory and self._ctx is not None
+        peak = peak_memory_allocated(self._ctx.device) if measured else None
         if peak is not None:
             metrics[f"{stage}/peak_memory_mb"] = peak / 2**20
         if metrics:
             self._ensure_open()
             self._log(metrics, step)
-
-    def _reset_memory(self) -> None:
-        """Start measuring a pass's peak memory afresh."""
-        if self._memory is None or self._ctx is None:
-            return
-        try:
-            self._memory.reset_peak_memory_stats(self._ctx.device)
-        except Exception:  # noqa: BLE001 - a device without the counter logs none
-            self._memory = None
-
-    def _peak_memory(self) -> int | None:
-        """Return the bytes allocated at most since the pass began, if measurable."""
-        if self._memory is None or self._ctx is None:
-            return None
-        try:
-            return int(self._memory.max_memory_allocated(self._ctx.device))
-        except Exception:  # noqa: BLE001 - a device without the counter logs none
-            self._memory = None
-            return None
 
     def _ensure_open(self) -> None:
         """Open the backend run before its first log; a fresh one logs its config."""
