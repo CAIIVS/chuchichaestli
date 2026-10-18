@@ -66,6 +66,10 @@ jit = [
 git = [
     "GitPython>=3.1.40",
 ]
+# For logging a run to TensorBoard
+tensorboard = [
+    "tensorboard>=2.14",
+]
 all = [
     "ruff==0.16.6",
     "pre-commit>=3.7.0",
@@ -79,6 +83,7 @@ all = [
     "torch>=2.2.2",
     "matplotlib>=3.7",
     "GitPython>=3.1.40",
+    "tensorboard>=2.14",
 ]
 
 [dependency-groups]
