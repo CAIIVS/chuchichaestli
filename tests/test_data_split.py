@@ -4,6 +4,7 @@
 """Tests for dividing a dataset into disjoint parts."""
 
 import pytest
+import torch
 
 from chuchichaestli.data import split_dataset
 
@@ -25,6 +26,19 @@ def test_the_same_seed_gives_the_same_parts():
         part.indices for part in split_dataset(list(range(50)), [0.7, 0.3], seed=1)
     ]
     assert other != first
+
+
+def test_an_unseeded_split_draws_like_random_split():
+    """Two unseeded splits differ, and repeat once torch is seeded again."""
+
+    def held_out():
+        return split_dataset(list(range(50)), [0.7, 0.3])[1].indices
+
+    torch.manual_seed(0)
+    first, second = held_out(), held_out()
+    torch.manual_seed(0)
+    assert first != second
+    assert held_out() == first
 
 
 def test_a_mapping_comes_back_as_a_mapping():

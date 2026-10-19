@@ -22,7 +22,7 @@ from chuchichaestli.data.split import split_dataset
 from chuchichaestli.programs.context import Context
 from chuchichaestli.programs.traits import Topology
 from chuchichaestli.utils.functools import InitArgMixin
-from chuchichaestli.utils.rng import rng_generator
+from chuchichaestli.utils.rng import rng_generator, root_seed
 
 
 __all__ = ["DataManager", "C3liDataError"]
@@ -58,7 +58,7 @@ class DataManager(InitArgMixin):
         seed: int | None = None,
         split: Sequence[float] | Mapping[str, float] | None = None,
         part: str | int | None = None,
-        split_seed: int = 0,
+        split_seed: int | None = None,
         balance_ranks: bool = False,
     ):
         """Constructor.
@@ -181,7 +181,7 @@ class DataManager(InitArgMixin):
         dataset: Dataset,
         split: Sequence[float] | Mapping[str, float],
         part: str | int,
-        seed: int,
+        seed: int | None,
     ) -> Dataset:
         """Return the part of a split dataset this manager draws from.
 
@@ -194,7 +194,7 @@ class DataManager(InitArgMixin):
         Raises:
             C3liDataError: If the split holds no such part.
         """
-        parts = split_dataset(dataset, split, seed=seed)
+        parts = split_dataset(dataset, split, seed=root_seed(seed))
         try:
             return parts[part]
         except (KeyError, IndexError):

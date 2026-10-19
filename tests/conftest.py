@@ -6,10 +6,17 @@
 from pathlib import Path
 import h5py
 import numpy as np
+import pytest
 import torch
 
 np.random.seed(42)
 torch.manual_seed(42)
+
+
+@pytest.fixture(autouse=True)
+def seeded_torch():
+    """Seed torch before each test, which every unseeded default derives from."""
+    torch.manual_seed(42)
 
 
 def generate_sequential_hdf5(

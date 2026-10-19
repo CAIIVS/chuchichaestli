@@ -228,6 +228,14 @@ def test_the_same_split_seed_gives_the_same_part():
     assert other.dataset.indices != first
 
 
+def test_unseeded_streams_over_one_source_still_agree_on_the_split():
+    """Each manager splits on its own, so drawing a seed apiece would overlap them."""
+    shared = {"split": {"train": 0.8, "val": 0.2}, "batch_size": 4}
+    train = DataManager(Counting(20), part="train", **shared)
+    val = DataManager(Counting(20), part="val", **shared)
+    assert set(train.dataset.indices).isdisjoint(val.dataset.indices)
+
+
 def test_a_part_the_split_does_not_hold_says_what_it_does():
     """A typo in a stage config should not be a silent empty stream."""
     with pytest.raises(C3liDataError, match=r"holds \['train', 'val'\]"):

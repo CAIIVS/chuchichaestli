@@ -25,7 +25,12 @@ from chuchichaestli.programs.events import (
     filter_priority,
 )
 from chuchichaestli.programs.hooks import Console
-from chuchichaestli.utils.rng import restore_rng_state, seed_ambient
+from chuchichaestli.utils.rng import (
+    capture_rng_state,
+    restore_rng_state,
+    root_seed,
+    seed_ambient,
+)
 from chuchichaestli.programs.stages import Phase, Train
 from chuchichaestli.programs.topology import auto_topology, lockstep
 from chuchichaestli.programs.traits import (
@@ -122,7 +127,7 @@ class Runner:
     def __init__(
         self,
         program: Stage,
-        seed: int = 0,
+        seed: int | None = None,
         store: str | Path | None = None,
         resume: str | Path | int | None = None,
         hooks: Sequence[Hook] | None = None,
@@ -157,7 +162,7 @@ class Runner:
                 checkpoint a run resumes.
         """
         self.program = program
-        self.seed = seed
+        self.seed = seed if seed is not None or resume is not None else root_seed()
         self.store = Path(store).resolve() if store is not None else None
         self.resume = resume
         self.hooks = list(hooks) if hooks is not None else [Console()]
@@ -322,9 +327,19 @@ class Runner:
         Raises:
             C3liRunError: If any stage or hook aborted the run.
         """
+        caller = capture_rng_state()
+        try:
+            return self._run()
+        finally:
+            restore_rng_state(caller)
+
+    def _run(self) -> Progress:
+        """Execute the program within the run's own random state."""
         apply_backends_settings(self.backends)
         self._muted.clear()
         self._unplaced.clear()
+        if self.seed is None:
+            self.seed = self._resumed_seed()
         seed_ambient(self.seed)
         self.check()
         self._provision()
@@ -391,6 +406,13 @@ class Runner:
                     f"Closing the failed run also raised {exc!r}.", stacklevel=2
                 )
         return self.program.progress()
+
+    def _resumed_seed(self) -> int:
+        """Return the seed the run being resumed was seeded with, or torch's."""
+        store = self.checkpoints
+        if store is None:
+            return root_seed()
+        return int(store.read_manifest(self.resume).get("seed", root_seed()))
 
     def _name_run(self) -> str:
         """Return the run's name: the given one, the resumed one, or a new one."""

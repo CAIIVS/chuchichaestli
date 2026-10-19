@@ -25,7 +25,7 @@ organizes them in list.
 ## Minimal example
 
 `Runner` takes any stage, and a single stage needs no wrapper. Defaults fill
-in the rest: `optim="adamw"`, `lr=1e-4`, `hooks=[Console()]` and `seed=0`.
+in the rest: `optim="adamw"`, `lr=1e-4` and `hooks=[Console()]`.
 
 ```python
 Runner(Train(model=unet, data=train_ds, loss=nn.MSELoss(), epochs=10)).run()

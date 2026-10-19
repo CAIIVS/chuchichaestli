@@ -380,6 +380,19 @@ def test_a_resumed_run_ends_where_an_uninterrupted_one_does(tmp_path, at):
     assert identical(weights(whole), weights(carried))
 
 
+def test_an_unseeded_resume_takes_the_seed_of_the_run_it_resumes(tmp_path):
+    """Not torch's, which would draw the rest of the run from other streams."""
+    store = tmp_path / "run"
+    whole = uninterrupted(plain())
+    interrupted(plain(), store, at=5)
+    torch.manual_seed(0)
+    carried = plain()
+    runner = Runner(carried, store=store, resume="last", hooks=[])
+    runner.run()
+    assert runner.seed == 42
+    assert identical(weights(whole), weights(carried))
+
+
 def test_the_optimizer_and_schedule_come_back_too(tmp_path):
     """Matching weights would mean little if the state behind them differed."""
     store = tmp_path / "run"

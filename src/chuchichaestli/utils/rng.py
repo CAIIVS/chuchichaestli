@@ -19,6 +19,8 @@ import torch
 
 
 __all__ = [
+    "root_seed",
+    "draw_seed",
     "derive_seed",
     "rng_generator",
     "seed_ambient",
@@ -29,6 +31,26 @@ __all__ = [
 
 _MASK64 = 0xFFFFFFFFFFFFFFFF
 _MASK32 = 0xFFFFFFFF
+
+
+def root_seed(seed: int | None = None) -> int:
+    """Return the seed given, or the one torch was last seeded with.
+
+    Args:
+        seed: An explicit seed, or `None` for `torch.initial_seed()`.
+    """
+    return torch.initial_seed() if seed is None else seed
+
+
+def draw_seed(seed: int | None = None) -> int:
+    """Return the seed given, or a fresh one drawn from torch's global stream.
+
+    Args:
+        seed: An explicit seed, or `None` to draw one.
+    """
+    if seed is not None:
+        return seed
+    return int(torch.empty((), dtype=torch.int64).random_())
 
 
 def derive_seed(root: int, key: str) -> int:

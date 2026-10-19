@@ -79,6 +79,21 @@ def test_a_bare_stage_needs_no_program_wrapper():
     assert log == ["only"]
 
 
+def test_an_unseeded_run_takes_the_seed_torch_was_given():
+    """So `torch.manual_seed` alone makes a run reproducible."""
+    torch.manual_seed(17)
+    assert Runner(Call("only", fn=lambda c: None), hooks=[]).seed == 17
+
+
+def test_a_run_leaves_its_caller_random_state_as_it_found_it():
+    """The run seeds the global generators for itself, not for the script around it."""
+    torch.manual_seed(17)
+    expected = torch.rand(3)
+    torch.manual_seed(17)
+    Runner(Call("draw", fn=lambda c: torch.rand(5)), seed=3, hooks=[]).run()
+    assert (torch.initial_seed(), torch.equal(torch.rand(3), expected)) == (17, True)
+
+
 def test_run_brackets_the_program_with_run_events():
     """A trace always opens and closes."""
     hook = Record()

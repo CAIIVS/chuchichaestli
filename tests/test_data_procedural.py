@@ -176,6 +176,15 @@ class TestDerivedProceduralDataset:
         X_b, _ = _xy(ds_seed_b)
         assert not torch.equal(X_a, X_b)
 
+    def test_an_unseeded_dataset_draws_its_seed_from_torch(self):
+        """Two unseeded datasets differ, and repeat once torch is seeded again."""
+        torch.manual_seed(0)
+        first, second = HalfMoonsDataset(n_samples=N), HalfMoonsDataset(n_samples=N)
+        torch.manual_seed(0)
+        again = HalfMoonsDataset(n_samples=N)
+        assert not torch.equal(_xy(first)[0], _xy(second)[0])
+        assert torch.equal(_xy(first)[0], _xy(again)[0])
+
     @pytest.mark.parametrize("factory", DATASET_FACTORIES)
     def test_mmap_populated(self, factory):
         """Test _mmap content."""

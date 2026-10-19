@@ -6,7 +6,7 @@
 from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from torch.utils.data import Dataset, Subset, random_split
-from chuchichaestli.utils.rng import rng_generator
+from chuchichaestli.utils.rng import draw_seed, rng_generator
 
 
 __all__ = ["split_dataset"]
@@ -15,7 +15,7 @@ __all__ = ["split_dataset"]
 def split_dataset(
     dataset: Dataset,
     fractions: Sequence[float] | Mapping[str, float],
-    seed: int = 0,
+    seed: int | None = None,
     shuffle: bool = True,
 ) -> list[Subset] | dict[str, Subset]:
     """Divide a dataset into disjoint parts.
@@ -37,7 +37,9 @@ def split_dataset(
     if any(share <= 0 for share in shares):
         raise ValueError(f"Every fraction must be positive, got {shares}.")
 
-    parts = random_split(dataset, shares, generator=rng_generator(seed, "split"))
+    parts = random_split(
+        dataset, shares, generator=rng_generator(draw_seed(seed), "split")
+    )
     if not shuffle:
         start, contiguous = 0, []
         for part in parts:

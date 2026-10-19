@@ -27,7 +27,7 @@ from typing import Any
 from torch.utils.data import Dataset
 from chuchichaestli.data.base import CachingDataset, DataReturnTypes
 from chuchichaestli.utils import nbytes
-from chuchichaestli.utils.rng import rng_generator
+from chuchichaestli.utils.rng import draw_seed, rng_generator
 
 
 __all__ = [
@@ -63,7 +63,7 @@ class ProceduralDataset(CachingDataset, ABC):
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
         cache: int | float | str | bool | nbytes | None = None,
-        seed: int = 42,
+        seed: int | None = None,
         **kwargs,
     ):
         """Constructor.
@@ -84,7 +84,7 @@ class ProceduralDataset(CachingDataset, ABC):
         """
         self._req_samples = n_samples
         self.dim = dim
-        self.seed = seed
+        self.seed = draw_seed(seed)
 
         if cache is None:
             elem_bytes = torch.tensor(0, dtype=dtype).element_size()
@@ -760,7 +760,7 @@ class DensityDataset(Dataset):
         n_images: int = 64,
         side: int = 64,
         points: int = 64000,
-        seed: int = 42,
+        seed: int | None = None,
         dtype: torch.dtype = torch.float32,
         return_as: DataReturnTypes | None = "tuple",
         **kwargs,
@@ -783,6 +783,7 @@ class DensityDataset(Dataset):
             ValueError: If the cloud holds too few points for the images
                 asked for.
         """
+        seed = draw_seed(seed)
         cloud = (
             source(n_samples=n_images * points, seed=seed, **kwargs)
             if isinstance(source, type)

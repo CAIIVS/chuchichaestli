@@ -12,8 +12,10 @@ from chuchichaestli.utils.rng import (
     WorkerSeeder,
     capture_rng_state,
     derive_seed,
+    draw_seed,
     rng_generator,
     restore_rng_state,
+    root_seed,
     seed_ambient,
 )
 
@@ -76,3 +78,17 @@ def test_worker_seeds_differ_per_worker():
     zero = torch.randn(2)
     seeder(1)
     assert not torch.equal(torch.randn(2), zero)
+
+
+def test_root_seed_falls_back_on_the_seed_torch_was_given():
+    """An absent seed is the one `torch.manual_seed` set; a given one is kept."""
+    torch.manual_seed(17)
+    assert (root_seed(), root_seed(3)) == (17, 3)
+
+
+def test_draw_seed_draws_from_the_global_stream():
+    """Successive draws differ and repeat once torch is seeded again."""
+    torch.manual_seed(17)
+    first, second = draw_seed(), draw_seed()
+    torch.manual_seed(17)
+    assert (first != second, draw_seed(), draw_seed(3)) == (True, first, 3)
