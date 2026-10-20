@@ -44,6 +44,8 @@ it by — `"x"` for the samples, `"c"` for the condition. Those names are what
 `inputs=`, `targets=` and `condition=` refer to later.
 
 ```python
+--8<-- "examples/programs_diffusion.py:imports"
+
 --8<-- "examples/programs_diffusion.py:setup"
 ```
 
@@ -82,6 +84,12 @@ epoch the run had reached.
 and `Every(n, ...)` runs them on every nth epoch.
 
 ```python
+--8<-- "examples/programs_diffusion.py:program"
+```
+
+`Runner` runs the program with a set of hooks.
+
+```python
 --8<-- "examples/programs_diffusion.py:run"
 ```
 
@@ -103,11 +111,12 @@ measured at, the best one is never pruned, and `resume="best"` or
 
 [`examples/programs_gan.py`](https://github.com/CAIIVS/chuchichaestli/blob/main/examples/programs_gan.py)
 fits the same task with a Pix2Pix GAN. It is the reference for **two models
-trained against each other in one stage**, and reads the same paired dataset
-as above.
+trained against each other in one stage**. It reads the same data, scores and
+previews its samples the same way and runs with the same hooks as the diffusion
+example, so only what differs is shown here, starting with the imports.
 
 ```python
---8<-- "examples/programs_gan.py:setup"
+--8<-- "examples/programs_gan.py:imports"
 ```
 
 Two models, so the program binds two names. The generator maps one channel to
@@ -121,7 +130,8 @@ joined to a sample.
 A GAN is one `Train` stage with two update groups. Each `Term` names the
 groups it feeds, `Alternating` steps them in turn, and each optimizer owns the
 parameters its `params=` names — which is how one stage trains two models
-without either optimizer touching the other's weights.
+without either optimizer touching the other's weights. `Predict` runs the
+generator once per batch, so it needs no `draw=`.
 
 ```python
 --8<-- "examples/programs_gan.py:stages"
@@ -145,12 +155,12 @@ reference term's at a named parameter, so the ratio tracks training instead of
 being guessed once: over this run it moves from about 5 to 0.005 as the L1
 term converges and the adversarial one grows.
 
-```python
---8<-- "examples/programs_gan.py:run"
-```
+The program provides both models by name; the phases are the diffusion
+example's.
 
-The run is shaped like the diffusion one — same phases, same hooks — so the
-program above is the only part that differs.
+```python
+--8<-- "examples/programs_gan.py:program"
+```
 
 ## Context bindings
 

@@ -33,7 +33,6 @@ Run from repository root (plotting needs `chuchichaestli[viz]`):
 ```
 """
 
-# --8<-- [start:setup]
 import sys
 import tempfile
 from pathlib import Path
@@ -42,18 +41,13 @@ from torch import nn
 from chuchichaestli.data import ConditionalDensityDataset, HalfMoonsDataset
 from chuchichaestli.data.split import split_dataset
 from chuchichaestli.metrics import FID, PSNR, SSIM
-from chuchichaestli.models.adversarial.discriminator import PatchDiscriminator
 from chuchichaestli.models.unet import UNet
 from chuchichaestli.programs import (
-    Alternating,
     Checkpointer,
     Console,
-    Criterion,
-    DiscriminatorAdv,
     Eval,
     EventType,
     Every,
-    GeneratorAdv,
     ImageExport,
     Predict,
     Program,
@@ -64,14 +58,24 @@ from chuchichaestli.programs import (
     Phase,
     Train,
 )
-from chuchichaestli.training import AdaptiveWeight, OptimSpec, Term
+from chuchichaestli.training import OptimSpec, Term
 
-EPOCHS = 32
+# --8<-- [start:imports]
+from chuchichaestli.models.adversarial.discriminator import PatchDiscriminator
+from chuchichaestli.programs import (
+    Alternating,
+    Criterion,
+    DiscriminatorAdv,
+    GeneratorAdv,
+)
+from chuchichaestli.training import AdaptiveWeight
+# --8<-- [end:imports]
+
+# --8<-- [start:setup]
 STORE = Path(tempfile.mkdtemp()) / "store"
-SEED = 42
-torch.manual_seed(SEED)
+torch.manual_seed(42)
 
-# Create an image dataset of half moons
+# Create an image dataset of half moons, each paired with a coarse copy
 pairs = ConditionalDensityDataset(
     source=HalfMoonsDataset,
     n_images=64,
@@ -79,9 +83,8 @@ pairs = ConditionalDensityDataset(
     points=16384,
     noise=0.05,
     return_as={"x": 0, "c": 1},
-    seed=SEED,
 )
-dataset, validation = split_dataset(pairs, (0.8, 0.2), seed=SEED)
+dataset, validation = split_dataset(pairs, (0.8, 0.2))
 # --8<-- [end:setup]
 
 # --8<-- [start:model]
@@ -106,6 +109,8 @@ disc = PatchDiscriminator(
 # --8<-- [end:model]
 
 # --8<-- [start:stages]
+EPOCHS = 32
+
 # Training stage using the Pix2Pix objective (weighted L1 + adversarial), the
 # adversarial term weighed against L1's gradient at the generator's last layer.
 # Both take the same `variant` ("bce", "hinge", "least_squares", "wasserstein").
@@ -154,6 +159,7 @@ sampling = Predict(
     inputs="c",
     targets="x",
 )
+# --8<-- [end:stages]
 
 # Runs evaluation on published (predictions with GTs)
 scoring = Eval(
@@ -174,9 +180,8 @@ preview = ImageExport(
     cmap="magma",
     normalize="shared",
 )
-# --8<-- [end:stages]
 
-# --8<-- [start:run]
+# --8<-- [start:program]
 # Compose a program with training and validation stage...
 program = Program(
     provide={"model": model, "disc": disc},
@@ -188,11 +193,11 @@ program = Program(
         )
     ],
 )
+# --8<-- [end:program]
 
 # ...and run it with multiple hooks
 Runner(
     program,
-    seed=SEED,
     hooks=[
         Console(every=1, timing=True),
         Timer(stream=sys.stdout, depth=1),
@@ -203,7 +208,6 @@ Runner(
     store=STORE,
     device="cpu",
 ).run()
-# --8<-- [end:run]
 
 print(f"\nTook {training.total_steps} optimization steps over {EPOCHS} passes")
 print(f"Averaged weights are published as {'model/ema'!r}")

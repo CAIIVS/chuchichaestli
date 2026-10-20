@@ -26,7 +26,7 @@ Run from repository root (plotting needs `chuchichaestli[viz]`):
 ```
 """
 
-# --8<-- [start:setup]
+# --8<-- [start:imports]
 import sys
 import tempfile
 from pathlib import Path
@@ -56,13 +56,13 @@ from chuchichaestli.programs import (
     Train,
 )
 from chuchichaestli.training import OptimSpec, Term
+# --8<-- [end:imports]
 
-EPOCHS = 128
+# --8<-- [start:setup]
 STORE = Path(tempfile.mkdtemp()) / "store"
-SEED = 42
-torch.manual_seed(SEED)
+torch.manual_seed(42)
 
-# Create an image dataset of half moons
+# Create an image dataset of half moons, each paired with a coarse copy
 pairs = ConditionalDensityDataset(
     source=HalfMoonsDataset,
     n_images=64,
@@ -70,9 +70,8 @@ pairs = ConditionalDensityDataset(
     points=16384,
     noise=0.05,
     return_as={"x": 0, "c": 1},
-    seed=SEED,
 )
-dataset, validation = split_dataset(pairs, (0.8, 0.2), seed=SEED)
+dataset, validation = split_dataset(pairs, (0.8, 0.2))
 # --8<-- [end:setup]
 
 # --8<-- [start:model]
@@ -93,6 +92,8 @@ process = DDPM(num_timesteps=200, device="cpu")
 # --8<-- [end:model]
 
 # --8<-- [start:stages]
+EPOCHS = 128
+
 # Training stage using a custom objective (MSE + 0.1 x MAE)
 training = Train(
     "train_denoising",
@@ -143,7 +144,7 @@ preview = ImageExport(
 )
 # --8<-- [end:stages]
 
-# --8<-- [start:run]
+# --8<-- [start:program]
 # Compose a program with training and validation stage...
 program = Program(
     provide={"model": model},
@@ -155,11 +156,12 @@ program = Program(
         )
     ],
 )
+# --8<-- [end:program]
 
+# --8<-- [start:run]
 # ...and run it with multiple hooks
 Runner(
     program,
-    seed=SEED,
     hooks=[
         Console(every=1, timing=True),
         Timer(stream=sys.stdout, depth=1),
