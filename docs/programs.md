@@ -25,7 +25,8 @@ organizes them in list.
 ## Minimal example
 
 `Runner` takes any stage, and a single stage needs no wrapper. Defaults fill
-in the rest: `optim="adamw"`, `lr=1e-4` and `hooks=[Console()]`.
+in the rest: `optim="adamw"`, `lr=1e-4` and `hooks=[Console()]`. A step with
+non-finite gradients stops the run; `Train(nonfinite=...)` chooses otherwise.
 
 ```python
 Runner(Train(model=unet, data=train_ds, loss=nn.MSELoss(), epochs=10)).run()
@@ -96,30 +97,6 @@ the monitored value improves, reading it as `EarlyStop` does, e.g. the metric
 an `Eval` stage reports as it ends. Each checkpoint records the value it was
 measured at, the best one is never pruned, and `resume="best"` or
 `CheckpointStore(root).load("best")` reads it back.
-
-A step whose gradients are not finite stops the run with a `C3liRunError`
-naming the stage and step, before the optimizer writes NaN into the weights.
-`Train(nonfinite="skip")` leaves such a step out instead, with a warning, and
-`nonfinite="ignore"` steps anyway, sparing the check its device sync. Under
-`precision=torch.float16` the grad scaler skips non-finite steps itself.
-
-A hook can also watch each step's gradients. One defining `on_gradients`
-and setting `watches_gradients = True` is a `GradientHook`: it is handed each
-update group's parameters once the micro-batches are in, averaged across
-processes and unscaled, before they are clipped and checked, with a `norm()`
-that returns their total norm, computed once for every hook and the clipping
-alike, and only if one asks. Nothing is emitted, so traces stay as they are.
-
-```python
-class GradNorms:
-    watches_gradients = True
-
-    def on(self, event):
-        return Signal.GO
-
-    def on_gradients(self, params, norm, group, path):
-        print(path, group, float(norm()))
-```
 
 
 ## Adversarial Training
