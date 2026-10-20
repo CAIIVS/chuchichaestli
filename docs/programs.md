@@ -333,7 +333,6 @@ above, sent to TensorBoard as well:
 ```python
 Runner(
     program,
-    seed=SEED,
     hooks=[
         Console(every=1, timing=True),
         Timer(stream=sys.stdout, depth=1),
@@ -354,6 +353,51 @@ Three backends ship with the package, each behind its own extra:
 | `TensorBoard()` | `chuchichaestli[tensorboard]` | `<store>/tensorboard/<project>/<experiment>/<run_name>` |
 | `Wandb(entity=..., mode=...)` | `chuchichaestli[wandb]` | your W&B account; `mode="offline"` keeps it local |
 | `MLflow(tracking_uri=...)` | `chuchichaestli[mlflow]` | one SQLite file, `<store>/mlflow.db` |
+
+`examples/programs_tensorboard.py`, `programs_wandb.py` and
+`programs_mlflow.py` each log a run entirely locally. They read the diffusion
+example's data, but train a small convolutional upsampler, which takes well
+under a minute on a CPU.
+
+```python
+--8<-- "examples/programs_tensorboard.py:model"
+
+--8<-- "examples/programs_tensorboard.py:program"
+```
+
+The run is stopped halfway by `CancelAfter` and resumed, so the backend shows
+how a resumed run carries on.
+
+```python
+--8<-- "examples/programs_tensorboard.py:run"
+```
+
+The three scripts differ only in the tracker, and each prints how to look at
+the result.
+
+=== "TensorBoard"
+
+    ```python
+    --8<-- "examples/programs_tensorboard.py:imports"
+
+    --8<-- "examples/programs_tensorboard.py:tracker"
+    ```
+
+=== "W&B"
+
+    ```python
+    --8<-- "examples/programs_wandb.py:imports"
+
+    --8<-- "examples/programs_wandb.py:tracker"
+    ```
+
+=== "MLflow"
+
+    ```python
+    --8<-- "examples/programs_mlflow.py:imports"
+
+    --8<-- "examples/programs_mlflow.py:tracker"
+    ```
 
 The runner names the run once (`project=`, `experiment=`, `run_name=`; a
 `run_name` is drawn when you give none) and every tracker files it under those
