@@ -199,9 +199,10 @@ state, and the same trace.
 --8<-- "examples/programs_resume.py:resume"
 ```
 
-`resume=` takes `"last"`, `"last~N"` for N checkpoints earlier, `"best"` for
-the best-scored one, or a path to one. A run that *finished* records no stage state — a `Phase` saves only the
-child it is in the middle of — so resuming its last checkpoint does nothing.
+`resume=` takes `"last"`, `"last~N"` for N checkpoints earlier, `"first"`,
+an index, `"best"` for the best-scored one, or a path to one. A run that
+*finished* records no stage state — a `Phase` saves only the child it is in
+the middle of — so resuming its last checkpoint does nothing.
 To carry on training from finished weights, `Load` them into a `Finetune`
 stage instead, which starts an optimizer of its own.
 
@@ -259,7 +260,7 @@ with the file is all that separates them.
 | stage | writes | kind | suffix picks |
 |---|---|---|---|
 | `WeightsExport` | a binding's `state_dict`, with its model spec when it records one, atomically | `weights` | `.safetensors`, `.pt`, `.pth` |
-| `ImageExport` | one file per image | `image` | `.png`, `.jpg`, `.webp`, `.tif`, `.pdf`, `.svg` |
+| `ImageExport` | one file per image | `image` | `.png`, `.jpg`, `.jpeg`, `.webp`, `.tif`, `.tiff`, `.pdf`, `.svg` |
 | `ArchiveExport` | samples, and their truths beside them | `tensor` | any suffix under [Archives](#archives) |
 
 Every export is announced with an `EXPORTED` event carrying the `files`
@@ -268,10 +269,10 @@ written, their `kind` and the `source` binding, identical on every rank. A
 kind `tensor`, and a `Checkpointer` each checkpoint it writes, with kind
 `checkpoint`, so hooks such as `Jsonl` see every file a run leaves.
 
-A path with an `{epoch}`, `{step}` or `{advance}` field numbers the exports by
-where the run had got to, so a stage entered every few epochs leaves its own
-files rather than overwriting the last ones. An inference pass is not an
-epoch: `Predict` and `Eval` loops report `trains=False`, so only a loop that
+A path with an `{epoch}`, `{step}`, `{advance}` or `{name}` field numbers the
+exports by where the run had got to, so a stage entered every few epochs leaves
+its own files rather than overwriting the last ones. An inference pass is not
+an epoch: `Predict` and `Eval` loops report `trains=False`, so only a loop that
 updates the model moves the epoch and step counters. `Checkpointer(unit=...)`
 counts the same way. A checkpoint records the counters, so a resumed run
 carries on numbering where it stopped.
@@ -279,7 +280,7 @@ carries on numbering where it stopped.
 ```python
 ImageExport(
     "preview",
-    path=WORK / "samples_{epoch:02d}.png",
+    path=STORE / "samples_{epoch:02d}.png",
     source="sample/pairs",
     labels=("sampled", "gt"),
     limit=4,
@@ -406,7 +407,7 @@ continues the same backend run, on the same step axis.
 
 What is logged is a `TrackingPolicy`. By default that is each training step's
 losses, rate and gradient norm, each pass's duration, throughput and peak
-memory, each stage's closing scores (`check/mse`), a config of the run (its
+memory, each stage's closing scores (`eval/mse`), a config of the run (its
 seed, every stage's settings, the models' specs and sizes, versions, device and
 the repository's commit, with a dirty repository's diff as `git.patch`), a
 record of each checkpoint, and the images and archives the exporters write.

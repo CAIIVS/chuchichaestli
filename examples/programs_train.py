@@ -71,7 +71,6 @@ program = Program(provide={"model": model}, stages=[training])
 # The runner drives the program and reports every event to its hooks
 Runner(
     program,
-    seed=42,
     hooks=[
         Console(every=1, timing=True),
         Checkpointer(every=1, unit="epoch"),

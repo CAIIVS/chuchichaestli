@@ -254,7 +254,7 @@ share. `model="model"` names a binding instead of holding the module.
 ```
 
 The objective is a list of named `Term`s: the stage reports them as a composite
-loss, for instance `loss=0.06419 mse=0.04953 mae=0.1466`. A single `loss=` 
+loss, for instance `loss=0.07237 mse=0.05756 mae=0.1481`. A single `loss=` 
 argument is shorthand for one unnamed term.
 
 Nothing has run yet — a program is a description. `Runner` executes it and
