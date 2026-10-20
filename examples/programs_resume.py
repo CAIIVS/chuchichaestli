@@ -39,14 +39,14 @@ from chuchichaestli.programs import (
 from chuchichaestli.training import OptimSpec
 
 STORE = Path(tempfile.mkdtemp()) / "store"
-SEED = 42
-torch.manual_seed(SEED)
 # --8<-- [end:setup]
 
 
 # --8<-- [start:program]
 def build_program() -> Program:
     """Return a fresh copy of the program under test."""
+    # as a new process would, so both copies draw the same data and weights
+    torch.manual_seed(42)
     model = nn.Sequential(nn.Linear(2, 16), nn.ReLU(), nn.Linear(16, 1), nn.Flatten(0))
     stage = Train(
         "fit",
@@ -57,6 +57,8 @@ def build_program() -> Program:
         optim=OptimSpec.sgd(lr=0.1).with_exponential_schedule(0.9),
     )
     return Program(provide={"model": model}, stages=[stage])
+
+
 # --8<-- [end:program]
 
 
@@ -64,7 +66,6 @@ def build_program() -> Program:
 first_round = build_program()
 Runner(
     first_round,
-    seed=42,
     store=STORE,
     hooks=[Checkpointer(every=1, unit="epoch"), Jsonl("first.jsonl")],
     device="cpu",
@@ -75,10 +76,9 @@ program = build_program()
 # --8<-- [start:resume]
 Runner(
     program,
-    seed=42,
     store=STORE,
     resume="last~2",
-    hooks=[Jsonl("second_round.jsonl")],
+    hooks=[Jsonl("second.jsonl")],
     device="cpu",
 ).run()
 # --8<-- [end:resume]
