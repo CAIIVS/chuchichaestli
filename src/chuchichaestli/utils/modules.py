@@ -15,6 +15,7 @@ from torch.overrides import TorchFunctionMode
 from typing import Any, Literal
 from collections.abc import Sequence, Iterable, Callable
 from chuchichaestli.utils import nested_list_size, prod, map_nested
+from chuchichaestli.utils.rng import seeded_rand
 
 try:
     from torch.nn.parameter import is_lazy
@@ -601,7 +602,7 @@ def info_forward_pass(
         ):
             input_shape = [input_shape]
         for s in input_shape:
-            input_tensor = torch.rand(*s)
+            input_tensor = seeded_rand(*s)
             if batch_dim is not None:
                 input_tensor = input_tensor.unsqueeze(dim=batch_dim)
             input_tensor = input_tensor if device is None else input_tensor.to(device)
@@ -611,7 +612,7 @@ def info_forward_pass(
         x = []
         input_shape = [_infer_input_shape(model, init_size=size, dtype=input_dtype)]
         for s in input_shape:
-            input_tensor = torch.rand(*s)
+            input_tensor = seeded_rand(*s)
             if batch_dim is not None:
                 input_tensor = input_tensor.unsqueeze(dim=batch_dim)
             input_tensor = input_tensor if device is None else input_tensor.to(device)
@@ -729,7 +730,7 @@ def trace_dataflow(
         and isinstance(shapes[0], int)
     ):
         shapes = [shapes]
-    inputs = [torch.rand(*s).to(device).type(input_dtype) for s in shapes]
+    inputs = [seeded_rand(*s, device=device, dtype=input_dtype) for s in shapes]
 
     provenance: dict[int, set[int]] = {}
     edges: dict[int, set[int]] = {}
@@ -989,7 +990,7 @@ def _infer_input_shape(
     if isinstance(first_layer, nn.Conv2d):
         in_channels = first_layer.in_channels
         for size in range(init_size, max_size + 1, init_size):
-            x = torch.randn(1, in_channels, size, size, device=device).type(dtype)
+            x = seeded_rand(1, in_channels, size, size, device=device, dtype=dtype)
             try:
                 with torch.no_grad():
                     model(x)
@@ -999,8 +1000,8 @@ def _infer_input_shape(
     elif isinstance(first_layer, nn.Conv3d):
         in_channels = first_layer.in_channels
         for size in range(init_size, max_size + 1, init_size):
-            x = torch.randn(1, in_channels, size, size, size // 2, device=device).type(
-                dtype
+            x = seeded_rand(
+                1, in_channels, size, size, size // 2, device=device, dtype=dtype
             )
             try:
                 with torch.no_grad():
@@ -1009,21 +1010,14 @@ def _infer_input_shape(
             except RuntimeError:
                 continue
     elif isinstance(first_layer, nn.Linear):
-        in_features = first_layer.in_features
-        x = torch.randn(1, in_features, device=device)
-        return x.shape
+        return torch.Size((1, first_layer.in_features))
     elif isinstance(first_layer, nn.Embedding):
-        x = torch.randint(0, first_layer.num_embeddings, (1, 16), device=device).type(
-            dtype
-        )
-        return x.shape
+        return torch.Size((1, 16))
     elif isinstance(first_layer, nn.LSTM | nn.GRU | nn.RNN):
         input_size = first_layer.input_size
         if getattr(first_layer, "batch_first", False):
-            x = torch.randn(1, 16, input_size, device=device).type(dtype)
-        else:
-            x = torch.randn(16, 1, input_size, device=device).type(dtype)
-        return x.shape
+            return torch.Size((1, 16, input_size))
+        return torch.Size((16, 1, input_size))
     # No shape could be inferred from the model's first layer.
     raise RuntimeError(
         f"Could not infer an input shape for {model.__class__.__name__} "

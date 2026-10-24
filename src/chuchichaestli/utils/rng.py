@@ -21,6 +21,7 @@ import torch
 __all__ = [
     "root_seed",
     "draw_seed",
+    "seeded_rand",
     "derive_seed",
     "rng_generator",
     "seed_ambient",
@@ -51,6 +52,24 @@ def draw_seed(seed: int | None = None) -> int:
     if seed is not None:
         return seed
     return int(torch.empty((), dtype=torch.int64).random_())
+
+
+def seeded_rand(
+    *shape: int,
+    seed: int = 0,
+    device: torch.device | str | None = None,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    """Return uniform noise drawn from its own seed.
+
+    Args:
+        shape: Size of the tensor.
+        seed: Seed the noise is drawn from.
+        device: Device to put it on.
+        dtype: Type to give it.
+    """
+    noise = torch.rand(*shape, generator=torch.Generator().manual_seed(seed))
+    return noise.to(device=device, dtype=dtype)
 
 
 def derive_seed(root: int, key: str) -> int:

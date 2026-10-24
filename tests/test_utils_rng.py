@@ -13,6 +13,7 @@ from chuchichaestli.utils.rng import (
     capture_rng_state,
     derive_seed,
     draw_seed,
+    seeded_rand,
     rng_generator,
     restore_rng_state,
     root_seed,
@@ -92,3 +93,15 @@ def test_draw_seed_draws_from_the_global_stream():
     first, second = draw_seed(), draw_seed()
     torch.manual_seed(17)
     assert (first != second, draw_seed(), draw_seed(3)) == (True, first, 3)
+
+
+def test_seeded_rand_repeats_per_seed_and_draws_nothing_globally():
+    """The same seed gives the same noise, and the global stream stays put."""
+    torch.manual_seed(0)
+    expected = torch.rand(2)
+    torch.manual_seed(0)
+    first, again = seeded_rand(2, 3), seeded_rand(2, 3, dtype=torch.float64)
+    other = seeded_rand(2, 3, seed=1)
+    assert torch.equal(first.double(), again)
+    assert not torch.equal(first, other)
+    assert torch.equal(torch.rand(2), expected)

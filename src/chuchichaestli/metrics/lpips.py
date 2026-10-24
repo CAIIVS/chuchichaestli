@@ -27,6 +27,7 @@ from chuchichaestli.utils.tensors import (
 )
 from chuchichaestli.models.blocks import BaseConvBlock
 from chuchichaestli.utils import partialclass
+from chuchichaestli.utils.rng import seeded_rand
 from typing import Any, Literal
 from collections.abc import Iterable, Sequence, Callable
 
@@ -102,7 +103,7 @@ class FeatureExtractor(Module):
     def feature_channels(self):
         """Feature channels of the extractor's output."""
         if not hasattr(self, "_feature_channels"):
-            sample = torch.rand((1, 1, *self.input_size))
+            sample = seeded_rand(1, 1, *self.input_size)
             features = self(sample)
             channels = [feature.shape[1] for feature in features]
             self._feature_channels = channels
