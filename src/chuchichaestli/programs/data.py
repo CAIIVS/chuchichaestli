@@ -69,7 +69,8 @@ class DataManager(InitArgMixin):
             batch_size: Samples per batch when no sampler is given.
             batches: A batch sampler or an explicit list of index lists,
                 for variable-size batches. Its contents are used as given.
-            shuffle: Whether the batch order is permuted each epoch.
+            shuffle: Whether the batch order is permuted each epoch; a sampler
+                that shuffles asks for it too.
             drop_last: Whether a short final batch is discarded.
             num_workers: Dataloader worker processes.
             collate_fn: Builds a batch from the samples it indexes.
@@ -94,7 +95,7 @@ class DataManager(InitArgMixin):
             ValueError: If a number is out of range, if `split` and `part` are
                 not given together, or if a worker option was given without
                 workers to apply it to.
-            C3liDataError: If a sampler was given that shuffles itself.
+            C3liDataError: If the split holds no such part.
         """
         if batch_size < 1:
             raise ValueError(
@@ -103,13 +104,6 @@ class DataManager(InitArgMixin):
         if num_workers < 0:
             raise ValueError(
                 f"A data manager needs no negative workers, got {num_workers!r}."
-            )
-        if getattr(batches, "shuffle", False):
-            raise C3liDataError(
-                f"{type(batches).__name__} was given shuffle=True, which draws "
-                "from the global generator and so would order batches "
-                "differently on a resume. Construct it with shuffle=False and "
-                "let DataManager(shuffle=...) do the ordering."
             )
         if timeout < 0:
             raise ValueError(
@@ -136,7 +130,8 @@ class DataManager(InitArgMixin):
         self.part = part
         self.split_seed = split_seed
         self.batch_size = batch_size
-        self.shuffle = shuffle
+        # the batches are read once, so a sampler's shuffling is done here instead
+        self.shuffle = shuffle or getattr(batches, "shuffle", False)
         self.drop_last = drop_last
         self.num_workers = num_workers
         self.collate_fn = collate_fn
@@ -282,7 +277,7 @@ class DataManager(InitArgMixin):
         return per_rank - len(range(rank, len(plan), world_size))
 
     def iter(self, ctx: Context, epoch: int = 0, seek: int = 0) -> Iterator[BatchType]:
-        """Iterate this process's batches for one epoch, each loaded under a seed of its own.
+        """Iterate this process's batches for one epoch, each under a seed of its own.
 
         Args:
             ctx: Context the order and the seeds derive from.

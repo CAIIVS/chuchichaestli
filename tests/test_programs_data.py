@@ -180,11 +180,14 @@ def test_a_sampler_plan_survives_a_seek():
     assert drawn(stream, ctx(), seek=2) == [[3, 4, 5], [6]]
 
 
-def test_a_self_shuffling_sampler_is_refused():
-    """It draws from the global generator, so a resume would reorder."""
-    sampler = HierarchicalBatchSampler([[0, 1], [2, 3]], shuffle=True)
-    with pytest.raises(C3liDataError, match="shuffle=True"):
-        DataManager(Counting(4), batches=sampler)
+def test_a_shuffling_sampler_has_its_batches_shuffled_each_epoch():
+    """The batches are read once, so the manager does the sampler's shuffling."""
+    batches = [[i, i + 1] for i in range(0, 16, 2)]
+    sampler = HierarchicalBatchSampler(batches, shuffle=True, seed=3)
+    stream = DataManager(Counting(16), batches=sampler, shuffle=False)
+    first, second = stream.plan(ctx(), epoch=0), stream.plan(ctx(), epoch=1)
+    assert first != second
+    assert sorted(first) == sorted(second) == batches
 
 
 @pytest.mark.parametrize("kwargs", [{"batch_size": 0}, {"num_workers": -1}])

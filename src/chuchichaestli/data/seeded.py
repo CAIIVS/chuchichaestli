@@ -14,7 +14,7 @@ __all__ = ["SeededBatches"]
 
 
 class SeededBatches(Dataset):
-    """A dataset loading each batch under a seed derived from the epoch and its indices."""
+    """A dataset loading each batch under a seed from the epoch and its indices."""
 
     def __init__(self, dataset: Dataset, seed: int | None = None):
         """Constructor.
