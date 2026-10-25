@@ -18,11 +18,12 @@ from torch.utils.data import (
     SequentialSampler,
 )
 from chuchichaestli.data.batch import BatchType
+from chuchichaestli.data.seeded import SeededBatches
 from chuchichaestli.data.split import split_dataset
 from chuchichaestli.programs.context import Context
 from chuchichaestli.programs.traits import Topology
 from chuchichaestli.utils.functools import InitArgMixin
-from chuchichaestli.utils.rng import rng_generator, root_seed
+from chuchichaestli.utils.rng import derive_seed, root_seed
 
 
 __all__ = ["DataManager", "C3liDataError"]
@@ -78,8 +79,8 @@ class DataManager(InitArgMixin):
             prefetch_factor: Batches each worker loads ahead.
             persistent_workers: Whether workers outlive one epoch.
             multiprocessing_context: How workers are started, e.g. `"spawn"`.
-            seed: Root the loader's own generator derives from, epoch by
-                epoch; taken from the context when absent.
+            seed: Root the loader's generator and each batch's seed derive
+                from, epoch by epoch; taken from the context when absent.
             split: Shares to divide the dataset into, for drawing train and
                 evaluation batches from one source. Every manager splitting
                 the same dataset must pass the same shares and `split_seed`.
@@ -281,10 +282,10 @@ class DataManager(InitArgMixin):
         return per_rank - len(range(rank, len(plan), world_size))
 
     def iter(self, ctx: Context, epoch: int = 0, seek: int = 0) -> Iterator[BatchType]:
-        """Iterate this process's batches for one epoch.
+        """Iterate this process's batches for one epoch, each loaded under a seed of its own.
 
         Args:
-            ctx: Context the order and the worker seeds derive from.
+            ctx: Context the order and the seeds derive from.
             epoch: Which pass over the dataset.
             seek: Batches to skip, for resuming part-way through an epoch.
         """
@@ -292,13 +293,14 @@ class DataManager(InitArgMixin):
         if not plan:
             return iter(())
         key = f"data/epoch={epoch}"
+        seed = self._seed(ctx, key)
         loader = DataLoader(
-            self.dataset,
+            SeededBatches(self.dataset, seed),
             batch_sampler=plan,
             num_workers=self.num_workers,
             collate_fn=self.collate_fn,
             worker_init_fn=ctx.seeder(key) if self.num_workers else None,
-            generator=self._generator(ctx, key),
+            generator=torch.Generator().manual_seed(seed),
             pin_memory=self.pin_memory,
             pin_memory_device=self.pin_memory_device,
             timeout=self.timeout,
@@ -312,13 +314,13 @@ class DataManager(InitArgMixin):
         )
         return iter(loader)
 
-    def _generator(self, ctx: Context, key: str) -> torch.Generator:
-        """Return the generator the loader seeds its workers from.
+    def _seed(self, ctx: Context, key: str) -> int:
+        """Return the seed a pass's loader and batches derive their randomness from.
 
         Args:
             ctx: Context the seed derives from when none was pinned.
             key: Names the random stream within the run.
         """
         if self.seed is None:
-            return ctx.rng(key)
-        return rng_generator(self.seed, key)
+            return ctx.seed_for(key)
+        return derive_seed(self.seed, key)

@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for deterministically ordered, resumable passes over a dataset."""
 
+import random
+
+import numpy as np
 import pytest
 import torch
 
@@ -32,6 +35,31 @@ class Counting(torch.utils.data.Dataset):
             index: Which sample.
         """
         return torch.tensor(index)
+
+
+class Augmented(torch.utils.data.Dataset):
+    """A dataset jittering each sample with torch's, numpy's and python's generators."""
+
+    def __init__(self, n: int):
+        """Constructor.
+
+        Args:
+            n: How many samples.
+        """
+        self.n = n
+
+    def __len__(self) -> int:
+        """Number of samples."""
+        return self.n
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        """Return the index beside a draw from each global generator.
+
+        Args:
+            index: Which sample.
+        """
+        draws = [float(torch.rand(())), float(np.random.rand()), random.random()]
+        return torch.tensor([index, *draws], dtype=torch.float64)
 
 
 class Ranks:
@@ -287,19 +315,19 @@ def test_a_negative_timeout_is_refused():
 def test_the_loader_generator_is_derived_when_none_is_pinned():
     """Torch seeds its workers from it, so it must not be left to chance."""
     stream = DataManager(Counting(12), batch_size=3)
-    first = stream._generator(ctx(), "data/epoch=0").initial_seed()
-    assert stream._generator(ctx(), "data/epoch=0").initial_seed() == first
-    assert stream._generator(ctx(seed=8), "data/epoch=0").initial_seed() != first
-    assert stream._generator(ctx(), "data/epoch=1").initial_seed() != first
+    first = stream._seed(ctx(), "data/epoch=0")
+    assert stream._seed(ctx(), "data/epoch=0") == first
+    assert stream._seed(ctx(seed=8), "data/epoch=0") != first
+    assert stream._seed(ctx(), "data/epoch=1") != first
 
 
 def test_a_pinned_seed_replaces_the_runs_but_still_derives():
     """A generator fixed for the whole run would repeat every epoch."""
     stream = DataManager(Counting(12), batch_size=3, seed=1234)
-    first = stream._generator(ctx(), "data/epoch=0").initial_seed()
-    assert stream._generator(ctx(seed=8), "data/epoch=0").initial_seed() == first
-    assert stream._generator(ctx(), "data/epoch=1").initial_seed() != first
-    assert stream._generator(ctx(), "data/epoch=0").initial_seed() == first
+    first = stream._seed(ctx(), "data/epoch=0")
+    assert stream._seed(ctx(seed=8), "data/epoch=0") == first
+    assert stream._seed(ctx(), "data/epoch=1") != first
+    assert stream._seed(ctx(), "data/epoch=0") == first
 
 
 @pytest.mark.parametrize("world", [2, 3, 4, 8])
@@ -338,3 +366,50 @@ def test_padding_repeats_batches_rather_than_dropping_them(batches, world):
         for batch in stream.shard(plan, Ranks(rank, world))
     ]
     assert {tuple(batch) for batch in dealt} == {tuple(batch) for batch in plan}
+
+
+def augmented(stream: DataManager, context: Context, **kwargs) -> list:
+    """Return a pass's batches as lists.
+
+    Args:
+        stream: What to draw from.
+        context: Context the order and the seeds derive from.
+        kwargs: Passed on to `DataManager.iter`.
+    """
+    return [batch.tolist() for batch in stream.iter(context, **kwargs)]
+
+
+def test_an_augmentation_does_not_depend_on_the_worker_count():
+    """Each sample draws from its index alone, so who loads it does not matter."""
+    alone = augmented(DataManager(Augmented(12), batch_size=3), ctx())
+    shared = DataManager(
+        Augmented(12), batch_size=3, num_workers=2, multiprocessing_context="spawn"
+    )
+    assert augmented(shared, ctx()) == alone
+
+
+def test_a_resumed_pass_draws_the_augmentations_an_uninterrupted_one_does():
+    """Seeking past batches must not shift what the rest of the pass draws."""
+    stream = DataManager(Augmented(12), batch_size=3)
+    assert augmented(stream, ctx(), seek=2) == augmented(stream, ctx())[2:]
+
+
+def test_each_epoch_augments_anew():
+    """The same epoch repeats its draws; the next one draws others."""
+    stream = DataManager(Augmented(12), batch_size=3, shuffle=False)
+    first = augmented(stream, ctx(), epoch=0)
+    assert augmented(stream, ctx(), epoch=0) == first
+    assert augmented(stream, ctx(), epoch=1) != first
+
+
+def test_loading_in_the_main_process_leaves_its_streams_alone():
+    """The run's own draws, dropout's for one, must not move with the data."""
+
+    def draws():
+        return torch.rand(2).tolist(), np.random.rand(2).tolist(), random.random()
+
+    torch.manual_seed(0), np.random.seed(0), random.seed(0)
+    expected = draws()
+    torch.manual_seed(0), np.random.seed(0), random.seed(0)
+    augmented(DataManager(Augmented(12), batch_size=3), ctx())
+    assert draws() == expected

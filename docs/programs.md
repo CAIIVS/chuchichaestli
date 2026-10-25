@@ -218,7 +218,11 @@ resumed with `resume="last"` until it finishes.
 
 Randomness is derived from `(seed, stage path)` rather than replayed, so the
 result does not depend on where a run was interrupted, how many dataloader
-workers it used, or how many processes it ran across.
+workers it used, or how many processes it ran across. Each batch is loaded
+under a seed of its own, derived from the epoch and its samples' indices, so a
+transform drawing from torch's, numpy's or python's global generator augments
+it the same way whichever worker loads it. `SeededBatches` does the same for a
+plain `DataLoader`.
 
 !!!warning "Bitwise on CPU, and on GPU only under `backends="strict"`"
 

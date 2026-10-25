@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import random
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,6 +27,7 @@ __all__ = [
     "derive_seed",
     "rng_generator",
     "seed_ambient",
+    "scoped_seed",
     "capture_rng_state",
     "restore_rng_state",
     "WorkerSeeder",
@@ -32,6 +35,8 @@ __all__ = [
 
 _MASK64 = 0xFFFFFFFFFFFFFFFF
 _MASK32 = 0xFFFFFFFF
+
+_SPARE_NUMPY: list[tuple[np.random.MT19937, np.random.RandomState]] = []
 
 
 def root_seed(seed: int | None = None) -> int:
@@ -121,6 +126,36 @@ def seed_ambient(root: int, key: str = "ambient") -> int:
     random.seed(seed)
     np.random.seed(seed & _MASK32)
     return seed
+
+
+@contextmanager
+def scoped_seed(seed: int) -> Iterator[None]:
+    """Seed torch's CPU, numpy's and python's global generators for a block only.
+
+    Args:
+        seed: Seed the block draws from.
+    """
+    spare = _SPARE_NUMPY.pop() if _SPARE_NUMPY else _spare_numpy()
+    torch_state = torch.get_rng_state()
+    numpy_bits = np.random.get_bit_generator()
+    python_state = random.getstate()
+    torch.default_generator.manual_seed(seed)
+    spare[1].seed(seed & _MASK32)
+    np.random.set_bit_generator(spare[0])
+    random.seed(seed)
+    try:
+        yield
+    finally:
+        torch.set_rng_state(torch_state)
+        np.random.set_bit_generator(numpy_bits)
+        random.setstate(python_state)
+        _SPARE_NUMPY.append(spare)
+
+
+def _spare_numpy() -> tuple[np.random.MT19937, np.random.RandomState]:
+    """Return a numpy generator and the legacy handle that reseeds it."""
+    bits = np.random.MT19937()
+    return bits, np.random.RandomState(bits)
 
 
 def capture_rng_state() -> dict[str, Any]:

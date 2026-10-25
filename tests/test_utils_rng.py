@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for derivation-based randomness."""
 
+import random
 import subprocess
 import sys
 
+import numpy as np
 import torch
 
 from chuchichaestli.utils.rng import (
@@ -16,6 +18,7 @@ from chuchichaestli.utils.rng import (
     seeded_rand,
     rng_generator,
     restore_rng_state,
+    scoped_seed,
     root_seed,
     seed_ambient,
 )
@@ -105,3 +108,34 @@ def test_seeded_rand_repeats_per_seed_and_draws_nothing_globally():
     assert torch.equal(first.double(), again)
     assert not torch.equal(first, other)
     assert torch.equal(torch.rand(2), expected)
+
+
+def _global_draws():
+    """Draw once from torch's, numpy's and python's global generators."""
+    return torch.rand(2).tolist(), np.random.rand(2).tolist(), random.random()
+
+
+def test_a_scoped_seed_repeats_its_draws_and_restores_the_streams():
+    """Inside, every global generator follows the seed; after, each is as it was."""
+    torch.manual_seed(1), np.random.seed(1), random.seed(1)
+    expected = _global_draws()
+    torch.manual_seed(1), np.random.seed(1), random.seed(1)
+    with scoped_seed(7):
+        first = _global_draws()
+    with scoped_seed(7):
+        again = _global_draws()
+    assert first == again
+    assert _global_draws() == expected
+
+
+def test_a_nested_scope_leaves_the_outer_one_drawing_on():
+    """The inner block lends its own generators and gives the outer ones back."""
+    with scoped_seed(7):
+        _global_draws()
+        with scoped_seed(8):
+            _global_draws()
+        interrupted = _global_draws()
+    with scoped_seed(7):
+        _global_draws()
+        plain = _global_draws()
+    assert interrupted == plain
