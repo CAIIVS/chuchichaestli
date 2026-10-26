@@ -7,8 +7,8 @@ authors = [
     { name = "Philipp Denzel", email = "denp@zhaw.ch" },
     { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
     { name = "Daniel Barco", email = "baoc@zhaw.ch" },
-    { name = "Yann Billeter", email = "bily@zhaw.ch" },
-    { name = "Martin Oswald", email = "oswd@zhaw.ch" },
+    { name = "Yann Billeter"},
+    { name = "Martin Oswald"},
 ]
 maintainers = [
     { name = "Philipp Denzel", email = "denp@zhaw.ch" },
