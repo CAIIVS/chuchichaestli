@@ -7,6 +7,7 @@ import pytest
 import torch
 
 from chuchichaestli.diffusion.processes import BBDM, CFGDDPM, DDPM, InDI, PriorGrad
+from chuchichaestli.diffusion.processes.shift_ddpm import ShiftDDPM
 from chuchichaestli.diffusion.distributions import (
     HalfNormalDistribution,
     NormalDistribution,
@@ -29,6 +30,10 @@ def a_process(name: str, seed: int):
         "cfg_ddpm": lambda: (CFGDDPM(10, generator=gen), {"condition": condition}),
         "bbdm": lambda: (BBDM(10, generator=gen), {"condition": condition}),
         "indi": lambda: (InDI(num_timesteps=10, generator=gen), {"y": condition}),
+        "shift_ddpm": lambda: (
+            ShiftDDPM(10, E=torch.nn.Identity(), generator=gen),
+            {"condition": condition},
+        ),
         "prior_grad": lambda: (
             PriorGrad(torch.zeros(SHAPE[1:]), torch.ones(SHAPE[1:]), 10, generator=gen),
             {"condition": condition},
@@ -49,7 +54,16 @@ def a_process(name: str, seed: int):
     return builders[name]()
 
 
-PROCESSES = ["ddpm", "cfg_ddpm", "bbdm", "indi", "prior_grad", "normal", "half_normal"]
+PROCESSES = [
+    "ddpm",
+    "cfg_ddpm",
+    "bbdm",
+    "indi",
+    "shift_ddpm",
+    "prior_grad",
+    "normal",
+    "half_normal",
+]
 
 
 @pytest.mark.parametrize("name", PROCESSES)

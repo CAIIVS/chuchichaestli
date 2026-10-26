@@ -5,6 +5,7 @@
 
 import torch
 import torch.types
+from torch import nn
 
 from collections.abc import Callable, Generator
 
@@ -29,7 +30,8 @@ class ShiftDDPM(DDPM):
         beta_end: float = 0.02,
         device: str = "cpu",
         schedule: str = "linear",
-        E: torch.Module = None,
+        E: nn.Module | None = None,
+        **kwargs,
     ) -> None:
         """Initialize the ShiftDDPM algorithm.
 
@@ -40,8 +42,11 @@ class ShiftDDPM(DDPM):
             device: Device to use for the computation.
             schedule: Schedule for beta.
             E: Prior shift predictor.
+            kwargs: Passed on to `DDPM`, e.g. a `generator` to draw from.
         """
-        super().__init__(num_timesteps, beta_start, beta_end, device, schedule)
+        super().__init__(
+            num_timesteps, beta_start, beta_end, device, schedule, **kwargs
+        )
         self.k = self.sqrt_alpha_cumprod * (1 - self.sqrt_alpha_cumprod)
         self.E = E
 
@@ -62,15 +67,13 @@ class ShiftDDPM(DDPM):
         E = self.E(condition)
         timesteps = self.sample_timesteps(x_0.shape[0])
         noise = self.sample_noise(x_0.shape)
-        s_t = self.k[timesteps] * E
-        x_t = (
-            self.sqrt_alpha_cumprod[timesteps] * x_0
-            + s_t
-            + self.coef_inner[timesteps] * noise
-        )
-        noise = (
-            x_t - self.sqrt_alpha_cumprod[timesteps] * x_0
-        ) / self.sqrt_1m_alpha_cumprod[timesteps]
+        s_shape = [-1] + [1] * (x_0.dim() - 1)
+        k = self.k[timesteps].reshape(s_shape)
+        sqrt_alpha = self.sqrt_alpha_cumprod[timesteps].reshape(s_shape)
+        sqrt_1m_alpha = self.sqrt_1m_alpha_cumprod[timesteps].reshape(s_shape)
+        coef_inner = self.coef_inner[timesteps].reshape(s_shape)
+        x_t = sqrt_alpha * x_0 + k * E + coef_inner * noise
+        noise = (x_t - sqrt_alpha * x_0) / sqrt_1m_alpha
         return x_t, noise, timesteps
 
     def generate(
