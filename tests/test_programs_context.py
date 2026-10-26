@@ -204,3 +204,9 @@ def test_a_stage_s_seeds_are_derived_from_its_subpaths():
     ctx = Context("program/0:fit", 7)
     assert ctx.seed_for("noise") == derive_seed(7, "program/0:fit/noise")
     assert ctx.seed_for() == derive_seed(7, "program/0:fit")
+
+
+def test_an_unseeded_context_takes_the_seed_torch_was_given():
+    """As a Runner does, so a context built by hand derives from the same root."""
+    torch.manual_seed(17)
+    assert (Context("program").seed, Context("program", 3).seed) == (17, 3)

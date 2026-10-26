@@ -16,7 +16,7 @@ from chuchichaestli.programs.events import (
     Signal,
     counts_toward,
 )
-from chuchichaestli.utils.rng import WorkerSeeder, derive_seed, rng_generator
+from chuchichaestli.utils.rng import WorkerSeeder, derive_seed, rng_generator, root_seed
 from chuchichaestli.programs.topology import Local
 from chuchichaestli.programs.traits import Stateful, Topology
 
@@ -104,7 +104,7 @@ class Context:
     def __init__(
         self,
         path: str,
-        seed: int = 0,
+        seed: int | None = None,
         *,
         parent: Context | None = None,
         topology: Topology | None = None,
@@ -137,7 +137,7 @@ class Context:
             watcher: Receives each binding as it is registered.
         """
         self.path = path
-        self.seed = seed
+        self.seed = root_seed(seed)
         self.parent = parent
         self.topology = topology if topology is not None else Local()
         self.device = (
