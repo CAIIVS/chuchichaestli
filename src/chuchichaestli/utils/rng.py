@@ -159,7 +159,7 @@ def _spare_numpy() -> tuple[np.random.MT19937, np.random.RandomState]:
 
 
 def capture_rng_state() -> dict[str, Any]:
-    """Capture the ambient torch, CUDA, numpy and python RNG state.
+    """Capture the ambient torch, CUDA, MPS, numpy and python RNG state.
 
     Returns a flat mapping whose values are tensors or JSON-serializable
     scalars, so a checkpoint can route each to the right payload.
@@ -180,14 +180,16 @@ def capture_rng_state() -> dict[str, Any]:
     if torch.cuda.is_available():
         for i, cuda_state in enumerate(torch.cuda.get_rng_state_all()):
             state[f"cuda/{i}"] = cuda_state
+    if torch.backends.mps.is_available():
+        state["mps"] = torch.mps.get_rng_state()
     return state
 
 
 def restore_rng_state(state: dict[str, Any]) -> None:
     """Restore ambient RNG state captured by `capture_rng_state`.
 
-    Missing entries are left alone, so a checkpoint taken on a CUDA host can be
-    resumed on a CPU-only one.
+    Missing entries are left alone, so a checkpoint taken on a CUDA or MPS host
+    can be resumed on a CPU-only one.
 
     Args:
         state: Mapping as returned by `capture_rng_state`.
@@ -215,6 +217,8 @@ def restore_rng_state(state: dict[str, Any]) -> None:
             torch.cuda.set_rng_state_all(
                 [s.to(dtype=torch.uint8, device="cpu") for s in cuda_states]
             )
+    if "mps" in state and torch.backends.mps.is_available():
+        torch.mps.set_rng_state(state["mps"].to(dtype=torch.uint8, device="cpu"))
 
 
 @dataclass(frozen=True, slots=True)

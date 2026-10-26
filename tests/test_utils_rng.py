@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 import torch
 
 from chuchichaestli.utils.rng import (
@@ -139,3 +140,14 @@ def test_a_nested_scope_leaves_the_outer_one_drawing_on():
         _global_draws()
         plain = _global_draws()
     assert interrupted == plain
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="needs MPS")
+def test_the_mps_generator_is_captured_and_restored_too():
+    """A run on a Mac draws from it, so a resume must bring it back."""
+    torch.mps.manual_seed(3)
+    state = capture_rng_state()
+    expected = torch.rand(4, device="mps").cpu()
+    torch.mps.manual_seed(9)
+    restore_rng_state(state)
+    assert torch.equal(torch.rand(4, device="mps").cpu(), expected)
