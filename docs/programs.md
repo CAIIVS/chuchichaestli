@@ -267,6 +267,10 @@ with the file is all that separates them.
 | `ImageExport` | one file per image | `image` | `.png`, `.jpg`, `.jpeg`, `.webp`, `.tif`, `.tiff`, `.pdf`, `.svg` |
 | `ArchiveExport` | samples, and their truths beside them | `tensor` | any suffix under [Archives](#archives) |
 
+A model spec is every argument the model was constructed with, so anyone
+holding the weights file, or a checkpoint, can read them: paths, tensors and
+device names included.
+
 Every export is announced with an `EXPORTED` event carrying the `files`
 written, their `kind` and the `source` binding, identical on every rank. A
 `Predict(archive=...)` announces its archive the same way as it ends, with
