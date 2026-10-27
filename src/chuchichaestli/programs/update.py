@@ -403,12 +403,16 @@ class Updater(ABC):
         total: torch.Tensor | None = None
         parts: dict[str, torch.Tensor] = {}
         scaler = self._scalers[group]
-        for batch, count in zip(batches, counts):
-            view.clear_cache()
-            with self._autocast(ctx):
-                loss = objective.compute(batch, view)
-            share = self.policy.share(loss.total, count / rank_samples)
-            scaler.scale(share).backward()
+        modules = [m for m in ctx.run_stateful().values() if isinstance(m, nn.Module)]
+        for index, (batch, count) in enumerate(zip(batches, counts)):
+            # gradients are averaged across processes once, on the last micro-batch
+            last = index == len(batches) - 1
+            with nullcontext() if last else ctx.topology.no_sync(modules):
+                view.clear_cache()
+                with self._autocast(ctx):
+                    loss = objective.compute(batch, view)
+                share = self.policy.share(loss.total, count / rank_samples)
+                scaler.scale(share).backward()
             reported = share.detach()
             total = reported if total is None else total + reported
             for name, value in loss.parts.items():

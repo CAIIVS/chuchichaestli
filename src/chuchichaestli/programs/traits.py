@@ -4,7 +4,8 @@
 """Structural interfaces the runner expects of its components."""
 
 from __future__ import annotations
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from contextlib import AbstractContextManager
 
 from chuchichaestli.data.batch import BatchType
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -307,6 +308,14 @@ class Topology(Protocol):
         Args:
             module: Module to unwrap; returned unchanged when it was never
                 wrapped.
+        """
+        ...
+
+    def no_sync(self, modules: Iterable[nn.Module]) -> AbstractContextManager[None]:
+        """Hold back averaging the given modules' gradients while the context lasts.
+
+        Args:
+            modules: Modules whose gradients are not averaged yet.
         """
         ...
 

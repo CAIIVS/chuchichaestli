@@ -145,6 +145,46 @@ def _trains(rank, world, results, port):
         topology.close()
 
 
+def _accumulates(rank, world, results, port):
+    """Train with two micro-batches per step, counting the gradient all-reduces.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+    """
+    from torch.distributed.algorithms.ddp_comm_hooks import default_hooks
+
+    topology = join_group(rank, world, port)
+    reduced = []
+
+    def counted(state, bucket):
+        reduced.append(bucket.index())
+        return default_hooks.allreduce_hook(state, bucket)
+
+    try:
+        program = Program(
+            provide={"model": model()},
+            stages=[
+                Call(
+                    "hook",
+                    fn=lambda ctx: ctx["model"].register_comm_hook(None, counted),
+                ),
+                stage(topology, accumulate=2),
+            ],
+        )
+        Runner(program, seed=42, topology=topology, hooks=[]).run()
+        weights = topology.state_of(program.provide["model"])
+        results[rank] = {
+            "reduced": len(reduced),
+            "steps": program.stages[1].total_steps,
+            "weights": {k: v.tolist() for k, v in weights.items()},
+        }
+    finally:
+        topology.close()
+
+
 def _checkpoints(rank, world, results, port, store):
     """Train with a checkpointer and report what this rank wrote.
 
@@ -811,6 +851,15 @@ def test_every_rank_agrees_on_the_weights():
     assert reported[0].keys() == reported[1].keys()
     for key, value in reported[0].items():
         assert torch.equal(torch.tensor(value), torch.tensor(reported[1][key]))
+
+
+def test_accumulated_gradients_are_averaged_once_per_step():
+    """The micro-batches before the last hold back their all-reduce."""
+    reported = under_ddp(_accumulates, free_port())
+    for rank in range(WORLD):
+        assert reported[rank]["steps"] == 2
+        assert reported[rank]["reduced"] == reported[rank]["steps"]
+    assert reported[0]["weights"] == reported[1]["weights"]
 
 
 def test_the_captured_weights_carry_no_wrapper_prefix():

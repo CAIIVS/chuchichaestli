@@ -4,6 +4,8 @@
 """Process layouts a run can execute across."""
 
 from __future__ import annotations
+from collections.abc import Iterable, Iterator
+from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import timedelta
 from typing import Any, Literal
 import os
@@ -197,6 +199,14 @@ class Local:
             module = module._orig_mod
         return module
 
+    def no_sync(self, modules: Iterable[nn.Module]) -> nullcontext[None]:
+        """Return a context holding nothing back, as one process averages nothing.
+
+        Args:
+            modules: Modules whose gradients are not averaged yet.
+        """
+        return nullcontext()
+
     def broadcast(self, value: Any) -> Any:
         """Return rank 0's value on every process.
 
@@ -383,6 +393,20 @@ class Ddp:
                 module = module._orig_mod
             else:
                 return module
+
+    @contextmanager
+    def no_sync(self, modules: Iterable[nn.Module]) -> Iterator[None]:
+        """Hold back averaging the replicas' gradients while the context lasts.
+
+        Args:
+            modules: Modules whose gradients are not averaged yet; those not
+                replicated are left alone.
+        """
+        with ExitStack() as stack:
+            for module in modules:
+                if isinstance(module, DistributedDataParallel):
+                    stack.enter_context(module.no_sync())
+            yield
 
     def broadcast(self, value: Any) -> Any:
         """Return rank 0's value on every process.
