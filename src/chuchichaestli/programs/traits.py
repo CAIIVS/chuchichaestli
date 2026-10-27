@@ -302,7 +302,7 @@ class Topology(Protocol):
         ...
 
     def unwrap(self, module: nn.Module) -> nn.Module:
-        """Return the module `wrap` was given, for its parameters and spec.
+        """Return the module before `wrap` and `torch.compile` wrapped it.
 
         Args:
             module: Module to unwrap; returned unchanged when it was never

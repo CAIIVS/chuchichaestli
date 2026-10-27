@@ -188,11 +188,13 @@ class Local:
         return module
 
     def unwrap(self, module: nn.Module) -> nn.Module:
-        """Return the module unchanged, nothing having wrapped it.
+        """Return the module `torch.compile` wrapped, or the module itself.
 
         Args:
             module: Module to unwrap.
         """
+        while isinstance(getattr(module, "_orig_mod", None), nn.Module):
+            module = module._orig_mod
         return module
 
     def broadcast(self, value: Any) -> Any:
@@ -212,11 +214,13 @@ class Local:
         return [value]
 
     def state_of(self, stateful: Stateful) -> dict[str, Any]:
-        """Capture a component's state.
+        """Capture a component's state, a compiled module's under its own names.
 
         Args:
             stateful: Component whose state is wanted.
         """
+        if isinstance(stateful, nn.Module):
+            return self.unwrap(stateful).state_dict()
         return stateful.state_dict()
 
     def load_state(self, stateful: Stateful, state: dict[str, Any]) -> None:
@@ -226,6 +230,9 @@ class Local:
             stateful: Component to restore.
             state: Mapping as returned by `state_of`.
         """
+        if isinstance(stateful, nn.Module):
+            self.unwrap(stateful).load_state_dict(state)
+            return
         stateful.load_state_dict(state)
 
     def __repr__(self) -> str:
@@ -369,9 +376,13 @@ class Ddp:
             module: Module to unwrap; returned unchanged when it carries no
                 parameters, which `wrap` leaves alone.
         """
-        while isinstance(module, DistributedDataParallel):
-            module = module.module
-        return module
+        while True:
+            if isinstance(module, DistributedDataParallel):
+                module = module.module
+            elif isinstance(getattr(module, "_orig_mod", None), nn.Module):
+                module = module._orig_mod
+            else:
+                return module
 
     def broadcast(self, value: Any) -> Any:
         """Return rank 0's value on every process.

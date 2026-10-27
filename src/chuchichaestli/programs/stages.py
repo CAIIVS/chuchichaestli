@@ -255,7 +255,8 @@ class Load(StageBlock):
         """
         if not self.path.is_file():
             raise FileNotFoundError(f"No weights to load at {str(self.path)!r}.")
-        ctx[self.target].load_state_dict(read_state(self.path), strict=self.strict)
+        target = ctx.topology.unwrap(ctx[self.target])
+        target.load_state_dict(read_state(self.path), strict=self.strict)
 
 
 class Exporter(StageBlock, ABC):
@@ -1447,7 +1448,7 @@ class Train(StageLoop):
             if isinstance(decay, Ema):
                 averaged = decay
             else:
-                model = ctx.resolve(name)
+                model = ctx.topology.unwrap(ctx.resolve(name))
                 averaged = Ema(model) if decay is None else Ema(model, decay)
             ctx.publish(f"{name}/ema", averaged)
             built[name] = averaged
