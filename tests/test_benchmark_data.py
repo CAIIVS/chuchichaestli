@@ -108,6 +108,19 @@ class TestReadEpoch:
         read_epoch(dataset, Case(batch_size=2))
         assert dataset.drawn == list(range(8))
 
+    def test_a_device_without_cuda_is_read_onto(self):
+        """Landing batches elsewhere must not wait on CUDA, which may not exist."""
+        dataset = Counted(6)
+        read_epoch(dataset, Case(batch_size=4), device="meta")
+        assert sorted(dataset.drawn) == list(range(6))
+
+    @pytest.mark.skipif(not torch.backends.mps.is_available(), reason="needs MPS")
+    def test_batches_land_on_mps(self):
+        """An Apple GPU is waited on through its own backend."""
+        dataset = Counted(6)
+        read_epoch(dataset, Case(batch_size=4), device="mps")
+        assert sorted(dataset.drawn) == list(range(6))
+
     def test_shuffled_is_seeded(self):
         """A shuffled case draws in the same order every run, and not in order."""
         case = Case(batch_size=4, order="shuffled")

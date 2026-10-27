@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 import torch
 from torch.utils.data import DataLoader, Dataset
-from chuchichaestli.utils import map_nested
+from chuchichaestli.data.batch import batch_to_device
 from chuchichaestli.utils.rng import rng_generator
 
 
@@ -88,5 +88,8 @@ def read_epoch(
             pass
         return
     for batch in loader:
-        map_nested(batch, lambda x: x.to(device, non_blocking=True))
-    torch.cuda.synchronize()
+        batch_to_device(batch, device)
+    # copies to an accelerator can still be running; wait for them to land
+    synchronize = getattr(getattr(torch, device.type, None), "synchronize", None)
+    if callable(synchronize):
+        synchronize()
