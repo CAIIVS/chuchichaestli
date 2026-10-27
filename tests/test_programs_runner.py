@@ -403,8 +403,9 @@ def test_default_device_defers_to_the_torch_accelerator():
 def test_default_device_falls_back_without_the_accelerator_api(monkeypatch):
     """Torch below 2.6 has no `torch.accelerator`, so the probe chain runs."""
     monkeypatch.delattr(torch, "accelerator", raising=False)
-    for backend in ("cuda", "xpu"):
-        if getattr(torch, backend, None) is not None:
+    # each backend is probed through `torch.<name>` first, `torch.backends` second
+    for backend in ("cuda", "xpu", "mps"):
+        if hasattr(getattr(torch, backend, None), "is_available"):
             monkeypatch.setattr(f"torch.{backend}.is_available", lambda: False)
     monkeypatch.setattr("torch.backends.mps.is_available", lambda: False)
     assert default_device() == torch.device("cpu")
