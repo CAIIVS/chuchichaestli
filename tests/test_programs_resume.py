@@ -25,6 +25,7 @@ from chuchichaestli.programs import (
     GracefulStop,
     Jsonl,
     Phase,
+    Predict,
     Program,
     DiscriminatorAdv,
     GeneratorAdv,
@@ -784,6 +785,56 @@ def test_what_a_finished_stage_published_survives_a_resume(tmp_path, at, stage):
     resumed(probed(carried), store)
     assert carried["mse"] == whole["mse"]
     assert identical(dict(whole["ema"]), dict(carried["ema"]))
+
+
+def predicted(seen: dict, archive=None) -> Program:
+    """Build a program whose last stage reads what a finished Predict published.
+
+    Args:
+        seen: Receives the predictions and truths it read.
+        archive: File the predictions are written to, or `None` to keep them.
+    """
+
+    def read(ctx):
+        pairs = ctx["sample/pairs"]
+        rows = [pairs[index] for index in range(len(pairs))]
+        seen["predicted"] = torch.stack([row[0] for row in rows])
+        seen["truths"] = torch.stack([row[1] for row in rows])
+
+    return Program(
+        provide={"model": model(), "side": model()},
+        stages=[
+            trainer(epochs=1),
+            Predict(
+                "sample",
+                data=ramp(),
+                batch_size=BATCH,
+                inputs=(0,),
+                targets=1,
+                archive=archive,
+            ),
+            side_trainer(),
+            Call("read", fn=read),
+        ],
+    )
+
+
+@pytest.mark.parametrize("archived", [False, True], ids=["in_memory", "archive"])
+def test_what_a_finished_predict_published_survives_a_resume(tmp_path, archived):
+    """A later stage still reads the predictions and their truths."""
+
+    def archive(name):
+        return tmp_path / name / "sample.safetensors" if archived else None
+
+    store, whole, carried = tmp_path / "run", {}, {}
+    Runner(predicted(whole, archive("whole")), seed=42, hooks=[]).run()
+    interrupted(predicted({}, archive("carried")), store, at=9, graceful=True)
+    last = sorted(p for p in store.iterdir() if p.is_dir())[-1]
+    state = json.loads((last / "manifest.json").read_text())["state"]["program"]
+    assert state["index"] == 2
+    resumed(predicted(carried, archive("carried")), store)
+    assert torch.equal(carried["predicted"], whole["predicted"])
+    assert torch.equal(carried["truths"], whole["truths"])
 
 
 def counted(seen: list, export=None) -> Program:

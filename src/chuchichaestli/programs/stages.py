@@ -1966,6 +1966,7 @@ class Predict(Inference):
         self._written: Path | None = None
         self._predictions: list[torch.Tensor] = []
         self._truths: list[torch.Tensor] = []
+        self._deferred_states: dict[str, Any] | None = None
         if pairs:
             self.provides += (f"{self.name}/pairs",)
 
@@ -2037,10 +2038,8 @@ class Predict(Inference):
             ctx: Execution context for this entry.
             archive: File the shards belong to.
         """
-        if ctx.topology.world_size == 1:
-            return archive
-        if not self.merge:
-            return self.shard_path(ctx.topology.rank, archive)
+        if ctx.topology.world_size == 1 or not self.merge:
+            return self._rank_path(ctx, archive)
         ctx.topology.barrier()
         shards = [
             self.shard_path(rank, archive) for rank in range(ctx.topology.world_size)
@@ -2051,6 +2050,17 @@ class Predict(Inference):
                 shard.unlink(missing_ok=True)
         ctx.topology.barrier()
         return archive
+
+    def _rank_path(self, ctx: Context, archive: Path) -> Path:
+        """Return the file this process reads an archive from once it is written.
+
+        Args:
+            ctx: Execution context for this entry.
+            archive: File the shards belong to.
+        """
+        if ctx.topology.world_size == 1 or self.merge:
+            return archive
+        return self.shard_path(ctx.topology.rank, archive)
 
     def _record(
         self, archive: Path | None, batch: torch.Tensor, in_memory: list[torch.Tensor]
@@ -2133,10 +2143,13 @@ class Predict(Inference):
         self._writers = {}
         if self._written is not None:
             self._written = self._gather_shards(ctx, self.archive)
+            if self.targets_archive is not None:
+                self._gather_shards(ctx, self.targets_archive)
             ctx.publish(f"{self.name}/archive", self._written)
         else:
             self._predictions = self._gather_batches(ctx, self._predictions)
             self._truths = self._gather_batches(ctx, self._truths)
+            self._deferred_states = self._in_memory_results()
             y = self.predictions
             if y is not None:
                 ctx.publish(f"{self.name}/predictions", y)
@@ -2149,6 +2162,45 @@ class Predict(Inference):
                 source=f"{self.name}/archive",
             )
         return super().leave(ctx)
+
+    def _in_memory_results(self) -> dict[str, torch.Tensor]:
+        """Return the predictions and truths kept in memory, for a checkpoint."""
+        kept = {}
+        if self._predictions:
+            kept["predictions"] = torch.cat(self._predictions).detach().cpu()
+        if self._truths:
+            kept["truths"] = torch.cat(self._truths).detach().cpu()
+        return kept
+
+    def component_states(self) -> dict[str, Any]:
+        """Return what the stage kept in memory when it last finished."""
+        return dict(self._deferred_states or {})
+
+    def defer_component_states(self, state: dict[str, Any]) -> None:
+        """Hold what a finished stage kept, until it publishes again.
+
+        Args:
+            state: Mapping as returned by `component_states`.
+        """
+        self._deferred_states = dict(state)
+
+    def republish(self, ctx: Context) -> None:
+        """Publish again what the stage published before a resume.
+
+        Args:
+            ctx: Execution context of the finished stage.
+        """
+        if self.archive is not None:
+            self._written = self._rank_path(ctx, self.archive)
+            ctx.publish(f"{self.name}/archive", self._written)
+        else:
+            kept = self._deferred_states or {}
+            self._predictions = [kept["predictions"]] if "predictions" in kept else []
+            self._truths = [kept["truths"]] if "truths" in kept else []
+            y = self.predictions
+            if y is not None:
+                ctx.publish(f"{self.name}/predictions", y)
+        self._publish_pairs(ctx)
 
     def archive_files(self, world_size: int) -> list[Path]:
         """Return every file the archive left: one per archive, or each shard.
@@ -2220,7 +2272,7 @@ class Predict(Inference):
         archive = self.targets_archive
         if archive is None:
             return self._paired(ctx)
-        return open_archive(self._gather_shards(ctx, archive), self.key, dtype=None)
+        return open_archive(self._rank_path(ctx, archive), self.key, dtype=None)
 
     def _paired(self, ctx: Context) -> torch.Tensor | None:
         """Return what the predictions are published alongside, if anything.
