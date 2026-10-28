@@ -386,6 +386,7 @@ class Tracker(ABC):
         self._runner_settings = {
             "seed": payload.get("seed"),
             "backends": payload.get("backends"),
+            "compile": payload.get("compile"),
         }
         self._closed = False
 

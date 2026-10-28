@@ -12,13 +12,18 @@ from chuchichaestli.programs import (
     CancelAfter,
     Checkpointer,
     CheckpointStore,
+    EventType,
     Load,
+    Local,
     Program,
     Runner,
+    Signal,
     Train,
     WeightsExport,
 )
 from chuchichaestli.programs.events import C3liRunCancelled
+from chuchichaestli.programs.runner import C3liProgramError
+from chuchichaestli.programs.topology import is_compiled
 from chuchichaestli.training import OptimSpec
 from chuchichaestli.utils.io import read_state
 
@@ -61,7 +66,7 @@ def plain_state(module: nn.Module) -> dict[str, torch.Tensor]:
     Args:
         module: A plain or compiled module.
     """
-    return dict(getattr(module, "_orig_mod", module).state_dict())
+    return dict(Local().unwrap(module).state_dict())
 
 
 @pytest.mark.parametrize(
@@ -125,3 +130,104 @@ def test_exported_weights_move_between_compiled_and_plain(tmp_path):
     for model in (plain, loaded.provide["model"]):
         for name, tensor in plain_state(model).items():
             assert torch.equal(tensor, expected[name])
+
+
+EAGER = {"backend": "eager"}
+
+
+class Began:
+    """Keeps the payload the run began with."""
+
+    def __init__(self):
+        """Constructor."""
+        self.payload: dict = {}
+
+    def on(self, event):
+        """Keep the opening event's payload.
+
+        Args:
+            event: What the runner just did.
+        """
+        if event.type is EventType.RUN_BEGAN:
+            self.payload = dict(event.payload)
+        return Signal.GO
+
+
+def test_the_runner_compiles_every_module_it_holds():
+    """Bound or held by a stage directly, each is compiled and trains as it would."""
+    plain = program(False)
+    Runner(plain, hooks=[], device="cpu").run()
+    direct = Train(
+        "direct",
+        model=net(False),
+        data=DATA,
+        batch_size=4,
+        epochs=1,
+        loss=nn.MSELoss(),
+        optim=OptimSpec.sgd(lr=0.1),
+    )
+    compiled = program(False, direct)
+    began = Began()
+    Runner(
+        compiled, hooks=[began], device="cpu", compile=True, compile_kwargs=EAGER
+    ).run()
+    assert is_compiled(compiled.provide["model"]) and is_compiled(direct.model)
+    assert began.payload["compile"] is True
+    expected = plain_state(plain.provide["model"])
+    for name, tensor in plain_state(compiled.provide["model"]).items():
+        assert torch.equal(tensor, expected[name])
+
+
+@pytest.mark.parametrize("names", [("model",), "model"], ids=["tuple", "string"])
+def test_the_runner_compiles_only_the_bindings_named(names):
+    """Another binding is left as it was."""
+    prog = program(False)
+    prog.provide["side"] = net(False)
+    began = Began()
+    Runner(prog, hooks=[began], device="cpu", compile=names, compile_kwargs=EAGER).run()
+    assert is_compiled(prog.provide["model"])
+    assert not is_compiled(prog.provide["side"])
+    assert began.payload["compile"] == ("model",)
+
+
+def test_compiling_an_unknown_binding_is_refused_before_the_run():
+    """A typo would otherwise leave the model silently uncompiled."""
+    with pytest.raises(C3liProgramError, match=r"compile names \['modle'\]"):
+        Runner(program(False), hooks=[], device="cpu", compile=("modle",)).run()
+
+
+def test_a_module_is_compiled_once_however_often_it_runs():
+    """A second run of the same program finds it compiled already."""
+    prog = program(False)
+    for _ in range(2):
+        Runner(prog, hooks=[], device="cpu", compile=True, compile_kwargs=EAGER).run()
+    compiled = prog.provide["model"]
+    assert is_compiled(compiled) and not is_compiled(compiled._orig_mod)
+
+
+def test_a_run_compiled_by_the_runner_resumes_uncompiled(tmp_path):
+    """The checkpoint holds plain names, so the setting may change on resume."""
+    whole = program(False)
+    Runner(whole, hooks=[], device="cpu").run()
+    store = tmp_path / "run"
+    with pytest.raises(C3liRunCancelled):
+        Runner(
+            program(False),
+            hooks=[Checkpointer(every=1, unit="step"), CancelAfter(steps=5)],
+            store=store,
+            device="cpu",
+            compile=True,
+            compile_kwargs=EAGER,
+        ).run()
+    carried = program(False)
+    Runner(carried, hooks=[], store=store, device="cpu", resume="last").run()
+    expected = plain_state(whole.provide["model"])
+    for name, tensor in plain_state(carried.provide["model"]).items():
+        assert torch.equal(tensor, expected[name])
+
+
+def test_holding_a_compiled_module_does_not_make_one_compiled():
+    """Only DDP's wrapper is looked through, not any submodule called `module`."""
+    holder = nn.Module()
+    holder.module = net(True)
+    assert is_compiled(holder.module) and not is_compiled(holder)

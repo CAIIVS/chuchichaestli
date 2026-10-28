@@ -242,6 +242,17 @@ leaving the others blocked. Metrics are combined before an `Eval` publishes
 them, only the main rank writes checkpoints, and a `Predict` writes one shard
 per rank and joins them when the run ends.
 
+## Compiling
+
+`Runner(program, compile=True)` compiles every module the run holds with
+`torch.compile`, and `compile=("model",)` only the bindings named;
+`compile_kwargs` reaches `torch.compile` (`mode`, `backend`, `fullgraph`).
+A module is compiled after the topology wraps it, so under `torchrun` it
+becomes `torch.compile(DDP(model))`, which lets torch split the graph at DDP's
+gradient buckets. Checkpoints and exports name a compiled module's weights as
+a plain one's, so a run compiled for training resumes, evaluates or exports
+uncompiled, and the other way round.
+
 ## Archives
 
 `Predict(archive=...)` picks its writer from the suffix. Formats that can be

@@ -32,7 +32,7 @@ from chuchichaestli.utils.rng import (
     seed_ambient,
 )
 from chuchichaestli.programs.stages import Phase, Train
-from chuchichaestli.programs.topology import auto_topology, lockstep
+from chuchichaestli.programs.topology import auto_topology, is_compiled, lockstep
 from chuchichaestli.programs.traits import (
     Hook,
     RunAwareHook,
@@ -134,6 +134,8 @@ class Runner:
         device: torch.device | str | None = None,
         topology: Topology | None = None,
         backends: BackendsPresets = "default",
+        compile: bool | str | Sequence[str] = False,
+        compile_kwargs: Mapping[str, Any] | None = None,
         allow_signature_change: bool = False,
         project: str | None = None,
         experiment: str | None = None,
@@ -154,6 +156,11 @@ class Runner:
             topology: Process layout; detected from the environment if absent.
             backends: Torch backend preset; one of `"fast"`, `"default"`,
                 `"deterministic"` or `"strict"`.
+            compile: Compile modules with `torch.compile`, after the topology
+                wraps them: `True` for every module the run holds, or the
+                names of the bindings to compile.
+            compile_kwargs: Passed on to `torch.compile`, e.g. `mode` or
+                `backend`.
             allow_signature_change: Resume even though the program's stages
                 no longer match the original ones.
             project: Project the run belongs to, for trackers.
@@ -167,6 +174,10 @@ class Runner:
         self.resume = resume
         self.hooks = list(hooks) if hooks is not None else [Console()]
         self.backends = backends
+        if isinstance(compile, str):
+            compile = (compile,)
+        self.compile = compile if isinstance(compile, bool) else tuple(compile)
+        self.compile_kwargs = dict(compile_kwargs or {})
         self.allow_signature_change = allow_signature_change
         self.project = project
         self.experiment = experiment
@@ -225,6 +236,15 @@ class Runner:
                 store.resolve(self.resume)
             except C3liCheckpointError as exc:
                 problems.append(str(exc))
+        if not isinstance(self.compile, bool):
+            provide = getattr(self.program, "provide", None) or {}
+            modules = sorted(k for k, v in provide.items() if isinstance(v, nn.Module))
+            unknown = [name for name in self.compile if name not in modules]
+            if unknown:
+                problems.append(
+                    f"compile names {unknown}, which the program does not provide "
+                    f"as modules (provided: {modules or 'none'})."
+                )
         self._check_stage(self.program, set(), problems, self.program.name)
         if problems:
             raise C3liProgramError(
@@ -273,11 +293,25 @@ class Runner:
         provisioned: dict[int, nn.Module] = {}
         for key, value in list((provide or {}).items()):
             if isinstance(value, nn.Module):
-                provide[key] = self._provision_module(value, provisioned)
+                compiled = self._compiles(key)
+                provide[key] = self._provision_module(value, provisioned, compiled)
         self._provision_stage(self.program, provide, self.program.name, provisioned)
 
+    def _compiles(self, name: str) -> bool:
+        """Return whether the module bound under a name is to be compiled.
+
+        Args:
+            name: Name the module is bound under.
+        """
+        return self.compile is True or (
+            self.compile is not False and name in self.compile
+        )
+
     def _provision_module(
-        self, module: nn.Module, provisioned: dict[int, nn.Module]
+        self,
+        module: nn.Module,
+        provisioned: dict[int, nn.Module],
+        compiled: bool = False,
     ) -> nn.Module:
         """Move a module to the device and wrap it, once however often it recurs.
 
@@ -285,9 +319,13 @@ class Runner:
             module: The module, or a wrapper this run already made of it.
             provisioned: Wrappers made so far, keyed by the id of the module
                 and of the wrapper itself.
+            compiled: Whether to compile it, after the topology wrapped it.
         """
         if id(module) not in provisioned:
             wrapped = self.topology.wrap(module.to(self.device))
+            # compiling a DDP replica lets torch split the graph at its buckets
+            if compiled and not is_compiled(wrapped):
+                wrapped = torch.compile(wrapped, **self.compile_kwargs)
             provisioned[id(module)] = provisioned[id(wrapped)] = wrapped
         return provisioned[id(module)]
 
@@ -313,7 +351,8 @@ class Runner:
         model = getattr(stage, "model", None)
         if isinstance(model, nn.Module):
             seen = id(model) in provisioned
-            stage.model = self._provision_module(model, provisioned)
+            compiled = self._compiles(subpath(path, "model"))
+            stage.model = self._provision_module(model, provisioned, compiled)
             if provide is not None and not seen:
                 provide[subpath(path, "model")] = stage.model
         for index, child in enumerate(getattr(stage, "stages", ())):
@@ -360,6 +399,7 @@ class Runner:
             EventType.RUN_BEGAN,
             seed=self.seed,
             backends=self.backends,
+            compile=self.compile,
             project=self.project,
             experiment=self.experiment,
             run_name=self._name_run(),

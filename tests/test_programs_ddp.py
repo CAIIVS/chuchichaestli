@@ -185,6 +185,41 @@ def _accumulates(rank, world, results, port):
         topology.close()
 
 
+def _compiles(rank, world, results, port):
+    """Train compiled on every rank and report how the model was wrapped.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+    """
+    from torch.nn.parallel import DistributedDataParallel
+
+    from chuchichaestli.programs.topology import is_compiled
+
+    topology = join_group(rank, world, port)
+    try:
+        program = Program(provide={"model": model()}, stages=[stage(topology)])
+        Runner(
+            program,
+            seed=42,
+            topology=topology,
+            hooks=[],
+            compile=True,
+            compile_kwargs={"backend": "eager"},
+        ).run()
+        held = program.provide["model"]
+        weights = topology.state_of(held)
+        results[rank] = {
+            "compiled_around_ddp": is_compiled(held)
+            and isinstance(held._orig_mod, DistributedDataParallel),
+            "weights": {k: v.tolist() for k, v in weights.items()},
+        }
+    finally:
+        topology.close()
+
+
 def _checkpoints(rank, world, results, port, store):
     """Train with a checkpointer and report what this rank wrote.
 
@@ -860,6 +895,15 @@ def test_accumulated_gradients_are_averaged_once_per_step():
         assert reported[rank]["steps"] == 2
         assert reported[rank]["reduced"] == reported[rank]["steps"]
     assert reported[0]["weights"] == reported[1]["weights"]
+
+
+def test_a_replica_is_compiled_around_its_ddp_wrapper():
+    """torch.compile(DDP(model)) lets torch split the graph at DDP's buckets."""
+    reported = under_ddp(_compiles, free_port())
+    for rank in range(WORLD):
+        assert reported[rank]["compiled_around_ddp"]
+    assert reported[0]["weights"] == reported[1]["weights"]
+    assert sorted(reported[0]["weights"]) == ["weight"]
 
 
 def test_the_captured_weights_carry_no_wrapper_prefix():

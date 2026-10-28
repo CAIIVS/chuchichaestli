@@ -31,6 +31,7 @@ __all__ = [
     "Ddp",
     "default_device",
     "auto_topology",
+    "is_compiled",
 ]
 
 
@@ -61,6 +62,17 @@ def default_device() -> torch.device:
         if probe is not None and probe.is_available():
             return torch.device(backend)
     return torch.device("cpu")
+
+
+def is_compiled(module: nn.Module) -> bool:
+    """Return whether `torch.compile` wrapped a module, outside or inside DDP.
+
+    Args:
+        module: Module to look at.
+    """
+    if isinstance(module, DistributedDataParallel):
+        module = module.module
+    return isinstance(getattr(module, "_orig_mod", None), nn.Module)
 
 
 def auto_topology(device: torch.device | str | None = None) -> Topology:
@@ -195,7 +207,7 @@ class Local:
         Args:
             module: Module to unwrap.
         """
-        while isinstance(getattr(module, "_orig_mod", None), nn.Module):
+        while is_compiled(module):
             module = module._orig_mod
         return module
 
@@ -389,7 +401,7 @@ class Ddp:
         while True:
             if isinstance(module, DistributedDataParallel):
                 module = module.module
-            elif isinstance(getattr(module, "_orig_mod", None), nn.Module):
+            elif is_compiled(module):
                 module = module._orig_mod
             else:
                 return module
