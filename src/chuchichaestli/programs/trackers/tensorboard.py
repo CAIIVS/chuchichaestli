@@ -18,6 +18,7 @@ from chuchichaestli.programs.trackers.base import (
     TrackingPolicy,
 )
 from chuchichaestli.utils.registry import require_module
+from chuchichaestli.utils.visualization.images import RASTER_FORMATS
 
 __all__ = ["TensorBoard"]
 
@@ -25,10 +26,9 @@ __all__ = ["TensorBoard"]
 class TensorBoard(Tracker):
     """Log a run to TensorBoard, as one event directory per run."""
 
-    # TensorBoard draws these; it stores no files, so nothing else is logged
-    DRAWN_FORMATS: ClassVar[frozenset[str]] = frozenset(
-        {".png", ".jpg", ".jpeg", ".webp"}
-    )
+    # TensorBoard draws these, as torchvision decodes them (it reads no TIFF);
+    # it stores no files, so nothing else is logged
+    DRAWN_FORMATS: ClassVar[frozenset[str]] = RASTER_FORMATS - {".tif", ".tiff"}
 
     def __init__(
         self,
@@ -105,7 +105,9 @@ class TensorBoard(Tracker):
 
         drawn = [p for p in paths if p.suffix.lower() in self.DRAWN_FORMATS]
         if kind != "image" or len(drawn) < len(paths):
-            skipped = f"{kind!r} artifacts" if kind != "image" else "vector images"
+            skipped = (
+                f"{kind!r} artifacts" if kind != "image" else "vector or TIFF images"
+            )
             if skipped not in self._skipped:
                 self._skipped.add(skipped)
                 warnings.warn(

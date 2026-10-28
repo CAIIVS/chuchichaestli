@@ -16,6 +16,7 @@ from chuchichaestli.programs.trackers.base import (
     TrackingPolicy,
 )
 from chuchichaestli.utils.registry import require_module
+from chuchichaestli.utils.visualization.images import RASTER_FORMATS
 
 __all__ = ["Wandb"]
 
@@ -122,13 +123,7 @@ class Wandb(Tracker):
         if step < self._floor:
             return
         if kind == "image":
-            from chuchichaestli.utils.visualization.images import (
-                IMAGE_FORMATS,
-                VECTOR_FORMATS,
-            )
-
-            raster = IMAGE_FORMATS - VECTOR_FORMATS
-            shown = [p for p in paths if p.suffix.lower() in raster]
+            shown = [p for p in paths if p.suffix.lower() in RASTER_FORMATS]
             if shown:
                 images = [self._wandb.Image(str(p)) for p in shown]
                 self._run.log({key: images}, step=step)

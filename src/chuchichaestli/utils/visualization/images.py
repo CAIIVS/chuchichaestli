@@ -21,6 +21,7 @@ from chuchichaestli.utils.visualization.base import require_mpl
 __all__ = [
     "NormalizeTypes",
     "IMAGE_FORMATS",
+    "RASTER_FORMATS",
     "save_images",
 ]
 
@@ -30,6 +31,7 @@ IMAGE_FORMATS = frozenset(
     {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".pdf", ".svg"}
 )
 VECTOR_FORMATS = frozenset({".pdf", ".svg"})
+RASTER_FORMATS = IMAGE_FORMATS - VECTOR_FORMATS
 UNSAFE_IN_NAME = re.compile(r"[^\w.-]+")
 
 
