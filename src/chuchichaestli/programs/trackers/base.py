@@ -308,9 +308,8 @@ class Tracker(ABC):
                 if kind in self.log.kinds:
                     self._checkpoint_written(event, step)
             elif kind in self.log.kinds:
-                self._ensure_open()
-                paths = [Path(f) for f in event.payload.get("files", ())]
-                self._log_artifacts(kind, stage_name(event.path), paths, step)
+                paths = self._files(event.payload)
+                self._upload(kind, stage_name(event.path), paths, step)
         elif event.type is EventType.RUN_ENDED:
             self._upload_latest()
             if self._opened:
@@ -326,15 +325,14 @@ class Tracker(ABC):
             step: Training step it was taken at.
         """
         payload = event.payload
-        paths = [Path(f) for f in payload.get("files", ())]
+        paths = self._files(payload)
         best = bool(payload.get("best"))
         tags = ("best",) if best else ()
         mode = self.log.checkpoint_uploads
         if mode == "all" or (mode == "best" and best):
             self._uploaded_best = self._uploaded_best or best
             self._latest = None
-            self._ensure_open()
-            self._log_artifacts("checkpoint", "checkpoint", paths, step, tags)
+            self._upload("checkpoint", "checkpoint", paths, step, tags)
         else:
             self._latest = (paths, step, tags)
 
@@ -351,8 +349,7 @@ class Tracker(ABC):
                 stacklevel=2,
             )
             return
-        self._ensure_open()
-        self._log_artifacts("checkpoint", "checkpoint", paths, step, tags)
+        self._upload("checkpoint", "checkpoint", paths, step, tags)
 
     @staticmethod
     def _status(event: Event) -> RunStatusTypes:
@@ -404,9 +401,7 @@ class Tracker(ABC):
         stage = stage_name(event.path)
         values = numbers(event.payload, skip=("total",))
         metrics = {f"{stage}/{k}": v for k, v in values.items()} | dict(extra or {})
-        if metrics:
-            self._ensure_open()
-            self._log(metrics, step)
+        self._send(metrics, step)
 
     def _epoch(self, event: Event, step: int) -> None:
         """Log a training pass: its count, duration, throughput and peak memory.
@@ -429,9 +424,47 @@ class Tracker(ABC):
         peak = peak_memory_allocated(self._ctx.device) if measured else None
         if peak is not None:
             metrics[f"{stage}/peak_memory_mb"] = peak / 2**20
+        self._send(metrics, step)
+
+    def _send(self, metrics: Mapping[str, float | int], step: int) -> None:
+        """Log numbers, if there are any, opening the backend run first.
+
+        Args:
+            metrics: Numbers keyed by name.
+            step: Training step they belong to.
+        """
         if metrics:
             self._ensure_open()
             self._log(metrics, step)
+
+    def _upload(
+        self,
+        kind: ArtifactTypes,
+        key: str,
+        paths: Sequence[Path],
+        step: int,
+        tags: Sequence[str] = (),
+    ) -> None:
+        """Upload files, opening the backend run first.
+
+        Args:
+            kind: What the files hold.
+            key: Name they are filed under.
+            paths: The files.
+            step: Training step they belong to.
+            tags: Further aliases, e.g. `"best"`.
+        """
+        self._ensure_open()
+        self._log_artifacts(kind, key, paths, step, tags)
+
+    @staticmethod
+    def _files(payload: Mapping[str, Any]) -> list[Path]:
+        """Return the files an event's payload names.
+
+        Args:
+            payload: Payload of an `EXPORTED` event.
+        """
+        return [Path(f) for f in payload.get("files", ())]
 
     def _ensure_open(self) -> None:
         """Open the backend run before its first log; a fresh one logs its config."""
