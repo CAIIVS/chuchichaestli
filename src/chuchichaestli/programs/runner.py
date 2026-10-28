@@ -377,8 +377,9 @@ class Runner:
         apply_backends_settings(self.backends)
         self._muted.clear()
         self._unplaced.clear()
+        resumed = self._resumed_manifest()
         if self.seed is None:
-            self.seed = self._resumed_seed()
+            self.seed = int(resumed.get("seed", root_seed()))
         seed_ambient(self.seed)
         self.check()
         self._provision()
@@ -402,7 +403,7 @@ class Runner:
             compile=self.compile,
             project=self.project,
             experiment=self.experiment,
-            run_name=self._name_run(),
+            run_name=self._name_run(resumed),
         )
         failure: str | None = None
         cancelled = False
@@ -447,22 +448,24 @@ class Runner:
                 )
         return self.program.progress()
 
-    def _resumed_seed(self) -> int:
-        """Return the seed the run being resumed was seeded with, or torch's."""
+    def _resumed_manifest(self) -> Mapping[str, Any]:
+        """Return the manifest of the checkpoint this run resumes, or nothing."""
         store = self.checkpoints
-        if store is None:
-            return root_seed()
-        return int(store.read_manifest(self.resume).get("seed", root_seed()))
+        if self.resume is None or store is None:
+            return {}
+        return store.read_manifest(self.resume)
 
-    def _name_run(self) -> str:
-        """Return the run's name: the given one, the resumed one, or a new one."""
+    def _name_run(self, resumed: Mapping[str, Any]) -> str:
+        """Return the run's name: the given one, the resumed one, or a new one.
+
+        Args:
+            resumed: Manifest of the checkpoint the run resumes, or nothing.
+        """
         if self.run_name is not None:
             return self.run_name
+        if resumed.get("run_name"):
+            return resumed["run_name"]
         store = self.checkpoints
-        if self.resume is not None and store is not None:
-            resumed = store.read_manifest(self.resume).get("run_name")
-            if resumed:
-                return resumed
         taken = store.run_names() if store is not None else ()
         return self.topology.broadcast(unique_name(taken))
 
