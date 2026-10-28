@@ -2141,15 +2141,11 @@ class Predict(DeferredStatesMixin, Inference):
             self._written = self._gather_shards(ctx, self.archive)
             if self.targets_archive is not None:
                 self._gather_shards(ctx, self.targets_archive)
-            ctx.publish(f"{self.name}/archive", self._written)
         else:
             self._predictions = self._gather_batches(ctx, self._predictions)
             self._truths = self._gather_batches(ctx, self._truths)
             self._deferred_states = self._in_memory_results()
-            y = self.predictions
-            if y is not None:
-                ctx.publish(f"{self.name}/predictions", y)
-        self._publish_pairs(ctx)
+        self._publish_results(ctx)
         if self._written is not None:
             ctx.emit(
                 EventType.EXPORTED,
@@ -2176,14 +2172,22 @@ class Predict(DeferredStatesMixin, Inference):
         """
         if self.archive is not None:
             self._written = self._rank_path(ctx, self.archive)
-            ctx.publish(f"{self.name}/archive", self._written)
         else:
             kept = self._deferred_states or {}
             self._predictions = [kept["predictions"]] if "predictions" in kept else []
             self._truths = [kept["truths"]] if "truths" in kept else []
-            y = self.predictions
-            if y is not None:
-                ctx.publish(f"{self.name}/predictions", y)
+        self._publish_results(ctx)
+
+    def _publish_results(self, ctx: Context) -> None:
+        """Publish the archive or the predictions kept, and the pairs beside them.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        if self._written is not None:
+            ctx.publish(f"{self.name}/archive", self._written)
+        elif (y := self.predictions) is not None:
+            ctx.publish(f"{self.name}/predictions", y)
         self._publish_pairs(ctx)
 
     def archive_files(self, world_size: int) -> list[Path]:
