@@ -51,6 +51,40 @@ THRESHOLD_MODES: frozenset[str] = frozenset(get_args(ThresholdModeTypes))
 CHECKPOINT_UNIT_MAP: dict[str, EventType] = units(CheckpointUnitTypes)
 BAR_UNIT_MAP: dict[str, EventType] = units(BarUnitTypes)
 
+
+def worst(mode: MonitorModeTypes) -> float:
+    """Return the value every observation improves on, for a monitor's mode.
+
+    Args:
+        mode: `"min"` when lower is better, `"max"` when higher is.
+    """
+    return math.inf if mode == "min" else -math.inf
+
+
+def improves(
+    value: float,
+    best: float,
+    mode: MonitorModeTypes,
+    threshold: float = 0.0,
+    threshold_mode: ThresholdModeTypes = "abs",
+) -> bool:
+    """Return whether a value beats the best so far by more than a threshold.
+
+    Args:
+        value: The newly observed value.
+        best: The best value observed before it.
+        mode: `"min"` when lower is better, `"max"` when higher is.
+        threshold: Margin it has to beat the best by.
+        threshold_mode: Whether `threshold` is a fraction of the best
+            (`"rel"`) or an absolute margin (`"abs"`).
+    """
+    if threshold_mode == "rel":
+        if mode == "min":
+            return value < best * (1.0 - threshold)
+        return value > best * (1.0 + threshold)
+    return value < best - threshold if mode == "min" else value > best + threshold
+
+
 __all__ = [
     "ProgressBar",
     "Console",
@@ -476,7 +510,7 @@ class EarlyStop:
         self.patience = patience
         self.threshold = threshold
         self.threshold_mode = threshold_mode
-        self.best = math.inf if mode == "min" else -math.inf
+        self.best = worst(mode)
         self.waited = 0
 
     def __repr__(self) -> str:
@@ -507,13 +541,9 @@ class EarlyStop:
         Args:
             value: The newly observed value.
         """
-        if self.mode == "min" and self.threshold_mode == "rel":
-            return value < self.best * (1.0 - self.threshold)
-        if self.mode == "min" and self.threshold_mode == "abs":
-            return value < self.best - self.threshold
-        if self.mode == "max" and self.threshold_mode == "rel":
-            return value > self.best * (self.threshold + 1.0)
-        return value > self.best + self.threshold
+        return improves(
+            value, self.best, self.mode, self.threshold, self.threshold_mode
+        )
 
     def on(self, event: Event) -> Signal:
         """Watch the monitored value and ask to stop when it stalls.
@@ -865,7 +895,7 @@ class Checkpointer:
         self.at_end = at_end
         self.monitor = monitor
         self.mode = mode
-        self.best = math.inf if mode == "min" else -math.inf
+        self.best = worst(mode)
         self._score: float | None = None
         self._store: CheckpointStore | None = None
         self._runner: Runner | None = None
@@ -916,7 +946,7 @@ class Checkpointer:
         self._due = False
         self._at = None
         self._at_path = None
-        self.best = math.inf if self.mode == "min" else -math.inf
+        self.best = worst(self.mode)
         self._score = None
         self._store = CheckpointStore(
             self.store or runner.store,
@@ -966,11 +996,7 @@ class Checkpointer:
         if value is None:
             return
         self._score = float(value)
-        if self.mode == "min":
-            improved = self._score < self.best
-        else:
-            improved = self._score > self.best
-        if improved:
+        if improves(self._score, self.best, self.mode):
             self.best = self._score
             self._due = True
 
