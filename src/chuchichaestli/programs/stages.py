@@ -347,7 +347,7 @@ class Exporter(StageBlock, ABC):
                 written = self.write(target, ctx[self.source], ctx)
             files = [str(f) for f in (written if written is not None else [target])]
         files = ctx.topology.broadcast(files)
-        ctx.emit(EventType.EXPORTED, files=files, kind=self.kind, source=self.source)
+        ctx.exported(files, self.kind, self.source)
 
 
 class WeightsExport(Exporter):
@@ -2147,12 +2147,8 @@ class Predict(DeferredStatesMixin, Inference):
             self._deferred_states = self._in_memory_results()
         self._publish_results(ctx)
         if self._written is not None:
-            ctx.emit(
-                EventType.EXPORTED,
-                files=[str(f) for f in self.archive_files(ctx.topology.world_size)],
-                kind="tensor",
-                source=f"{self.name}/archive",
-            )
+            files = self.archive_files(ctx.topology.world_size)
+            ctx.exported(files, "tensor", f"{self.name}/archive")
         return super().leave(ctx)
 
     def _in_memory_results(self) -> dict[str, torch.Tensor]:

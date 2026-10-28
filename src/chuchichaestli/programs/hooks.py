@@ -1050,11 +1050,10 @@ class Checkpointer:
                 score=checkpoint.score,
             )
             files = sorted(f for f in checkpoint.path.iterdir() if f.is_file())
-            self._ctx.emit(
-                EventType.EXPORTED,
-                files=[str(f) for f in files],
-                kind="checkpoint",
-                source="checkpoint",
+            self._ctx.exported(
+                files,
+                "checkpoint",
+                "checkpoint",
                 index=checkpoint.index,
                 best=checkpoint.score is not None
                 and checkpoint.score["value"] == self.best,

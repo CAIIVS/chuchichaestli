@@ -4,12 +4,14 @@
 """Execution contexts: one per stage entry, chained to the enclosing stage."""
 
 from __future__ import annotations
+import os
 import warnings
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any
 import torch
 from chuchichaestli.programs.events import (
     UNIT_MAP,
+    ArtifactTypes,
     Event,
     EventType,
     Progress,
@@ -365,6 +367,27 @@ class Context:
             if counts_toward(event, unit):
                 self._counts[unit] = self._counts.get(unit, 0) + 1
         return self._dispatch(event) if self._dispatch is not None else Signal.GO
+
+    def exported(
+        self,
+        files: Iterable[str | os.PathLike[str]],
+        kind: ArtifactTypes,
+        source: str,
+        **extra: Any,
+    ) -> Signal:
+        """Announce files written out, as an `EXPORTED` event, and return the verdict.
+
+        Args:
+            files: The files written.
+            kind: What they hold: `"image"`, `"tensor"`, `"weights"` or
+                `"checkpoint"`.
+            source: Name of the binding they were written from.
+            extra: Further JSON-serializable detail, e.g. a checkpoint's index.
+        """
+        paths = [str(f) for f in files]
+        return self.emit(
+            EventType.EXPORTED, files=paths, kind=kind, source=source, **extra
+        )
 
     def count(self, unit: str) -> int:
         """Return how many of a unit the run has completed.
