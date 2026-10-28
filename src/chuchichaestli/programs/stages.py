@@ -905,6 +905,24 @@ class Every(Phase):
         self._visits = int(state.get("visits", 0))
 
 
+class DeferredStatesMixin:
+    """Holds a stage's component states between a checkpoint and their use."""
+
+    _deferred_states: dict[str, Any] | None = None
+
+    def component_states(self) -> dict[str, Any]:
+        """Return the component states the stage holds, for a checkpoint."""
+        return dict(self._deferred_states or {})
+
+    def defer_component_states(self, state: dict[str, Any]) -> None:
+        """Hold component states a checkpoint restored, until the stage uses them.
+
+        Args:
+            state: Mapping as returned by `component_states`.
+        """
+        self._deferred_states = dict(state)
+
+
 class StageLoop(InitArgMixin, ABC):
     """A stage that repeats a unit of work until it has done enough.
 
@@ -1205,7 +1223,7 @@ class StageLoop(InitArgMixin, ABC):
         ctx.progress = self._progress
 
 
-class Train(StageLoop):
+class Train(DeferredStatesMixin, StageLoop):
     """Updates a model's parameters against an objective.
 
     Attributes:
@@ -1361,7 +1379,6 @@ class Train(StageLoop):
         self._ema: dict[str, Ema] = {}
         self._sweepwise_schedulers: dict[str | None, LRScheduler] = {}
         self._specs: dict[str | None, OptimSpec] = {}
-        self._deferred_states: dict[str, Any] | None = None
         self._objective: Objective | None = None
         self._monitors: dict[str | None, str | None] = {}
         self._rates: dict[str | None, float] = {}
@@ -1617,14 +1634,6 @@ class Train(StageLoop):
         self.swa_window.build(self.model_binding, {}, ctx)
         self._load_averages(self._deferred_states)
 
-    def defer_component_states(self, state: dict[str, Any]) -> None:
-        """Hold the component states until `prepare` has built them again.
-
-        Args:
-            state: Mapping as returned by `component_states`.
-        """
-        self._deferred_states = dict(state)
-
 
 Finetune = partialclass(
     "Finetune",
@@ -1730,7 +1739,7 @@ class Inference(StageLoop):
         return ctx[f"{self.model_binding}/{self.weights}"]
 
 
-class Eval(Inference):
+class Eval(DeferredStatesMixin, Inference):
     """Accumulates metrics over a pass, publishing each when it ends.
 
     Attributes:
@@ -1768,7 +1777,6 @@ class Eval(Inference):
             raise ValueError(f"Eval({self.name!r}) was given no metric to compute.")
         self.targets = targets
         self._scored: dict[str, float] = {}
-        self._deferred_states: dict[str, Any] | None = None
 
     def prepare(self, ctx: Context) -> None:
         """Move the metrics to the device and clear what they hold.
@@ -1856,10 +1864,6 @@ class Eval(Inference):
             if isinstance(metric, Stateful)
         }
 
-    def component_states(self) -> dict[str, Any]:
-        """Return what each metric held when the stage last finished."""
-        return dict(self._deferred_states or {})
-
     def load_component_states(self, state: dict[str, Any]) -> None:
         """Restore what each metric had accumulated.
 
@@ -1870,14 +1874,6 @@ class Eval(Inference):
             metric = self.metrics.get(key)
             if isinstance(metric, Stateful):
                 metric.load_state_dict(saved)
-
-    def defer_component_states(self, state: dict[str, Any]) -> None:
-        """Hold the component states until the stage publishes again.
-
-        Args:
-            state: Mapping as returned by `component_states`.
-        """
-        self._deferred_states = dict(state)
 
     def republish(self, ctx: Context) -> None:
         """Publish the scores again from the deferred component states.
@@ -1891,7 +1887,7 @@ class Eval(Inference):
         self._publish_scores(ctx)
 
 
-class Predict(Inference):
+class Predict(DeferredStatesMixin, Inference):
     """Runs a model or sampler over an inference pass and publishes results.
 
     Given an `archive` the predictions stream to it and are not kept; without
@@ -1967,7 +1963,6 @@ class Predict(Inference):
         self._written: Path | None = None
         self._predictions: list[torch.Tensor] = []
         self._truths: list[torch.Tensor] = []
-        self._deferred_states: dict[str, Any] | None = None
         if pairs:
             self.provides += (f"{self.name}/pairs",)
 
@@ -2172,18 +2167,6 @@ class Predict(Inference):
         if self._truths:
             kept["truths"] = torch.cat(self._truths).detach().cpu()
         return kept
-
-    def component_states(self) -> dict[str, Any]:
-        """Return what the stage kept in memory when it last finished."""
-        return dict(self._deferred_states or {})
-
-    def defer_component_states(self, state: dict[str, Any]) -> None:
-        """Hold what a finished stage kept, until it publishes again.
-
-        Args:
-            state: Mapping as returned by `component_states`.
-        """
-        self._deferred_states = dict(state)
 
     def republish(self, ctx: Context) -> None:
         """Publish again what the stage published before a resume.
