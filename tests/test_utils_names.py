@@ -22,6 +22,14 @@ from chuchichaestli.utils.names import (
 class Scripted(random.Random):
     """A random source that picks the given words, in order."""
 
+    def __new__(cls, *picks: str):
+        """Create the source; `random.Random.__new__` takes a seed only before 3.11.
+
+        Args:
+            picks: Words to return, handled by `__init__`.
+        """
+        return super().__new__(cls)
+
     def __init__(self, *picks: str):
         """Constructor.
 
