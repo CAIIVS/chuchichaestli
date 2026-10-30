@@ -4,6 +4,7 @@
 """Tests for running across several processes without deadlocking one."""
 
 import os
+import warnings
 from pathlib import Path
 
 import pytest
@@ -747,6 +748,103 @@ def test_the_shards_can_be_left_apart(tmp_path):
         for shard in tmp_path.glob("*.h5")
     )
     assert rows == 8
+
+
+class CancelAtAdvance:
+    """Cancel the run at a given program step, on every rank alike."""
+
+    def __init__(self, advances: int):
+        """Constructor.
+
+        Args:
+            advances: Program steps to allow before cancelling.
+        """
+        self.advances = advances
+        self.seen = 0
+
+    def on(self, event):
+        """Count program steps and cancel once enough have gone by.
+
+        Args:
+            event: What the runner just did.
+        """
+        if event.type is EventType.STAGE_ADVANCED:
+            self.seen += 1
+            if self.seen == self.advances:
+                raise C3liRunCancelled("cancelled")
+        return Signal.GO
+
+
+def _resumes_predict(rank, world, results, port, store, archive, merge):
+    """Predict, cancel partway, resume, and report what this rank wrote.
+
+    Args:
+        rank: Index of this process.
+        world: Number of processes taking part.
+        results: Shared mapping the ranks report into.
+        port: Rendezvous port.
+        store: Where checkpoints are written.
+        archive: File the predictions are written to.
+        merge: Whether the shards are joined when the run ends.
+    """
+    topology = join_group(rank, world, port)
+    try:
+
+        def sampler():
+            return Predict(
+                "sample",
+                model=model(),
+                data=ramp(16),
+                batch_size=2,
+                archive=archive,
+                merge=merge,
+            )
+
+        with pytest.raises(C3liRunCancelled):
+            Runner(
+                Program(stages=[sampler()]),
+                seed=42,
+                topology=topology,
+                store=store,
+                hooks=[CancelAtAdvance(2), Checkpointer()],
+            ).run()
+        topology.barrier()
+        resumed = sampler()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            Runner(
+                Program(stages=[resumed]),
+                seed=42,
+                topology=topology,
+                store=store,
+                resume="last",
+                hooks=[],
+            ).run()
+        over = any("starts over" in str(w.message) for w in caught)
+        results[rank] = (str(resumed._written), over)
+    finally:
+        topology.close()
+
+
+@pytest.mark.parametrize("merge", [True, False], ids=["merged", "shards"])
+def test_a_predict_resumed_partway_across_processes_holds_every_row(tmp_path, merge):
+    """Each rank takes up its own shard; a merged file cannot be split, so is redone."""
+    from chuchichaestli.programs.topology import Local
+
+    archive = tmp_path / "out.safetensors"
+    reported = under_ddp(
+        _resumes_predict, free_port(), str(tmp_path / "run"), str(archive), merge
+    )
+    alone = Predict("sample", model=model(), data=ramp(16), batch_size=2)
+    Runner(
+        Program(stages=[alone]), seed=42, topology=Local(device="cpu"), hooks=[]
+    ).run()
+    files = sorted({path for path, _ in reported.values()})
+    written = torch.cat(list(read_archive(files, "data")))
+    assert sorted(written.flatten().tolist()) == sorted(
+        alone.predictions.flatten().tolist()
+    )
+    assert {over for _, over in reported.values()} == {merge}
 
 
 class Exports:

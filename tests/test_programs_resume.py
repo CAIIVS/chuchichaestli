@@ -837,6 +837,42 @@ def test_what_a_finished_predict_published_survives_a_resume(tmp_path, archived)
     assert torch.equal(carried["truths"], whole["truths"])
 
 
+@pytest.mark.parametrize("archived", [False, True], ids=["in_memory", "archive"])
+def test_a_predict_resumed_partway_keeps_what_it_had_produced(tmp_path, archived):
+    """The batches before the interruption are not lost to the seek past them."""
+
+    def archive(name):
+        return tmp_path / name / "sample.safetensors" if archived else None
+
+    store, whole, carried = tmp_path / "run", {}, {}
+    Runner(predicted(whole, archive("whole")), seed=42, hooks=[]).run()
+    interrupted(predicted({}, archive("carried")), store, at=6, graceful=True)
+    last = sorted(p for p in store.iterdir() if p.is_dir())[-1]
+    state = json.loads((last / "manifest.json").read_text())["state"]["program"]
+    assert state["index"] == 1
+    assert state["child"]["progress"]["global_step"] == 2
+    resumed(predicted(carried, archive("carried")), store)
+    assert torch.equal(carried["predicted"], whole["predicted"])
+    assert torch.equal(carried["truths"], whole["truths"])
+
+
+def test_a_predict_whose_archive_is_gone_starts_its_pass_over(tmp_path):
+    """Without the rows it had written, the pass is redone rather than cut short.
+
+    The model's dropout draws again, so only the rows, not their values, match.
+    """
+    whole_archive = tmp_path / "whole" / "sample.safetensors"
+    carried_archive = tmp_path / "carried" / "sample.safetensors"
+    store, whole, carried = tmp_path / "run", {}, {}
+    Runner(predicted(whole, whole_archive), seed=42, hooks=[]).run()
+    interrupted(predicted({}, carried_archive), store, at=6, graceful=True)
+    carried_archive.unlink()
+    with pytest.warns(UserWarning, match="the pass starts over"):
+        resumed(predicted(carried, carried_archive), store)
+    assert carried["predicted"].shape == whole["predicted"].shape
+    assert torch.equal(carried["truths"], whole["truths"])
+
+
 def counted(seen: list, export=None) -> Program:
     """Build a program that trains, then notes the run's counts.
 

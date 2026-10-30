@@ -4,6 +4,7 @@
 """The stage register: blocks that run once, and phases that hold stages."""
 
 from __future__ import annotations
+import warnings
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -21,6 +22,7 @@ from chuchichaestli.data.archive import (
     archive_for,
     merge_archives,
     open_archive,
+    read_archive,
     targets_path,
 )
 from chuchichaestli.data.batch import (
@@ -1960,9 +1962,11 @@ class Predict(DeferredStatesMixin, Inference):
         self.targets = targets
         self.reference = reference
         self._writers: dict[Path, Archive] = {}
+        self._rows: dict[Path, int] = {}
         self._written: Path | None = None
         self._predictions: list[torch.Tensor] = []
         self._truths: list[torch.Tensor] = []
+        self._deferred_results: dict[str, Any] | None = None
         if pairs:
             self.provides += (f"{self.name}/pairs",)
 
@@ -1995,6 +1999,8 @@ class Predict(DeferredStatesMixin, Inference):
         self._predictions = []
         self._truths = []
         self._writers = {}
+        self._rows = {}
+        self._deferred_results = None
         if self.archive is None:
             return
         rank = None if ctx.topology.world_size == 1 else ctx.topology.rank
@@ -2074,6 +2080,7 @@ class Predict(DeferredStatesMixin, Inference):
             in_memory.append(batch)
             return
         writer.write(batch)
+        self._rows[archive] = self._rows.get(archive, 0) + len(batch)
 
     @property
     def predictions(self) -> torch.Tensor | None:
@@ -2159,6 +2166,123 @@ class Predict(DeferredStatesMixin, Inference):
         if self._truths:
             kept["truths"] = torch.cat(self._truths).detach().cpu()
         return kept
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return the stage's resumable state, with what its pass has produced.
+
+        Kept predictions are recorded whole; archived ones stay in their
+        file, of which only the rows written so far are recorded.
+        """
+        state = super().state_dict()
+        if self.archive is None:
+            state["produced"] = self._in_memory_results()
+        else:
+            state["rows"] = {
+                "predictions": self._rows.get(self.archive, 0),
+                "truths": self._rows.get(self.targets_archive, 0),
+            }
+        return state
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore state previously returned by `state_dict`.
+
+        What the pass had produced is taken up as the stage next executes.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+        """
+        super().load_state_dict(state)
+        if self._progress.global_step:
+            self._deferred_results = state
+
+    def execute(self, ctx: Context) -> Signal:
+        """Take up what a resumed pass had produced, then do one unit of work.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        if self._deferred_results is not None:
+            state, self._deferred_results = self._deferred_results, None
+            self._restore_results(state, ctx)
+        return super().execute(ctx)
+
+    def _restore_results(self, state: dict[str, Any], ctx: Context) -> None:
+        """Take up what the pass produced before a resume, or start it over.
+
+        Every process must find its own share, or they all start over.
+
+        Args:
+            state: Mapping as returned by `state_dict`.
+            ctx: Execution context for this entry.
+        """
+        partial_archives = self._partial_archives(state.get("rows", {}), ctx)
+        if ctx.topology.world_size > 1:
+            found = torch.tensor(float(partial_archives is not None), device=ctx.device)
+            if not ctx.topology.reduce(found, "min").item():
+                partial_archives = None
+        if partial_archives is None:
+            self._restart_pass(ctx)
+            return
+        produced = state.get("produced", {})
+        if "predictions" in produced:
+            self._predictions = [produced["predictions"]]
+        if "truths" in produced:
+            self._truths = [produced["truths"]]
+        for archive, path in partial_archives.items():
+            for batch in read_archive(path, self.key, dtype=None):
+                self._record(archive, batch, [])
+
+    def _partial_archives(
+        self, rows: Mapping[str, int], ctx: Context
+    ) -> dict[Path, Path] | None:
+        """Return the file holding each archive's rows so far, or `None`.
+
+        Kept predictions are in the checkpoint, but only one process's. An
+        archive's rows count only from a file holding exactly as many as
+        were recorded, as the interrupted run's `leave` lands it; a merged
+        archive cannot be told apart by process.
+
+        Args:
+            rows: Rows each archive held, as `state_dict` records them.
+            ctx: Execution context for this entry.
+        """
+        world_size = ctx.topology.world_size
+        if self.archive is None:
+            return {} if world_size == 1 else None
+        if world_size > 1 and self.merge:
+            return None
+        rank = None if world_size == 1 else ctx.topology.rank
+        found: dict[Path, Path] = {}
+        for archive, kind in (
+            (self.archive, "predictions"),
+            (self.targets_archive, "truths"),
+        ):
+            expected = int(rows.get(kind, 0))
+            if archive is None or not expected:
+                continue
+            path = self.shard_path(rank, archive)
+            if not path.is_file():
+                return None
+            if len(open_archive(path, self.key, dtype=None)) != expected:
+                return None
+            found[archive] = path
+        return found
+
+    def _restart_pass(self, ctx: Context) -> None:
+        """Begin the pass again, what it produced before being out of reach.
+
+        Args:
+            ctx: Execution context for this entry.
+        """
+        warnings.warn(
+            f"{self!r} was checkpointed partway through its pass, and what it "
+            "had produced cannot be taken up here; the pass starts over.",
+            stacklevel=2,
+        )
+        self.total_steps -= self._progress.global_step
+        self.total_passes -= self._progress.epoch
+        self._progress = Progress()
+        ctx.progress = self._progress
 
     def republish(self, ctx: Context) -> None:
         """Publish again what the stage published before a resume.
