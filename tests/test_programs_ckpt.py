@@ -216,13 +216,19 @@ def test_an_interrupted_checkpoint_is_passed_over(tmp_path):
     assert store.resolve("last") == good.path
 
 
+def explode(path, payload):
+    """Fail to write a manifest.
+
+    Args:
+        path: File to write.
+        payload: What to serialize.
+    """
+    raise OSError("disk full")
+
+
 def test_the_manifest_lands_after_the_state(tmp_path, monkeypatch):
-    """A crash between the two must leave no manifest, not a stale pairing."""
+    """A crash between the two must leave no checkpoint, not a stale pairing."""
     store = CheckpointStore(tmp_path)
-
-    def explode(path, payload):
-        raise OSError("disk full")
-
     monkeypatch.setattr(CheckpointStore, "_write_json", staticmethod(explode))
     with pytest.raises(OSError):
         store.save(
@@ -231,14 +237,12 @@ def test_the_manifest_lands_after_the_state(tmp_path, monkeypatch):
             bindings={},
             topology=Local(device="cpu"),
         )
-    directory = store.directory_for(1)
-    assert (directory / "state.safetensors").is_file()
-    assert not (directory / store.manifest).exists()
+    assert not store.directory_for(1).exists()
     assert store.checkpoints() == []
 
 
 def test_an_unfinished_write_leaves_no_scratch_files(tmp_path, monkeypatch):
-    """`staged` must clean up after itself."""
+    """The staged directory goes, whatever failed inside it."""
     store = CheckpointStore(tmp_path)
     monkeypatch.setattr(
         "chuchichaestli.programs.ckpt.write_state",
@@ -251,7 +255,24 @@ def test_an_unfinished_write_leaves_no_scratch_files(tmp_path, monkeypatch):
             bindings={},
             topology=Local(device="cpu"),
         )
-    assert not list(store.directory_for(1).glob("*.part*"))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_failed_rewrite_leaves_the_checkpoint_it_would_replace(tmp_path, monkeypatch):
+    """A final save at the index of the last one must not half-replace it."""
+    store = CheckpointStore(tmp_path)
+    save = dict(
+        index=1, program=recorder([], "a"), bindings={}, topology=Local(device="cpu")
+    )
+    store.save(seed=1, **save)
+    with monkeypatch.context() as patched:
+        patched.setattr(CheckpointStore, "_write_json", staticmethod(explode))
+        with pytest.raises(OSError):
+            store.save(seed=2, **save)
+    assert store.load(1).seed == 1
+    store.save(seed=2, **save)
+    assert store.load(1).seed == 2
+    assert [p.name for p in tmp_path.iterdir()] == [store.directory_for(1).name]
 
 
 def test_keep_retains_only_the_newest(tmp_path):

@@ -217,7 +217,8 @@ class CheckpointStore:
             return []
         found: list[tuple[int, Path]] = []
         for directory in self.root.iterdir():
-            if not directory.is_dir():
+            # hidden stage directories are skipped
+            if not directory.is_dir() or directory.name.startswith("."):
                 continue
             manifest = self._read_json(directory / self.manifest)
             if manifest is None:
@@ -370,7 +371,7 @@ class CheckpointStore:
             run_name: Name of the run writing it.
             counts: Units the run has completed.
         """
-        directory = self.directory_for(index, create=True)
+        directory = self.directory_for(index)
         models = {n: v for n, v in bindings.items() if isinstance(v, nn.Module)}
         rest = {n: v for n, v in bindings.items() if n not in models}
         weights = {n: topology.state_of(v) for n, v in models.items()}
@@ -385,41 +386,46 @@ class CheckpointStore:
         if not topology.is_main:
             return None
 
-        # write model states
-        specs = {n: writable_spec(topology.unwrap(v)) for n, v in models.items()}
-        files: dict[str, Path] = {}
-        for name, tensors in weights.items():
-            path = directory / self._weight_name(name, set(files.values()))
-            with staged(path) as (scratch,):
-                write_model_state(scratch, tensors, spec=specs[name])
-            files[name] = path
-        # write states for optimizer, LR scheduler, etc.
-        tensors, skeleton = unpack_tree(payload)
-        state_path = directory / f"{self.state_key}{self.suffix}"
-        with staged(state_path) as (scratch,):
-            write_state(scratch, tensors)
-        # write manifest
-        progress = progress if progress is not None else Progress()
-        signature = stage_signature(program)
-        manifest = {
-            "version": SCHEMA_VERSION,
-            "index": index,
-            "seed": seed,
-            "unit": unit,
-            "at": at,
-            "signature": signature,
-            "progress": progress.to_dict(),
-            "weights": {n: p.name for n, p in files.items()},
-            "state_file": state_path.name,
-            "state": skeleton,
-        }
-        if score is not None:
-            manifest["score"] = dict(score)
-        if run_name is not None:
-            manifest["run_name"] = run_name
-        if counts is not None:
-            manifest["counts"] = dict(counts)
-        self._write_json(directory / self.manifest, manifest)
+        scratch = directory.with_name(f".{directory.name}.part")
+        shutil.rmtree(scratch, ignore_errors=True)
+        scratch.mkdir(parents=True)
+        try:
+            # write model states
+            specs = {n: writable_spec(topology.unwrap(v)) for n, v in models.items()}
+            files: dict[str, Path] = {}
+            for name, tensors in weights.items():
+                filename = self._weight_name(name, set(files.values()))
+                write_model_state(scratch / filename, tensors, spec=specs[name])
+                files[name] = directory / filename
+            # write states for optimizer, LR scheduler, etc.
+            tensors, skeleton = unpack_tree(payload)
+            state_file = f"{self.state_key}{self.suffix}"
+            write_state(scratch / state_file, tensors)
+            # write manifest
+            progress = progress if progress is not None else Progress()
+            signature = stage_signature(program)
+            manifest = {
+                "version": SCHEMA_VERSION,
+                "index": index,
+                "seed": seed,
+                "unit": unit,
+                "at": at,
+                "signature": signature,
+                "progress": progress.to_dict(),
+                "weights": {n: p.name for n, p in files.items()},
+                "state_file": state_file,
+                "state": skeleton,
+            }
+            if score is not None:
+                manifest["score"] = dict(score)
+            if run_name is not None:
+                manifest["run_name"] = run_name
+            if counts is not None:
+                manifest["counts"] = dict(counts)
+            self._write_json(scratch / self.manifest, manifest)
+            self._publish(scratch, directory)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
         # delete old checkpoints if `keep` is set
         self.prune()
         return Checkpoint(
@@ -441,6 +447,23 @@ class CheckpointStore:
             run_name=run_name,
             counts=dict(counts or {}),
         )
+
+    @staticmethod
+    def _publish(scratch: Path, directory: Path) -> None:
+        """Move a finished checkpoint into place, replacing one at its index.
+
+        Args:
+            scratch: Hidden directory the checkpoint was written into.
+            directory: Where it belongs.
+        """
+        if not directory.exists():
+            scratch.rename(directory)
+            return
+        retired = directory.with_name(f".{directory.name}.old")
+        shutil.rmtree(retired, ignore_errors=True)
+        directory.rename(retired)
+        scratch.rename(directory)
+        shutil.rmtree(retired)
 
     def _weight_name(self, binding: str, taken: set[Path]) -> str:
         """Return a filename for a model binding, unique within a checkpoint.
