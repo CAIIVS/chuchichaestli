@@ -552,6 +552,29 @@ def test_a_hook_may_still_abort_the_run():
         Runner(Program([Call("a", fn=lambda c: None)]), hooks=[Stopper()]).run()
 
 
+def test_every_hook_sees_the_event_a_hook_stopped_the_run_on():
+    """A checkpointer listed after a canceller must still see the boundary."""
+
+    class Cancels:
+        """A hook that cancels at the first advance."""
+
+        def on(self, event: Event) -> Signal:
+            """Cancel on the first stage-advanced event.
+
+            Args:
+                event: What the runner just did.
+            """
+            if event.type is EventType.STAGE_ADVANCED:
+                raise C3liRunCancelled("cancelled")
+            return Signal.GO
+
+    later = Record()
+    program = Program([Call("a", fn=lambda c: None), Call("b", fn=lambda c: None)])
+    with pytest.raises(C3liRunCancelled, match="cancelled"):
+        Runner(program, hooks=[Cancels(), later]).run()
+    assert [e.type for e in later.events].count(EventType.STAGE_ADVANCED) == 1
+
+
 def test_muted_hooks_reset_between_runs():
     """A dropped hook gets another chance on the next run."""
     broken = Breaks()

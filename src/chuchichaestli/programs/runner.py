@@ -564,17 +564,27 @@ class Runner:
         """Deliver an event to every hook and combine their verdicts.
 
         A hook that raises is dropped for the rest of the run unless it sets
-        `critical`, so a failing console does not end a long training run.
+        `critical`, so a failing console does not end a long training run. A
+        hook stopping the run does so once every hook has seen the event.
 
         Args:
             event: What the runner just did.
         """
-        signals = [
-            self._guarded(hook, lambda hook=hook: hook.on(event))
-            for hook in self.hooks
-            if id(hook) not in self._muted
-        ]
-        return filter_priority([s for s in signals if s is not None])
+        signals: list[Signal] = []
+        stopped: C3liRunError | None = None
+        for hook in self.hooks:
+            if id(hook) in self._muted:
+                continue
+            try:
+                signal = self._guarded(hook, lambda hook=hook: hook.on(event))
+            except C3liRunError as exc:
+                stopped = stopped or exc
+                continue
+            if signal is not None:
+                signals.append(signal)
+        if stopped is not None:
+            raise stopped
+        return filter_priority(signals)
 
     def _watch(self, *gradients: Any) -> None:
         """Hand an update group's gradients to every hook watching them.
