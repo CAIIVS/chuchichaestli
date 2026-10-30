@@ -308,7 +308,8 @@ class Ddp:
         self.find_unused_parameters = find_unused_parameters
         self.device = self._pin_to_rank(device)
         self._pin_process()
-        if not dist.is_initialized():
+        self._owns_group = not dist.is_initialized()
+        if self._owns_group:
             dist.init_process_group(
                 backend=backend or self._backend(),
                 rank=self.rank,
@@ -468,8 +469,9 @@ class Ddp:
 
     def close(self) -> None:
         """Leave the process group, if this object started one."""
-        if dist.is_initialized():
+        if self._owns_group and dist.is_initialized():
             dist.destroy_process_group()
+            self._owns_group = False
 
     def __repr__(self) -> str:
         """Return a short description of the topology."""

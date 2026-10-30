@@ -1170,6 +1170,25 @@ def test_a_rank_pins_its_device_before_joining_the_group(monkeypatch):
     assert order == ["pin", "init"]
 
 
+@pytest.mark.parametrize("started", [True, False], ids=["own", "callers"])
+def test_closing_leaves_only_a_group_it_started(monkeypatch, started):
+    """A group the caller set up may outlive the run."""
+    import torch.distributed as dist
+
+    destroyed: list[bool] = []
+    initialized = [not started]
+    monkeypatch.setattr(Ddp, "_pin_process", lambda self: None)
+    monkeypatch.setattr(dist, "is_initialized", lambda: initialized[0])
+    monkeypatch.setattr(
+        dist, "init_process_group", lambda **kwargs: initialized.__setitem__(0, True)
+    )
+    monkeypatch.setattr(dist, "destroy_process_group", lambda: destroyed.append(True))
+    monkeypatch.setattr(dist, "get_rank", lambda: 0)
+    monkeypatch.setattr(dist, "get_world_size", lambda: 1)
+    Ddp(device="cpu").close()
+    assert destroyed == ([True] if started else [])
+
+
 class Names:
     """A hook keeping the name the run opened with."""
 
