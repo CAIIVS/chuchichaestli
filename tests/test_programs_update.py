@@ -618,40 +618,89 @@ def test_the_discriminator_steps_on_its_own_loss_alone(kind):
     assert torch.allclose(discriminator_step(kind), alone)
 
 
-def broken_step(policy: UpdatePolicy, model: nn.Module, **kwargs) -> Step:
+def broken_step(
+    policy: UpdatePolicy,
+    model: nn.Module,
+    optimizer: type = SGD,
+    objective=None,
+    **kwargs,
+) -> Step:
     """Apply one step whose gradients are NaN.
 
     Args:
         policy: Says what a non-finite step does.
         model: Model stepped, whose input is NaN.
+        optimizer: Class of the optimizer stepped.
+        objective: Produces the loss; a criterion fed NaN when absent.
         kwargs: Passed on to `Step`.
     """
     update = Step(policy, **kwargs)
-    optimizer = SGD(model.parameters(), lr=0.1)
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.5)
-    update.bind({None: optimizer}, {None: scheduler})
+    built = optimizer(model.parameters(), lr=0.1)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(built, gamma=0.5)
+    update.bind({None: built}, {None: scheduler})
+    inputs = torch.ones(4, 1) if objective else torch.full((4, 1), float("nan"))
     update.apply(
-        Criterion(nn.MSELoss(), model=model),
-        [(torch.full((4, 1), float("nan")), torch.zeros(4, 1))],
+        objective or Criterion(nn.MSELoss(), model=model),
+        [(inputs, torch.zeros(4, 1))],
         a_context(),
     )
     return update
 
 
-def test_a_non_finite_step_stops_the_run_by_default():
+class NanAfterFirst:
+    """A loss that turns NaN once the optimizer has evaluated it once."""
+
+    def __init__(self, model: nn.Module):
+        """Constructor.
+
+        Args:
+            model: Model the loss is computed through.
+        """
+        self.model = model
+        self.calls = 0
+
+    def compute(self, batch, ctx) -> Loss:
+        """Return a finite loss on the first evaluation and NaN after.
+
+        Args:
+            batch: Inputs and targets.
+            ctx: Execution context, unused.
+        """
+        self.calls += 1
+        x, y = batch
+        loss = nn.functional.mse_loss(self.model(x), y)
+        return Loss(loss if self.calls == 1 else loss * float("nan"))
+
+
+@pytest.mark.parametrize("optimizer", [SGD, LBFGS])
+def test_a_non_finite_step_stops_the_run_by_default(optimizer):
     """Silently stepping would leave every later weight NaN."""
     with pytest.raises(C3liRunError, match="Non-finite gradients in t after 0 steps"):
-        broken_step(UpdatePolicy(), linear())
+        broken_step(UpdatePolicy(), linear(), optimizer)
 
 
-def test_a_skipped_step_leaves_the_weights_and_the_schedule():
+@pytest.mark.parametrize("optimizer", [SGD, LBFGS])
+def test_a_skipped_step_leaves_the_weights_and_the_schedule(optimizer):
     """The step did not happen, so neither the weights nor the rate move."""
     model = linear()
     with pytest.warns(UserWarning, match="the step is skipped"):
-        update = broken_step(UpdatePolicy(nonfinite="skip"), model)
+        update = broken_step(UpdatePolicy(nonfinite="skip"), model, optimizer)
     assert model.weight.item() == 1.0
     assert model.weight.grad is None
     assert update.schedulers[None].last_epoch == 0
+
+
+def test_a_closure_step_skipped_partway_puts_everything_back():
+    """L-BFGS moves the weights between evaluations; a skip undoes all of it."""
+    model = linear()
+    objective = NanAfterFirst(model)
+    with pytest.warns(UserWarning, match="the step is skipped"):
+        update = broken_step(
+            UpdatePolicy(nonfinite="skip"), model, LBFGS, objective=objective
+        )
+    assert objective.calls > 1
+    assert model.weight.item() == 1.0
+    assert update.optimizers[None].state_dict()["state"] == {}
 
 
 def test_an_ignored_step_steps_anyway():

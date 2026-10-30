@@ -8,6 +8,7 @@ import functools
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
+from copy import deepcopy
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Literal
 import torch
@@ -583,6 +584,10 @@ def step_schedule(scheduler: LRScheduler, monitor: str | None, ctx: Context) -> 
     scheduler.step(value)
 
 
+class _SkippedStep(Exception):
+    """Abandons a closure step whose gradients are not finite."""
+
+
 class Step(Updater):
     """One optimizer step over a single group of parameters."""
 
@@ -633,6 +638,7 @@ class Step(Updater):
             ValueError: If the step was given more than one micro-batch.
         """
         optimizer = self.optimizers[None]
+        params = self._params[None]
         if len(batches) != 1:
             raise ValueError(
                 f"{type(optimizer).__name__} re-evaluates the loss, so it cannot "
@@ -640,16 +646,34 @@ class Step(Updater):
             )
         view = ctx.at_group(None)
         parts: dict[str, torch.Tensor] = {}
+        latest: list[torch.Tensor] = []
 
         def compute() -> torch.Tensor:
             view.clear_cache()
             loss = objective.compute(batches[0], view)
             parts.clear()
             parts.update({name: v.detach() for name, v in loss.parts.items()})
+            latest[:] = [loss.total.detach()]
             return loss.total
 
-        closure = self.policy.closure_for(optimizer, self._params[None], compute)
-        total = optimizer.step(closure)
+        def check(norm: Callable[[], torch.Tensor]) -> None:
+            if not self._finite(None, norm, ctx):
+                raise _SkippedStep
+
+        start = None
+        if self.policy.nonfinite == "skip":
+            weights = [p.detach().clone() for p in params]
+            start = (weights, deepcopy(optimizer.state_dict()))
+        closure = self.policy.closure_for(optimizer, params, compute, check=check)
+        try:
+            total = optimizer.step(closure)
+        except _SkippedStep:
+            weights, state = start
+            with torch.no_grad():
+                for param, weight in zip(params, weights):
+                    param.copy_(weight)
+            optimizer.load_state_dict(state)
+            return Loss(total=latest[0], parts=parts)
         scheduler = self.schedulers.get(None)
         if scheduler is not None:
             step_schedule(scheduler, self.monitors.get(None), ctx)

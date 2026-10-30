@@ -4,6 +4,7 @@
 """Gradient clipping, optimizer stepping and weight averaging."""
 
 from __future__ import annotations
+import functools
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
@@ -193,6 +194,7 @@ class UpdatePolicy:
         optimizer: Optimizer,
         params: Iterable[nn.Parameter],
         compute: Callable[[], torch.Tensor],
+        check: Callable[[Callable[[], torch.Tensor]], None] | None = None,
     ) -> Callable[[], torch.Tensor]:
         """Return a closure that zeroes, computes, backpropagates and clips.
 
@@ -200,6 +202,8 @@ class UpdatePolicy:
             optimizer: The optimizer to clear each pass.
             params: Parameters whose gradients are clipped.
             compute: Returns the loss for the current batch.
+            check: Called with the gradients' norm before they are clipped;
+                raising abandons the step.
         """
         kept = list(params)
 
@@ -207,7 +211,10 @@ class UpdatePolicy:
             self.zero_grad(optimizer)
             loss = compute()
             loss.backward()
-            self.clip_grads(kept)
+            norm = functools.cache(lambda: grad_norm(kept))
+            if check is not None:
+                check(norm)
+            self.clip_grads(kept, norm)
             return loss
 
         return closure
