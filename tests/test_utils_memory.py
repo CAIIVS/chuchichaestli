@@ -58,6 +58,6 @@ def test_a_device_refusing_is_unmeasured_not_an_error(monkeypatch):
 
 def test_older_torch_falls_back_to_the_device_s_own_module(monkeypatch):
     """Before `torch.accelerator` had counters, `torch.cuda` kept them."""
-    monkeypatch.delattr(torch.accelerator, "max_memory_allocated", raising=False)
+    monkeypatch.delattr(torch, "accelerator", raising=False)
     assert memory._counters(torch.device("cuda")) is torch.cuda
     assert memory._counters(torch.device("meta")) is None
