@@ -15,13 +15,15 @@ from chuchichaestli.models.blocks import (
     EncoderOutBlockTypes,
 )
 from chuchichaestli.models.downsampling import DOWNSAMPLE_FUNCTIONS, DownsampleTypes
-from chuchichaestli.models.maps import DIM_TO_CONV_MAP, require_cls
+from chuchichaestli.models.maps import DIM_TO_CONV_MAP
+from chuchichaestli.utils.registry import require
 from chuchichaestli.models.norm import NormTypes
+from chuchichaestli.models.spec import ModelSpecMixin
 from chuchichaestli.utils import broadcast, broadcast_kwargs, prod
 from collections.abc import Sequence
 
 
-class Encoder(nn.Module):
+class Encoder(ModelSpecMixin, nn.Module):
     """Flexible encoder implementation for autoencoders."""
 
     def __init__(
@@ -111,7 +113,7 @@ class Encoder(nn.Module):
             f"[{n_mults} level(s)]",
         )
         downsample_clss = [
-            require_cls(name, DOWNSAMPLE_FUNCTIONS, "downsampling type")
+            require(name, DOWNSAMPLE_FUNCTIONS, "downsampling type")
             for name in downsample_types
         ]
 

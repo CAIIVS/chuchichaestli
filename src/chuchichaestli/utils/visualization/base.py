@@ -1,19 +1,22 @@
 # SPDX-FileCopyrightText: 2024-present Members of CAIIVS
 # SPDX-FileNotice: Part of chuchichaestli
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Renderer contract and shared styling for model-visualization backends."""
+"""Renderer contract and shared helpers for the visualization backends."""
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal, get_args
 from chuchichaestli.utils.modules import DEFAULT_MODULE_LABELS as _L
+from chuchichaestli.utils.registry import require_module
 from chuchichaestli.utils.ir import IRGraph, IRNode
 from chuchichaestli.utils.visualization.colors import get_color, color_variant
 
 __all__ = [
     "LabelField",
+    "require_mpl",
     "TYPE_COLOR",
     "ZoomSpec",
     "Renderer",
@@ -22,6 +25,35 @@ __all__ = [
     "AspectSpec",
     "normalize_aspect",
 ]
+
+
+def require_mpl(purpose: str = "this backend") -> SimpleNamespace:
+    """Import matplotlib lazily with a helpful error if it is missing.
+
+    Args:
+        purpose: What matplotlib is needed for, named in the error.
+    """
+    matplotlib = require_module("matplotlib", "viz", purpose)
+    from matplotlib.figure import Figure
+    from matplotlib.patches import (
+        Polygon,
+        FancyBboxPatch,
+        FancyArrowPatch,
+        ConnectionPatch,
+        Patch,
+        Rectangle,
+    )
+
+    return SimpleNamespace(
+        matplotlib=matplotlib,
+        Figure=Figure,
+        Polygon=Polygon,
+        FancyBboxPatch=FancyBboxPatch,
+        FancyArrowPatch=FancyArrowPatch,
+        ConnectionPatch=ConnectionPatch,
+        Patch=Patch,
+        Rectangle=Rectangle,
+    )
 
 
 # Node label fields shared by both backends.

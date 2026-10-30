@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence, Sized
 import torch
 from torch.utils.data import Sampler
 from chuchichaestli.data.base import FileDataset
+from chuchichaestli.utils.rng import draw_seed, rng_generator
 
 
 class HierarchicalBatchSampler(Sampler):
@@ -20,25 +21,84 @@ class HierarchicalBatchSampler(Sampler):
     it useful when the grouping logic is handled externally or when subclassing.
     """
 
-    def __init__(self, batches: list[list[int]], shuffle: bool = False):
+    def __init__(
+        self,
+        batches: list[list[int]],
+        shuffle: bool = False,
+        seed: int | None = None,
+        generator: torch.Generator | None = None,
+    ):
         """Constructor.
 
         Args:
             batches: Pre-built list of batches; each batch is a list of indices.
             shuffle: Shuffle the order of batches each epoch (internal batch
                 ordering always preserved).
+            seed: Seed each epoch's order derives from.
+            generator: Draws the order from this instead of the seed.
         """
         self._batches = batches
+        self._init_shuffle(shuffle, seed, generator)
+
+    def _init_shuffle(
+        self, shuffle: bool, seed: int | None, generator: torch.Generator | None
+    ) -> None:
+        """Keep whether and what the order is drawn from, starting at epoch zero.
+
+        Args:
+            shuffle: Shuffle the order of batches each epoch.
+            seed: Seed each epoch's order derives from.
+            generator: Draws the order from this instead of the seed.
+        """
+        self.generator = generator
+        self.seed = seed
+        self.epoch = 0
         self.shuffle = shuffle
 
+    @property
+    def shuffle(self) -> bool:
+        """Whether each pass orders the batches anew."""
+        return self._shuffle
+
+    @shuffle.setter
+    def shuffle(self, shuffle: bool) -> None:
+        if shuffle and self.seed is None and self.generator is None:
+            self.seed = draw_seed()
+        self._shuffle = shuffle
+
+    def set_epoch(self, epoch: int) -> None:
+        """Set the epoch the next pass derives its order from; each pass moves on one.
+
+        Args:
+            epoch: The pass about to start.
+        """
+        self.epoch = epoch
+
+    def _permutation(self, n: int) -> list[int]:
+        """Return the shuffled order of `n` batches for the current epoch.
+
+        Args:
+            n: Batches in a pass.
+        """
+        generator = self.generator or rng_generator(
+            self.seed, f"batches/epoch={self.epoch}"
+        )
+        return torch.randperm(n, generator=generator).tolist()
+
+    def _batch(self, i: int) -> list[int]:
+        """Return the `i`-th batch.
+
+        Args:
+            i: Position of the batch.
+        """
+        return self._batches[i]
+
     def __iter__(self):
-        """Iterator."""
-        if self.shuffle:
-            # Shuffle via torch's RNG
-            order = torch.randperm(len(self._batches)).tolist()
-            yield from (self._batches[i] for i in order)
-        else:
-            yield from self._batches
+        """Iterate one pass's batches, moving on an epoch as it starts."""
+        n = len(self)
+        order = self._permutation(n) if self.shuffle else range(n)
+        self.epoch += 1
+        yield from (self._batch(i) for i in order)
 
     def __len__(self) -> int:
         """Number of batches (not samples)."""
@@ -88,6 +148,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
         shuffle: bool = False,
         drop_last: bool = False,
         order_fn: Callable[[Path], Any] | None = None,
+        seed: int | None = None,
+        generator: torch.Generator | None = None,
     ):
         """Constructor.
 
@@ -102,6 +164,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
             order_fn: Optional `Path -> sortable` key used to order files within
                 a group before emitting their sample indices. Default `None`
                 preserves dataset/glob order.
+            seed: Seed each epoch's order derives from.
+            generator: Draws the order from this instead of the seed.
         """
         if not hasattr(dataset, "files"):
             raise TypeError(
@@ -111,10 +175,10 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
         self.dataset = dataset
         self.batch_size = batch_size
         self.key_fn = key_fn
-        self.shuffle = shuffle
         self.drop_last = drop_last
         self.order_fn = order_fn
         self._batches = self._build_batches()
+        self._init_shuffle(shuffle, seed, generator)
 
     def _build_batches(self) -> list[list[int]]:
         """Group batches with the key function based on dataset filenames."""
@@ -167,6 +231,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
         shuffle: bool = False,
         drop_last: bool = False,
         order_fn: Callable[[Path], Any] | None = None,
+        seed: int | None = None,
+        generator: torch.Generator | None = None,
     ) -> "HierarchicalBatchSampler":
         """Group files by a capture group in their filename.
 
@@ -180,6 +246,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
             shuffle: Shuffle batch order each epoch; batch contents are preserved.
             drop_last: Drop partial batches at the end of each group.
             order_fn: Optional `Path -> sortable` ordering within each group.
+            seed: Seed each epoch's order derives from.
+            generator: Draws the order from this instead of the seed.
         """
         rx = re.compile(pattern)
 
@@ -194,6 +262,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
             shuffle=shuffle,
             drop_last=drop_last,
             order_fn=order_fn,
+            seed=seed,
+            generator=generator,
         )
 
     @classmethod
@@ -206,6 +276,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
         order_cast: Callable[[str], Any] = int,
         fallback: str = "__ungrouped__",
         shuffle: bool = False,
+        seed: int | None = None,
+        generator: torch.Generator | None = None,
     ) -> "HierarchicalBatchSampler":
         """Emit one variable-length, order-sorted batch per filename-key group.
 
@@ -220,6 +292,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
             order_cast: Cast for the order capture into a sortable (default: `int`).
             fallback: Key for unmatched files (merged into one batch; warns).
             shuffle: Shuffle sequence order; intra-sequence order is preserved.
+            seed: Seed each epoch's order derives from.
+            generator: Draws the order from this instead of the seed.
         """
         rx = re.compile(pattern)
 
@@ -249,6 +323,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
             batch_size=None,
             shuffle=shuffle,
             order_fn=order_fn,
+            seed=seed,
+            generator=generator,
         )
 
     @classmethod
@@ -260,6 +336,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
         shuffle: bool = False,
         drop_last: bool = False,
         order_fn: Callable[[Path], Any] | None = None,
+        seed: int | None = None,
+        generator: torch.Generator | None = None,
     ) -> "HierarchicalBatchSampler":
         """Group files by the directory `depth` levels above each file.
 
@@ -271,6 +349,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
             shuffle: Shuffle batch order each epoch; batch contents are preserved.
             drop_last: Drop partial batches at the end of each group.
             order_fn: Optional `Path -> sortable` ordering within each group.
+            seed: Seed each epoch's order derives from.
+            generator: Draws the order from this instead of the seed.
         """
 
         def key_fn(path: Path) -> str:
@@ -285,6 +365,8 @@ class HierarchicalFileBatchSampler(HierarchicalBatchSampler):
             shuffle=shuffle,
             drop_last=drop_last,
             order_fn=order_fn,
+            seed=seed,
+            generator=generator,
         )
 
 
@@ -306,6 +388,8 @@ class SlidingWindowBatchSampler(HierarchicalBatchSampler):
         shuffle: bool = False,
         drop_last: bool = False,
         boundaries: Sequence[int] | None = None,
+        seed: int | None = None,
+        generator: torch.Generator | None = None,
     ):
         """Constructor.
 
@@ -324,6 +408,8 @@ class SlidingWindowBatchSampler(HierarchicalBatchSampler):
             boundaries: Cumulative offsets delimiting independent sequences, e.g.
                 `[0, n0, n0+n1, ...]`. Defaults to the dataset's `_file_offsets`,
                 falling back to a single sequence spanning the whole dataset.
+            seed: Seed each epoch's order derives from.
+            generator: Draws the order from this instead of the seed.
         """
         if window_size < 1:
             raise ValueError(f"window_size must be >= 1, got {window_size}")
@@ -339,10 +425,10 @@ class SlidingWindowBatchSampler(HierarchicalBatchSampler):
         self.horizon = horizon
         self.stride = stride
         self.batch_size = batch_size
-        self.shuffle = shuffle
         self.drop_last = drop_last
         self.boundaries = self._resolve_boundaries(dataset, boundaries)
         self._starts = self._build_starts()
+        self._init_shuffle(shuffle, seed, generator)
 
     @property
     def span(self) -> int:
@@ -398,12 +484,6 @@ class SlidingWindowBatchSampler(HierarchicalBatchSampler):
         span = self.span
         chunk = self._starts[i * self.batch_size : (i + 1) * self.batch_size]
         return [idx for start in chunk for idx in range(start, start + span)]
-
-    def __iter__(self):
-        """Iterate batches, expanding one batch of windows at a time."""
-        n = len(self)
-        order = torch.randperm(n).tolist() if self.shuffle else range(n)
-        yield from (self._batch(i) for i in order)
 
     def __len__(self) -> int:
         """Number of batches (not windows)."""

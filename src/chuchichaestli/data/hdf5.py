@@ -679,28 +679,28 @@ class ZipHDF5Dataset(ZipDataset):
     ) -> "ZipHDF5Dataset":
         """Create ZipHDF5Dataset from named (path, group) pairs.
 
-        Named variant of :meth:`from_tuples`. Each key in ``pairs`` becomes
+        Named variant of :meth:`from_tuples`. Each key in `pairs` becomes
         the corresponding key in the returned sample dict, so no explicit
-        ``zip_as`` mapping is required.
+        `zip_as` mapping is required.
 
         Args:
-            pairs: Dict mapping output names to ``(path, group)`` tuples.
+            pairs: Dict mapping output names to `(path, group)` tuples.
                 Keys become the keys of the returned sample dict; values are
-                ``(path, group)`` tuples as accepted by :meth:`from_tuples`.
-            strict: If ``True``, all datasets must have the same length.
+                `(path, group)` tuples as accepted by :meth:`from_tuples`.
+            strict: If `True`, all datasets must have the same length.
             cache: Cache size for each dataset.
             attrs_cache: Attribute cache size for each dataset.
             preload: Whether to preload all datasets into memory.
             dtype: PyTorch data type for all datasets.
             return_as: Return format for individual datasets.
             **kwargs: Additional keyword arguments forwarded to
-                ``HDF5Dataset``.
+                `HDF5Dataset`.
 
         Raises:
-            ValueError: If ``pairs`` is empty.
+            ValueError: If `pairs` is empty.
 
-        Example::
-
+        Example:
+        ```python
             ds = ZipHDF5Dataset.from_named_tuples(
                 {
                     "image":  ("train_images.h5",  "data/images"),
@@ -710,6 +710,7 @@ class ZipHDF5Dataset(ZipDataset):
                 strict=True,
             )
             sample = ds[0]          # {"image": ..., "mask": ..., "meta": ...}
+        ```
         """
         if not pairs:
             raise ValueError("At least one (path, group) pair must be provided")

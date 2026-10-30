@@ -11,6 +11,7 @@ import torch
 from torchvision.transforms.v2 import Transform
 
 from chuchichaestli.utils import as_inexact
+from chuchichaestli.utils.registry import require
 
 __all__ = ["BasisProjection", "InvBasisProjection", "BASIS_REGISTRY"]
 
@@ -130,10 +131,13 @@ class BasisProjection(Transform):
                 normalised[axis] = spec
                 continue
             name, order = (basis, spec) if isinstance(spec, int) else spec
-            if name not in BASIS_REGISTRY:
-                raise ValueError(
-                    f"unknown basis {name!r}; choose from {sorted(BASIS_REGISTRY)}"
-                )
+            require(
+                name,
+                BASIS_REGISTRY,
+                message=lambda options: (
+                    f"unknown basis {name!r}; choose from {options}"
+                ),
+            )
             if order < 1:
                 raise ValueError(f"order for axis {axis} must be >= 1, got {order}")
             normalised[axis] = (name, order)

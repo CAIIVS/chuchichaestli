@@ -33,6 +33,7 @@ import torch
 import torch.utils.benchmark as benchmark
 
 from chuchichaestli.benchmark.args import without_options
+from chuchichaestli.utils.rng import rng_generator
 from chuchichaestli.utils import as_array
 
 
@@ -87,7 +88,7 @@ class TensorCase:
 
     def sample(self) -> torch.Tensor:
         """Draw the input, identically for every backend and every run."""
-        generator = torch.Generator().manual_seed(self.seed)
+        generator = rng_generator(self.seed, "benchmark")
         return torch.randn(self.tensor_shape, dtype=self.dtype, generator=generator)
 
     def label(self) -> str:

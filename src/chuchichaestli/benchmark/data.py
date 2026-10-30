@@ -23,11 +23,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Protocol, runtime_checkable
-
 import torch
 from torch.utils.data import DataLoader, Dataset
-
-from chuchichaestli.utils import map_nested
+from chuchichaestli.data.batch import batch_to_device
+from chuchichaestli.utils.rng import rng_generator
 
 
 __all__ = ["DataLoaderCase", "drop_page_cache", "read_epoch"]
@@ -57,7 +56,7 @@ class DataLoaderCase(Protocol):
     """A case that says how a loader draws from a dataset."""
 
     batch_size: int
-    workers: int
+    num_workers: int
     order: str
     seed: int
 
@@ -80,14 +79,17 @@ def read_epoch(
         dataset,
         batch_size=case.batch_size,
         shuffle=case.order == "shuffled",
-        num_workers=case.workers,
+        num_workers=case.num_workers,
         pin_memory=device.type == "cuda",
-        generator=torch.Generator().manual_seed(case.seed),
+        generator=rng_generator(case.seed, "benchmark"),
     )
     if device.type == "cpu":
         for _ in loader:
             pass
         return
     for batch in loader:
-        map_nested(batch, lambda x: x.to(device, non_blocking=True))
-    torch.cuda.synchronize()
+        batch_to_device(batch, device)
+    # copies to an accelerator can still be running; wait for them to land
+    synchronize = getattr(getattr(torch, device.type, None), "synchronize", None)
+    if callable(synchronize):
+        synchronize()

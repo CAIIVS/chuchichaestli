@@ -23,6 +23,11 @@ from chuchichaestli.utils.visualization.colors import (
     PALETTE,
 )
 from chuchichaestli.utils.visualization.base import Renderer, ZoomSpec, LabelField
+from chuchichaestli.utils.visualization.images import (
+    IMAGE_FORMATS,
+    NormalizeTypes,
+    save_images,
+)
 from chuchichaestli.utils.visualization.mpl import DiagramStyle, ColorMode
 from chuchichaestli.utils.visualization.mermaid import MermaidDiagram, DiagramDirection
 
@@ -42,6 +47,9 @@ __all__ = [
     "GraphLevel",
     "ZoomSpec",
     "DiagramStyle",
+    "IMAGE_FORMATS",
+    "NormalizeTypes",
+    "save_images",
     "MermaidDiagram",
     "mermaid_diagram",
     "matplotlib_diagram",

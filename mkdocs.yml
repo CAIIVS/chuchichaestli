@@ -10,6 +10,7 @@ nav:
   - Home: index.md
   - Install: install.md
   - Usage: usage.md
+  - Programs: programs.md
   - Benchmarks: benchmarks.md
   - API Reference: reference
 
@@ -50,6 +51,7 @@ markdown_extensions:
   - pymdownx.snippets:
       base_path: ["."]
       check_paths: true
+      dedent_subsections: true
 
 plugins:
   - search

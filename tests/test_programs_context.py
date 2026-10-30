@@ -1,0 +1,212 @@
+# SPDX-FileCopyrightText: 2024-present Members of CAIIVS
+# SPDX-FileNotice: Part of chuchichaestli
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Tests for the per-entry execution context."""
+
+import pytest
+import torch
+
+from chuchichaestli.programs.context import (
+    Context,
+    C3liContextError,
+    join_path,
+    subpath,
+    split_path,
+    split_segment,
+    stage_name,
+)
+from chuchichaestli.programs.events import EventType, Progress, Signal
+
+
+def test_child_paths_are_built_from_index_and_name():
+    """The path is the one source of truth for keys, streams and labels."""
+    root = Context("program", seed=1)
+    child = root.child(2, "cycle").child(0, "refine")
+    assert child.path == "program/2:cycle/0:refine"
+
+
+def test_bindings_resolve_outwards():
+    """A child sees what its ancestors bound."""
+    root = Context("program", seed=1, bindings={"model": "M"})
+    assert root.child(0, "a")["model"] == "M"
+    assert "model" in root.child(0, "a")
+    assert root.child(0, "a").get("absent", "fallback") == "fallback"
+
+
+def test_bind_is_local_and_publish_reaches_later_siblings():
+    """Children inherit what a stage binds; results must outlive it."""
+    root = Context("program", seed=1)
+    first, second = root.child(0, "a"), root.child(1, "b")
+    first.bind("scratch", 1)
+    first.publish("a/score", 31.4)
+    assert "scratch" not in second
+    assert second["a/score"] == 31.4
+    assert first.child(0, "inner")["scratch"] == 1
+
+
+def test_unbound_names_what_is_available():
+    """The error has to be actionable, not just a KeyError."""
+    ctx = Context("program", seed=1, bindings={"model": 1})
+    with pytest.raises(C3liContextError, match="model"):
+        ctx["nope"]
+
+
+def test_resolve_accepts_objects_or_names():
+    """This is what stops a config framework instantiating a second copy."""
+    ctx = Context("program", seed=1, bindings={"model": "M"})
+    sentinel = object()
+    assert ctx.resolve("model") == "M"
+    assert ctx.resolve(sentinel) is sentinel
+
+
+def test_rng_depends_on_position_not_on_call_order():
+    """Two contexts at the same position give the same stream."""
+    root = Context("program", seed=9)
+    a, b = root.child(0, "train"), root.child(1, "eval")
+    assert a.seed_for("data") != b.seed_for("data")
+    assert a.seed_for("data") == root.child(0, "train").seed_for("data")
+    assert a.seed_for("data") != a.seed_for("noise")
+
+
+def test_cache_computes_once_per_group():
+    """Composed terms share one forward; different graphs do not."""
+    calls: list[str | None] = []
+
+    def make(ctx):
+        calls.append(ctx.group)
+        return f"x-{ctx.group}"
+
+    ctx = Context("program", seed=1)
+    gen, disc = ctx.at_group("gen"), ctx.at_group("disc")
+    assert gen.cache("recon", lambda: make(gen)) == "x-gen"
+    assert gen.cache("recon", lambda: make(gen)) == "x-gen"
+    assert disc.cache("recon", lambda: make(disc)) == "x-disc"
+    assert calls == ["gen", "disc"]
+
+
+def test_clear_cache_is_shared_by_group_views():
+    """One clear at the end of a step drops every group's intermediates."""
+    ctx = Context("program", seed=1)
+    gen = ctx.at_group("gen")
+    gen.cache("k", lambda: 1)
+    ctx.clear_cache()
+    assert gen.cache("k", lambda: 2) == 2
+
+
+def test_child_gets_a_fresh_cache():
+    """A child stage is a different scope, not a continuation."""
+    ctx = Context("program", seed=1)
+    ctx.cache("k", lambda: 1)
+    assert ctx.child(0, "a").cache("k", lambda: 2) == 2
+
+
+def test_emit_builds_the_event_from_path_and_progress():
+    """A stage says what happened; the context knows where and when."""
+    seen = []
+
+    def dispatch(event):
+        seen.append(event)
+        return Signal.GO
+
+    ctx = Context("program", seed=1, dispatch=dispatch)
+    ctx.progress = Progress(step=4)
+    assert ctx.emit(EventType.STEP_ENDED, loss=0.25) is Signal.GO
+    assert seen[0].path == "program"
+    assert seen[0].progress.step == 4
+    assert seen[0].payload == {"loss": 0.25}
+
+
+def test_emit_without_a_dispatcher_is_a_no_op():
+    """A context built outside a run is still usable."""
+    assert Context("p", seed=1).emit(EventType.RUN_BEGAN) is Signal.GO
+
+
+def test_stateful_lists_only_the_bindings_that_carry_state():
+    """A checkpoint wants the models and optimizers, not the scalars."""
+    model = torch.nn.Linear(2, 2)
+    ctx = Context("program")
+    ctx.bind("model", model)
+    ctx.bind("optim", torch.optim.Adam(model.parameters()))
+    ctx.bind("threshold", 0.5)
+    ctx.bind("name", "unet")
+    assert sorted(ctx.stateful()) == ["model", "optim"]
+    assert ctx.stateful()["model"] is model
+
+
+def test_stateful_sees_what_an_enclosing_context_bound():
+    """Bindings resolve outwards, and so does this."""
+    root = Context("program")
+    root.bind("model", torch.nn.Linear(2, 2))
+    child = root.child(0, "train")
+    child.bind("optim", torch.optim.Adam(root["model"].parameters()))
+    assert sorted(child.stateful()) == ["model", "optim"]
+    assert sorted(root.stateful()) == ["model"]
+
+
+def test_restored_counts_reach_every_child():
+    """A child counts into the same dict, so a restore must reach it too."""
+    root = Context("program", 0)
+    child = root.child(0, "fit")
+    root.restore_counts({"step": 12, "epoch": 3})
+    assert child.counts() == {"advance": 0, "epoch": 3, "step": 12}
+    child.emit(EventType.STEP_ENDED, trains=True)
+    assert root.count("step") == 13
+
+
+def test_a_segment_splits_back_into_what_joined_it():
+    """Building and parsing a path must agree, or a resume finds the wrong stage."""
+    path = join_path("program/0:repeat", 2, "fit")
+    assert path == Context("program/0:repeat", 0).child(2, "fit").path
+    assert split_segment(path.rsplit("/", 1)[-1]) == (2, "fit")
+
+
+def test_the_root_segment_has_no_position():
+    """The root is named, not numbered."""
+    assert split_segment("program") == (None, "program")
+
+
+@pytest.mark.parametrize(
+    ("path", "name"),
+    [
+        ("program/0:epoch/0:fit", "fit"),
+        ("program/1:check", "check"),
+        ("program", "program"),
+    ],
+)
+def test_a_path_names_the_stage_it_ends_in(path, name):
+    """Visits of one stage under `each_pass` share its name, whatever the visit."""
+    assert stage_name(path) == name
+
+
+@pytest.mark.parametrize(
+    ("path", "key", "expected"),
+    [
+        ("program/0:fit", "model", "program/0:fit/model"),
+        ("", 3, "3"),
+        ("program", "", "program"),
+    ],
+)
+def test_a_subpath_leaves_empty_parts_out(path, key, expected):
+    """One spelling for bindings, seeds and tree paths alike."""
+    assert subpath(path, key) == expected
+
+
+def test_a_path_splits_into_the_segments_that_built_it():
+    """`split_path` reads back what `join_path` wrote, root included."""
+    path = join_path(join_path("program", 1, "cycle"), 0, "fit")
+    assert split_path(path) == [(None, "program"), (1, "cycle"), (0, "fit")]
+
+
+def test_a_stage_s_seeds_are_derived_from_its_subpaths():
+    """Seeds must not move: a resumed run draws what the interrupted one drew."""
+    from chuchichaestli.utils.rng import derive_seed
+
+    ctx = Context("program/0:fit", 7)
+    assert ctx.seed_for("noise") == derive_seed(7, "program/0:fit/noise")
+    assert ctx.seed_for() == derive_seed(7, "program/0:fit")
+
+
+def test_an_unseeded_context_takes_the_seed_torch_was_given():
+    """As a Runner does, so a context built by hand derives from the same root."""
+    torch.manual_seed(17)
+    assert (Context("program").seed, Context("program", 3).seed) == (17, 3)

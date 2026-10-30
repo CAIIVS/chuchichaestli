@@ -68,13 +68,13 @@ then the following creates a dataset with 16 MiB of shared memory allocation to
 cache image tensors read from the H5 MNIST dataset (test scenario 13)
 
 ```python
---8<-- "examples/hdf5_dataset.py:build"
+--8<-- "examples/dataset_hdf5.py:build"
 ```
 
 [ZipHDF5Dataset][chuchichaestli.data.ZipHDF5Dataset] reads multiple sample
 groups in parallel
 ```python
---8<-- "examples/zip_hdf5_dataset.py:build"
+--8<-- "examples/dataset_zip_hdf5.py:build"
 ```
 
 #### Procedural toy datasets
@@ -94,20 +94,20 @@ for reproducibility, generating in pure PyTorch into the same
 shared-memory cache as the file-backed datasets.
 
 ```python
---8<-- "examples/procedural_datasets.py:build"
+--8<-- "examples/dataset_procedural.py:build"
 ```
 
 The shapes are not restricted to the plane; raise `dim` to embed them in
 a volume instead.
 
 ```python
---8<-- "examples/procedural_datasets.py:swissroll"
+--8<-- "examples/dataset_procedural.py:swissroll"
 ```
 
 Finally, you can also wrap your own generator function with
 [generate_procedural_dataset][chuchichaestli.data.generate_procedural_dataset].
 
-Running `examples/procedural_datasets.py` renders all preset generators:
+Running `examples/dataset_procedural.py` renders all preset generators:
 
 ![Scatter plots of six procedural toy datasets: two interleaving half
 moons, two interlocking spiral arms, two concentric rings, and six
@@ -138,7 +138,7 @@ convolutional, whereas the lowest levels include a mixture of attention and
 (transposed) convolutional layers.
 
 ```python
---8<-- "examples/unet_visualization.py:unet"
+--8<-- "examples/visualization_unet.py:unet"
 ```
 
 [`summary`][chuchichaestli.utils.info.summary] provides a torchinfo-style 
@@ -146,7 +146,7 @@ text table (no extra dependency) that allows for detailed inspection of any
 model
 
 ```python
---8<-- "examples/unet_visualization.py:summary"
+--8<-- "examples/visualization_unet.py:summary"
 ```
 
 Similarly, you can build other models such as a Variational Auto-encoder (VAE)
@@ -155,7 +155,7 @@ U-Net, but misses skip connections and instead includes a stochastic regularizat
 in the lowest layer (the latent)
 
 ```python
---8<-- "examples/vae_visualization.py:vae"
+--8<-- "examples/visualization_vae.py:vae"
 ```
 
 Autoencoders take their two components as arguments, so an encoder and a decoder
@@ -205,6 +205,71 @@ model:
 ```
 
 
+### Training and the runner
+
+The [training][chuchichaestli.training] module provides utilities for fitting
+models. [`OptimSpec`][chuchichaestli.training.optim.OptimSpec] describes how
+to construct optimizer and schedulers, so a training loop can use them once it
+knows which parameters it owns.
+`with_warmup` runs any schedule ahead of the attached one, e.g.
+`OptimSpec.adamw(lr=1e-3).with_cosine_schedule(90).with_warmup("linear", 10, start_factor=0.01)`.
+A plateau schedule can follow a warmup too, which torch's `SequentialLR` does
+not allow. For more than two schedules,
+[`SequentialSchedulerSpec`][chuchichaestli.training.optim.SequentialSchedulerSpec]
+runs any number of them, each counting from zero when it takes over.
+[`Term`][chuchichaestli.training.objective.Term] is one named, weighted
+contribution to a composite objective, and
+[`Loss`][chuchichaestli.training.objective.Loss] carries a total computation
+as sum of its parts.
+
+The [programs][chuchichaestli.programs] module allows to construct model
+programs. Training and inference are the same kind of thing here: both are
+stages, and a run is a list of them.
+
+- [`Train`][chuchichaestli.programs.stages.Train] is a stage loop — it draws
+  batches, computes the loss and steps the optimizer.
+- [`Program`][chuchichaestli.programs.stages.Program] holds the stages and the
+  contextual bindings they share.
+- [`Runner`][chuchichaestli.programs.runner.Runner] runs the program and
+  reports everything that happens as
+  [`Event`][chuchichaestli.programs.events.Event] signals.
+- A [`Hook`][chuchichaestli.programs.traits.Hook] watches those events:
+  [`Console`][chuchichaestli.programs.hooks.Console] prints them,
+  [`Checkpointer`][chuchichaestli.programs.hooks.Checkpointer] writes
+  checkpoints, [`Jsonl`][chuchichaestli.programs.hooks.Jsonl] records a trace.
+
+#### Example
+
+Initialize a model, and the data to fit it on:
+
+```python
+--8<-- "examples/programs_train.py:setup"
+```
+
+The stage says what to fit and for how long; the program says what the stages
+share. `model="model"` names a binding instead of holding the module.
+
+```python
+--8<-- "examples/programs_train.py:program"
+```
+
+The objective is a list of named `Term`s: the stage reports them as a composite
+loss, for instance `loss=0.07237 mse=0.05756 mae=0.1481`. A single `loss=` 
+argument is shorthand for one unnamed term.
+
+Nothing has run yet — a program is a description. `Runner` executes it and
+hands every event to the hooks, so what a run reports is chosen at the call
+site rather than baked into the loop.
+
+```python
+--8<-- "examples/programs_train.py:run"
+```
+
+That is a simple but complete run. Everything else is more stages: `Predict` and
+`Eval` for inference, `Phase` to nest and repeat them, `Checkpointer` and
+`resume=` to survive an interruption. See [Programs](programs.md) for more
+advanced examples.
+
 ### Visualization
 
 The [visualization][chuchichaestli.utils.visualization] utilities turn a model
@@ -232,7 +297,7 @@ to produce publication-ready illustrations.
 encode (`component`, `type`, or `name`); `node_size` is `small`/`medium`/`large`.
 
 ```python
---8<-- "examples/unet_visualization.py:matplotlib"
+--8<-- "examples/visualization_unet.py:matplotlib"
 ```
 
 An *exemplary zoom* callout expands a block into its layers: `zoom=True`
@@ -241,7 +306,7 @@ places the inset (right/left/top/bottom, the four corners, or center); pass a
 list of `ZoomSpec`s to draw several at once.
 
 ```python
---8<-- "examples/unet_visualization.py:zoom"
+--8<-- "examples/visualization_unet.py:zoom"
 ```
 
 ![U-Net block-level diagram with two exemplary-zoom insets expanding an encoder
@@ -263,7 +328,7 @@ can be dragged to fine-tune the layout. The overall flow is controlled with
 the encoder/decoder subgraphs; skip connections render as dashed edges.
 
 ```python
---8<-- "examples/unet_visualization.py:mermaid"
+--8<-- "examples/visualization_unet.py:mermaid"
 ```
 
 Runnable end-to-end scripts for a U-Net, a VAE, a PatchGAN discriminator, and

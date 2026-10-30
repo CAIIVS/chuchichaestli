@@ -706,3 +706,101 @@ class TestSlidingWindowBatchSampler:
         )
         assert sampler.boundaries == [0, 5]
         assert max(i for b in sampler for i in b) < 5
+
+
+SHUFFLING = [
+    pytest.param(
+        lambda **kw: HierarchicalBatchSampler(
+            [[i, i + 1] for i in range(0, 40, 2)], shuffle=True, **kw
+        ),
+        id="hierarchical",
+    ),
+    pytest.param(
+        lambda **kw: HierarchicalFileBatchSampler(
+            make_file_dataset([(f"f{i:02d}.h5", 2) for i in range(20)]),
+            key_fn=lambda p: p.stem,
+            batch_size=2,
+            shuffle=True,
+            **kw,
+        ),
+        id="file",
+    ),
+    pytest.param(
+        lambda **kw: SlidingWindowBatchSampler(
+            SizedSeq(40), window_size=2, stride=2, shuffle=True, **kw
+        ),
+        id="sliding",
+    ),
+]
+
+
+@pytest.mark.parametrize("make", SHUFFLING)
+class TestShuffleOrder:
+    """Each pass's order derives from the seed and the epoch."""
+
+    def test_the_same_seed_gives_the_same_passes(self, make):
+        """Two samplers seeded alike agree pass by pass."""
+        a, b = make(seed=3), make(seed=3)
+        assert [list(a), list(a)] == [list(b), list(b)]
+
+    def test_each_pass_moves_on_an_epoch(self, make):
+        """Without set_epoch, consecutive passes are ordered differently."""
+        sampler = make(seed=3)
+        assert list(sampler) != list(sampler)
+
+    def test_set_epoch_picks_the_pass(self, make):
+        """A resumed loader can jump straight to the epoch it stopped in."""
+        whole = make(seed=3)
+        list(whole)
+        resumed = make(seed=3)
+        resumed.set_epoch(1)
+        assert list(resumed) == list(whole)
+
+    def test_an_unseeded_sampler_draws_its_seed_from_torch(self, make):
+        """Two unseeded samplers differ, and repeat once torch is seeded again."""
+        torch.manual_seed(0)
+        first, second = list(make()), list(make())
+        torch.manual_seed(0)
+        assert first != second
+        assert list(make()) == first
+
+    def test_a_generator_overrides_the_seed(self, make):
+        """The order is then drawn from the generator's own stream."""
+        a = make(seed=3, generator=torch.Generator().manual_seed(5))
+        b = make(seed=4, generator=torch.Generator().manual_seed(5))
+        assert list(a) == list(b)
+
+    def test_a_pass_leaves_the_global_stream_alone(self, make):
+        """Only an unseeded sampler draws from it, and only once, when built."""
+        sampler = make(seed=3)
+        torch.manual_seed(0)
+        expected = torch.rand(2)
+        torch.manual_seed(0)
+        list(sampler)
+        assert torch.equal(torch.rand(2), expected)
+
+
+def test_a_sampler_that_keeps_its_order_draws_no_seed():
+    """Not shuffling, it has no use for one and leaves the stream as it was."""
+    torch.manual_seed(0)
+    expected = torch.rand(2)
+    torch.manual_seed(0)
+    sampler = HierarchicalBatchSampler([[0, 1], [2, 3]])
+    assert (sampler.seed, torch.equal(torch.rand(2), expected)) == (None, True)
+
+
+def test_switching_shuffle_on_later_draws_the_seed_then():
+    """The seed is drawn as shuffling starts, so torch's seed still decides it."""
+
+    def switched_on():
+        sampler = SlidingWindowBatchSampler(SizedSeq(40), window_size=2, stride=2)
+        in_order = list(sampler)
+        sampler.shuffle = True
+        return sampler, in_order
+
+    torch.manual_seed(0)
+    first, in_order = switched_on()
+    torch.manual_seed(0)
+    again, _ = switched_on()
+    assert first.seed is not None
+    assert list(first) == list(again) != in_order
