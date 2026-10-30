@@ -463,7 +463,7 @@ class CheckpointStore:
         shutil.rmtree(retired, ignore_errors=True)
         directory.rename(retired)
         scratch.rename(directory)
-        shutil.rmtree(retired)
+        shutil.rmtree(retired, ignore_errors=True)
 
     def _weight_name(self, binding: str, taken: set[Path]) -> str:
         """Return a filename for a model binding, unique within a checkpoint.
