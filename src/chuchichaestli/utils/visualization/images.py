@@ -11,8 +11,6 @@ from typing import Any, Literal, get_args
 import torch
 from torch.utils.data import default_collate
 from torchvision.utils import save_image
-from chuchichaestli.data.batch import as_image_batch
-from chuchichaestli.data.transforms.intensity import MinMaxScale
 from chuchichaestli.utils.registry import require
 from chuchichaestli.utils.tensors import as_array
 from chuchichaestli.utils.visualization.base import require_mpl
@@ -78,6 +76,8 @@ def save_images(
             unknown, if there are not as many labels as rows, or if there is
             nothing to plot.
     """
+    from chuchichaestli.data.batch import as_image_batch
+
     target = Path(path)
     require(target.suffix.lower(), IMAGE_FORMATS, "image format")
     if isinstance(normalize, str):
@@ -135,6 +135,8 @@ def _to_unit(
         return [batch.clamp(0.0, 1.0) for batch in batches]
     if normalize == "image":
         return [torch.stack(_to_unit(list(batch), "batch")) for batch in batches]
+    from chuchichaestli.data.transforms.intensity import MinMaxScale
+
     low, high = normalize if isinstance(normalize, (tuple, list)) else (None, None)
     scale = MinMaxScale(low, high)
     return [scale.transform(batch).nan_to_num(0.0).clamp(0.0, 1.0) for batch in batches]
