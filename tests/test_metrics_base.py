@@ -5,12 +5,7 @@
 
 import pytest
 import torch
-from chuchichaestli.metrics.base import (
-    sanitize_ndim,
-    as_tri_channel,
-    as_batched_slices,
-    EvalMetric,
-)
+from chuchichaestli.metrics.base import EvalMetric
 
 
 class DummyTensor(torch.Tensor):
@@ -38,80 +33,6 @@ def patch_tensor_to(monkeypatch):
     """Patch torch.Tensor.to method to simulate device transfer."""
     monkeypatch.setattr(torch.Tensor, "to", lambda self, device=None, **k: self)
     yield
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        torch.rand((10, 10)),
-        torch.rand((1, 10, 10)),
-        torch.rand((1, 1, 10, 10)),
-    ],
-)
-def test_sanitize_ndim(x):
-    """Test `sanitize_ndim` function."""
-    # Test 2/3/4D input tensor
-    result = sanitize_ndim(x)
-    assert result.shape == (1, 1, 10, 10)
-
-
-def test_sanitize_ndim_invalid():
-    """Test `sanitize_ndim` function: case ValueError."""
-    # Test invalid dimensions
-    with pytest.raises(ValueError):
-        x = torch.rand((1, 1, 10, 10, 10))
-        sanitize_ndim(x)
-
-
-def test_sanitize_ndim_invalid_2_and_3D():
-    """Test `sanitize_ndim` function: case check_3D=True."""
-    with pytest.raises(ValueError):
-        x = torch.rand((1, 1, 10, 10, 10, 1))
-        sanitize_ndim(x, check_2D=True, check_3D=True)
-
-
-def test_sanitize_ndim_invalid_3D():
-    """Test `sanitize_ndim` function: case check_3D=True."""
-    with pytest.raises(ValueError):
-        x = torch.rand((1, 1, 10, 10))
-        sanitize_ndim(x, check_2D=False, check_3D=True)
-
-
-@pytest.mark.parametrize("channel", [1, 2, 3])
-def test_as_tri_channel(channel):
-    """Test `as_tri_channel` function."""
-    # Test single channel
-    x = torch.rand((1, channel, 10, 10))
-    result = as_tri_channel(x)
-    assert result.shape == (1, 3, 10, 10)
-
-
-def test_as_tri_channel_error():
-    """Test `as_tri_channel` function: case UserWarning."""
-    # Test more than 3 channels
-    x = torch.rand((1, 4, 10, 10))
-    with pytest.raises(ValueError):
-        as_tri_channel(x)
-
-
-@pytest.mark.parametrize("sample", [0, 1, 3, 4, 8])
-def test_as_batched_slices(sample):
-    """Test `as_batched_slices` function."""
-    # Test 5D input without sampling
-    x = torch.rand((2, 1, 8, 8, 4))
-    x_sliced = as_batched_slices(x, sample=sample)
-    if sample == 0:
-        target = 2 * 4
-    else:
-        target = 2 * min(sample, 4)
-    assert x_sliced.shape == (target, 1, 8, 8)
-
-
-def test_as_batched_slices_non_5D():
-    """Test `as_batched_slices` function case: non 5D."""
-    x = torch.rand((2, 3, 10, 10))
-    x_slices = as_batched_slices(x)
-    assert x_slices.shape == (2, 3, 10, 10)
 
 
 def test_EvalMetric_init_defaults():

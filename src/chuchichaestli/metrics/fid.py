@@ -9,11 +9,11 @@ import torch
 from torch.nn import Module
 from torch.nn.functional import interpolate
 from torchvision import models as tv
-from chuchichaestli.metrics.base import (
-    EvalMetric,
-    sanitize_ndim,
-    as_tri_channel,
+from chuchichaestli.metrics.base import EvalMetric
+from chuchichaestli.utils.tensors import (
     as_batched_slices,
+    as_tri_channel,
+    sanitize_ndim,
 )
 
 
@@ -74,6 +74,15 @@ class FIDInceptionV3(Module):
 
 class FID(EvalMetric):
     """Frechet inception distance."""
+
+    ADDITIVE = EvalMetric.ADDITIVE + (
+        "n_images_fake",
+        "n_images_real",
+        "aggregate_fake",
+        "aggregate_real",
+        "aggregate_cov_fake",
+        "aggregate_cov_real",
+    )
 
     def __init__(
         self,
@@ -213,10 +222,6 @@ class FID(EvalMetric):
         """
         super().to(device)
         self.model = self.model.to(device)
-        self.n_images_fake = self.n_images_fake.to(device=device)
-        self.n_images_real = self.n_images_real.to(device=device)
-        self.aggregate_fake = self.aggregate_fake.to(device=device)
-        self.aggregate_real = self.aggregate_real.to(device=device)
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ import numpy as np
 import torch
 from chuchichaestli.utils import nbytes, prod, torch_to_npy_dtype
 from typing import Protocol, Any
-from collections.abc import Generator, Iterator, KeysView, ValuesView, ItemsView
+from collections.abc import Generator, Iterator, KeysView, Mapping, ValuesView, ItemsView
 
 
 __all__ = [
@@ -31,6 +31,7 @@ __all__ = [
     "SharedDict",
     "SharedDictList",
     "serial_byte_size",
+    "shm_descr",
 ]
 
 
@@ -46,6 +47,19 @@ C_DTYPES = {
 }
 
 _SENTINEL = object()
+
+# macOS accepts at most 30 characters for a POSIX shared-memory name
+SHM_NAME_MAX = 30 - len("_states")
+
+
+def shm_descr(kind: str) -> str:
+    """Return a unique shared-memory name that fits every platform's limit.
+
+    Args:
+        kind: What the segment holds, e.g. `"arr"` or `"list"`.
+    """
+    stem = f"shm_{kind}_"
+    return stem + uuid.uuid4().hex[: SHM_NAME_MAX - len(stem)]
 
 
 class DictSerializer(Protocol):
@@ -155,7 +169,7 @@ class SharedArray:
             )
 
         self.dtype = dtype
-        self.descr = descr if descr is not None else f"shm_arr_{uuid.uuid4().hex}"
+        self.descr = descr if descr is not None else shm_descr("arr")
         self._lock = threading.Lock() if use_lock else DummyLock()
         if not shape:
             shape = (0,)
@@ -435,7 +449,7 @@ class SharedDict:
           use instead '__{key}'.
         """
         super().__init__()
-        self.descr = descr if descr is not None else f"shm_dict_{uuid.uuid4().hex}"
+        self.descr = descr if descr is not None else shm_descr("dict")
         self.allow_overwrite = True
         if isinstance(size, nbytes):
             self.cache_size = size
@@ -574,19 +588,19 @@ class SharedDict:
         """Test 'in' dictionary in shared memory."""
         return key in self.read_buffer()
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         """Test equal dictionary in shared memory."""
         return self.read_buffer() == other
 
-    def __ne__(self, other: Any) -> bool:
+    def __ne__(self, other: object) -> bool:
         """Test not equal dictionary in shared memory."""
         return self.read_buffer() != other
 
-    def __or__(self, other: Any) -> dict:
+    def __or__(self, other: Mapping[str, Any]) -> dict:
         """Test 'or' dictionary in shared memory."""
         return self.read_buffer() | other
 
-    def __ror__(self, other: Any) -> dict:
+    def __ror__(self, other: Mapping[str, Any]) -> dict:
         """Test 'or' dictionary in shared memory."""
         return other | self.read_buffer()
 
@@ -672,7 +686,7 @@ class SharedDictList:
         """
         super().__init__()
 
-        self.descr = descr if descr is not None else f"shm_list_{uuid.uuid4().hex}"
+        self.descr = descr if descr is not None else shm_descr("list")
         self.serializer = serializer
         self._lock = threading.Lock() if use_lock else DummyLock()
         self.allow_overwrite = True

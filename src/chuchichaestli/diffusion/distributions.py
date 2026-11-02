@@ -18,8 +18,15 @@ class DistributionAdapter(ABC):
     def __call__(
         self,
         shape: torch.Size,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
-        """Sample noise from the distribution."""
+        """Sample noise from the distribution.
+
+        Args:
+            shape: Shape of the noise tensor.
+            generator: Draws from this rather than the global RNG, so a
+                process owning one stays reproducible through its noise.
+        """
         pass
 
 
@@ -40,9 +47,16 @@ class HalfNormalDistribution(DistributionAdapter):
     def __call__(
         self,
         shape: torch.Size,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
-        """Sample noise from the distribution."""
-        return torch.randn(shape, device=self.device).abs() * self.scale + self.mean
+        """Sample noise from the distribution.
+
+        Args:
+            shape: Shape of the noise tensor.
+            generator: Draws from this rather than the global RNG.
+        """
+        noise = torch.randn(shape, generator=generator, device=self.device)
+        return noise.abs() * self.scale + self.mean
 
 
 class NormalDistribution(DistributionAdapter):
@@ -62,7 +76,13 @@ class NormalDistribution(DistributionAdapter):
     def __call__(
         self,
         shape: torch.Size,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
-        """Sample noise from the distribution."""
-        noise = torch.randn(shape, device=self.device)
+        """Sample noise from the distribution.
+
+        Args:
+            shape: Shape of the noise tensor.
+            generator: Draws from this rather than the global RNG.
+        """
+        noise = torch.randn(shape, generator=generator, device=self.device)
         return noise * self.scale + self.mean

@@ -9,6 +9,7 @@ from torch.nn import functional as F
 from chuchichaestli.utils import view_along_axis
 from functools import lru_cache
 from typing import Literal
+from chuchichaestli.utils.registry import require
 
 
 __all__ = [
@@ -58,11 +59,7 @@ def _sample(i: int, n: int, mode: str) -> tuple[float, int, float, float]:
     Raises:
         ValueError: If `mode` is not a known extension mode.
     """
-    if mode not in MODE_TO_CODE:
-        raise ValueError(
-            f"Unsupported signal extension mode: {mode!r}."
-            f" Use one of {sorted(MODE_TO_CODE)}."
-        )
+    require(mode, MODE_TO_CODE, "signal extension mode")
     if 0 <= i < n:
         return (1.0, i, 0.0, 0.0)
     if mode == "zero":

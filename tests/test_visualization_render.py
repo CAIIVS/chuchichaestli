@@ -201,3 +201,9 @@ def test_mermaid_mmd_export_is_utf8(tmp_path):
     assert result.returncode == 0, result.stderr
     # The VAE's reparameterization label carries non-ASCII glyphs.
     assert "\u03bc" in out.read_text(encoding="utf-8")
+
+
+def test_an_unknown_color_by_names_the_alternatives():
+    """The only diagram option whose refusal no test reached."""
+    with pytest.raises(ValueError, match="Unknown color_by 'hue'; choose from"):
+        matplotlib_diagram(_unet(), color_by="hue", input_shape=(1, 1, 64, 64))

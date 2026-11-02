@@ -6,7 +6,8 @@
 import torch
 from torch.nn import Module
 from chuchichaestli.models.maps import DIM_TO_CONV_FN_MAP
-from chuchichaestli.metrics.base import EvalMetric, sanitize_ndim
+from chuchichaestli.metrics.base import EvalMetric
+from chuchichaestli.utils.tensors import sanitize_ndim
 from typing import Literal
 from collections.abc import Sequence, Callable
 

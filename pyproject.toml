@@ -7,8 +7,8 @@ authors = [
     { name = "Philipp Denzel", email = "denp@zhaw.ch" },
     { name = "Marc Stadelmann", email = "stmd@zhaw.ch" },
     { name = "Daniel Barco", email = "baoc@zhaw.ch" },
-    { name = "Yann Billeter", email = "bily@zhaw.ch" },
-    { name = "Martin Oswald", email = "oswd@zhaw.ch" },
+    { name = "Yann Billeter"},
+    { name = "Martin Oswald"},
 ]
 maintainers = [
     { name = "Philipp Denzel", email = "denp@zhaw.ch" },
@@ -62,6 +62,22 @@ jit = [
     "ninja>=1.11",
     "setuptools>=49.4",
 ]
+# For recording a run's repository state: commit, dirtiness and diff
+git = [
+    "GitPython>=3.1.40",
+]
+# For logging a run to TensorBoard
+tensorboard = [
+    "tensorboard>=2.14",
+]
+# For logging a run to Weights & Biases
+wandb = [
+    "wandb>=0.17",
+]
+# For logging a run to MLflow; the full package brings its SQLite store
+mlflow = [
+    "mlflow>=2.10",
+]
 all = [
     "ruff==0.16.6",
     "pre-commit>=3.7.0",
@@ -74,6 +90,10 @@ all = [
     "mkdocstrings[python]>=0.30.0",
     "torch>=2.2.2",
     "matplotlib>=3.7",
+    "GitPython>=3.1.40",
+    "tensorboard>=2.14",
+    "wandb>=0.17",
+    "mlflow>=2.10",
 ]
 
 [dependency-groups]
@@ -159,6 +179,9 @@ dependencies = ["pytest", "pytest-cov"]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
+# `tests` must be importable by name: torch.multiprocessing.spawn pickles a
+# worker as `tests.<module>.<fn>` and hands the child this sys.path to load it
+pythonpath = ["."]
 
 # Testing & coverage
 [tool.coverage.run]

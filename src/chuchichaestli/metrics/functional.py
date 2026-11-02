@@ -5,7 +5,7 @@
 
 from pathlib import Path
 import torch
-from chuchichaestli.metrics.base import sanitize_ndim
+from chuchichaestli.utils.tensors import sanitize_ndim
 from chuchichaestli.metrics.ssim import SSIM
 from chuchichaestli.metrics.lpips import LPIPSLoss
 from typing import Literal

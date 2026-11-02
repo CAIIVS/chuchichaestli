@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the module tracing helpers."""
 
+import pytest
 import torch
 from torch import nn
 from chuchichaestli.utils.modules import info_forward_pass, layer_info
@@ -118,3 +119,14 @@ def test_cache_key_separates_input_dtypes():
         model, input_data=torch.zeros(1, 3, dtype=torch.int32), use_cache=True
     )
     assert long_info is not int_info
+
+
+@pytest.mark.parametrize("probe", [{"input_shape": (1, 1, 16, 16)}, {"size": 8}])
+def test_probing_a_model_leaves_the_global_stream_alone(probe):
+    """Inspecting a model must not move the draws that come after it."""
+    model = nn.Sequential(nn.Conv2d(1, 2, 3), nn.ReLU())
+    torch.manual_seed(0)
+    expected = torch.rand(3)
+    torch.manual_seed(0)
+    info_forward_pass(model, use_cache=False, **probe)
+    assert torch.equal(torch.rand(3), expected)

@@ -46,6 +46,12 @@ python313Packages.buildPythonPackage {
     torchvisionPackage
   ];
 
+  # The extras of pyproject.toml, e.g. for
+  #   python.withPackages (p: [ p.chuchichaestli ] ++ p.chuchichaestli.optional-dependencies.mlflow)
+  optional-dependencies = builtins.removeAttrs
+    (import ./extras.nix { python3Packages = python313Packages; })
+    [ "all" ];
+
   # The csrc extensions are tuned to the machine that compiles them, so the
   # package stays pure Python and the kernels are built from a dev shell.
   C3LI_SKIP_EXTENSIONS = "1";
