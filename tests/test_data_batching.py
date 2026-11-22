@@ -725,6 +725,11 @@ class TestWindowBatchSampler:
             **kwargs,
         )
 
+    @staticmethod
+    def _groups(sampler):
+        """One pass's window starts per batch, ignoring the order of either."""
+        return sorted(sorted(b[:: sampler.span]) for b in sampler)
+
     def test_without_shuffle_it_matches_the_sliding_sampler(self):
         """Only shuffling tells the two samplers apart."""
         kwargs = {"window_size": 3, "horizon": 1, "batch_size": 4}
@@ -751,24 +756,21 @@ class TestWindowBatchSampler:
         consecutive = SlidingWindowBatchSampler(
             SizedSeq(29, [0, 11, 29]), window_size=3, horizon=1, batch_size=4
         )
-
-        def groups(sampler):
-            return sorted(sorted(b[:: sampler.span]) for b in sampler)
-
-        assert groups(self._make()) != groups(consecutive)
+        assert self._groups(self._make()) != self._groups(consecutive)
 
     def test_groupings_change_between_passes(self):
-        """Each epoch groups the windows anew."""
+        """Each epoch groups the windows anew, not just reorders the batches."""
         sampler = self._make()
-        assert list(sampler) != list(sampler)
+        assert self._groups(sampler) != self._groups(sampler)
 
     def test_drop_last_keeps_only_full_batches(self):
-        """Every emitted batch holds batch_size windows."""
+        """Every emitted batch holds batch_size distinct windows."""
         sampler = self._make(drop_last=True)
         assert sampler.n_windows == 20
         batches = list(sampler)
         assert len(batches) == len(sampler) == sampler.n_windows // 4
         assert all(len(b) == 4 * sampler.span for b in batches)
+        assert len({start for b in batches for start in b[:: sampler.span]}) == 20
 
 
 SHUFFLING = [
