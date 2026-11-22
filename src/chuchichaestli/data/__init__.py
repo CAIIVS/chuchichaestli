@@ -50,6 +50,7 @@ from chuchichaestli.data.batching import (
     HierarchicalBatchSampler,
     HierarchicalFileBatchSampler,
     SlidingWindowBatchSampler,
+    WindowBatchSampler,
 )
 from chuchichaestli.data.collate import (
     SequenceCollate,
@@ -133,6 +134,7 @@ __all__ = [
     "HierarchicalBatchSampler",
     "HierarchicalFileBatchSampler",
     "SlidingWindowBatchSampler",
+    "WindowBatchSampler",
     "IndexedSample",
     "WithIndices",
     "with_indices",

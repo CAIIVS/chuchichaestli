@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import torch
 from torch.utils.data import DataLoader
-from chuchichaestli.data.batching import SlidingWindowBatchSampler
+from chuchichaestli.data.batching import SlidingWindowBatchSampler, WindowBatchSampler
 from chuchichaestli.data.collate import SlidingWindowCollate
 from chuchichaestli.data.numpy import NumpyDataset
 from chuchichaestli.data.zip import ZipDataset
@@ -120,6 +120,20 @@ class TestBatchAssembly:
         )
         assert sum(1 for _ in loader) == len(sampler)
         assert zipped.datasets[0].n_cached > 0
+
+    def test_independently_shuffled_windows_assemble_alike(self, zipped):
+        """The collate only depends on the span, not on how windows are grouped."""
+        sampler = WindowBatchSampler(
+            zipped, window_size=WINDOW, horizon=HORIZON, batch_size=BATCH, shuffle=True
+        )
+        collate = SlidingWindowCollate.from_sampler(sampler)
+        loader = DataLoader(
+            zipped, batch_sampler=sampler, collate_fn=collate, num_workers=2
+        )
+        batches = list(loader)
+        assert len(batches) == len(sampler)
+        assert all(b["main"].shape == (BATCH, WINDOW, 8, 6) for b in batches)
+        assert all(b["main_target"].shape == (BATCH, HORIZON, 8, 6) for b in batches)
 
 
 class TestPerKeyTransform:

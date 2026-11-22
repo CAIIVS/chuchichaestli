@@ -12,6 +12,7 @@ from chuchichaestli.data.batching import (
     HierarchicalBatchSampler,
     HierarchicalFileBatchSampler,
     SlidingWindowBatchSampler,
+    WindowBatchSampler,
 )
 
 
@@ -708,6 +709,70 @@ class TestSlidingWindowBatchSampler:
         assert max(i for b in sampler for i in b) < 5
 
 
+class TestWindowBatchSampler:
+    """Tests for WindowBatchSampler."""
+
+    @staticmethod
+    def _make(**kwargs):
+        """A shuffling sampler over two sequences, 8 + 15 = 23 windows."""
+        return WindowBatchSampler(
+            SizedSeq(29, [0, 11, 29]),
+            window_size=3,
+            horizon=1,
+            batch_size=4,
+            shuffle=True,
+            seed=0,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _groups(sampler):
+        """One pass's window starts per batch, ignoring the order of either."""
+        return sorted(sorted(b[:: sampler.span]) for b in sampler)
+
+    def test_without_shuffle_it_matches_the_sliding_sampler(self):
+        """Only shuffling tells the two samplers apart."""
+        kwargs = {"window_size": 3, "horizon": 1, "batch_size": 4}
+        windowed = WindowBatchSampler(SizedSeq(29, [0, 11, 29]), **kwargs)
+        sliding = SlidingWindowBatchSampler(SizedSeq(29, [0, 11, 29]), **kwargs)
+        assert list(windowed) == list(sliding)
+
+    def test_every_window_appears_once_per_pass(self):
+        """Shuffling regroups windows without losing or repeating any."""
+        sampler = self._make()
+        ordered = SlidingWindowBatchSampler(
+            SizedSeq(29, [0, 11, 29]), window_size=3, horizon=1, batch_size=4
+        )
+        assert sorted(windows_of(sampler)) == sorted(windows_of(ordered))
+
+    def test_windows_stay_whole_and_inside_their_sequence(self):
+        """Each window is still consecutive and never crosses a boundary."""
+        for w in windows_of(self._make()):
+            assert w == list(range(w[0], w[0] + 4))
+            assert w[-1] < 11 or w[0] >= 11
+
+    def test_batches_mix_windows_from_across_the_data(self):
+        """Batches regroup windows instead of reordering the consecutive groups."""
+        consecutive = SlidingWindowBatchSampler(
+            SizedSeq(29, [0, 11, 29]), window_size=3, horizon=1, batch_size=4
+        )
+        assert self._groups(self._make()) != self._groups(consecutive)
+
+    def test_groupings_change_between_passes(self):
+        """Each epoch groups the windows anew, not just reorders the batches."""
+        sampler = self._make()
+        assert self._groups(sampler) != self._groups(sampler)
+
+    def test_drop_last_keeps_only_full_batches(self):
+        """Every emitted batch holds batch_size distinct windows."""
+        sampler = self._make(drop_last=True)
+        assert sampler.n_windows == 20
+        batches = list(sampler)
+        assert len(batches) == len(sampler) == sampler.n_windows // 4
+        assert all(len(b) == 4 * sampler.span for b in batches)
+        assert len({start for b in batches for start in b[:: sampler.span]}) == 20
+
+
 SHUFFLING = [
     pytest.param(
         lambda **kw: HierarchicalBatchSampler(
@@ -730,6 +795,12 @@ SHUFFLING = [
             SizedSeq(40), window_size=2, stride=2, shuffle=True, **kw
         ),
         id="sliding",
+    ),
+    pytest.param(
+        lambda **kw: WindowBatchSampler(
+            SizedSeq(40), window_size=2, stride=2, shuffle=True, **kw
+        ),
+        id="window",
     ),
 ]
 
