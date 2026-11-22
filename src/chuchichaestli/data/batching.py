@@ -491,3 +491,24 @@ class SlidingWindowBatchSampler(HierarchicalBatchSampler):
         if self.drop_last:
             return n // self.batch_size
         return -(-n // self.batch_size)
+
+
+class WindowBatchSampler(SlidingWindowBatchSampler):
+    """Batches sliding windows that are shuffled independently of one another.
+
+    Windows are built as in `SlidingWindowBatchSampler`, but shuffling permutes
+    the windows before they are grouped, so a batch holds unrelated windows
+    instead of consecutive ones. Without shuffling both samplers agree.
+    """
+
+    def __iter__(self):
+        """Iterate one pass's batches, moving on an epoch as it starts."""
+        if not self.shuffle:
+            yield from super().__iter__()
+            return
+        starts = [self._starts[i] for i in self._permutation(len(self._starts))]
+        self.epoch += 1
+        span, size = self.span, self.batch_size
+        for i in range(len(self)):
+            chunk = starts[i * size : (i + 1) * size]
+            yield [idx for start in chunk for idx in range(start, start + span)]

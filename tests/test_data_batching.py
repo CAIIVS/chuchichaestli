@@ -12,6 +12,7 @@ from chuchichaestli.data.batching import (
     HierarchicalBatchSampler,
     HierarchicalFileBatchSampler,
     SlidingWindowBatchSampler,
+    WindowBatchSampler,
 )
 
 
@@ -708,6 +709,66 @@ class TestSlidingWindowBatchSampler:
         assert max(i for b in sampler for i in b) < 5
 
 
+class TestWindowBatchSampler:
+    """Tests for WindowBatchSampler."""
+
+    @staticmethod
+    def _make(**kwargs):
+        """A shuffling sampler over two sequences of uneven length."""
+        return WindowBatchSampler(
+            SizedSeq(30, [0, 11, 30]),
+            window_size=3,
+            horizon=1,
+            batch_size=4,
+            shuffle=True,
+            seed=0,
+            **kwargs,
+        )
+
+    def test_without_shuffle_it_matches_the_sliding_sampler(self):
+        """Only shuffling tells the two samplers apart."""
+        kwargs = {"window_size": 3, "horizon": 1, "batch_size": 4}
+        windowed = WindowBatchSampler(SizedSeq(30, [0, 11, 30]), **kwargs)
+        sliding = SlidingWindowBatchSampler(SizedSeq(30, [0, 11, 30]), **kwargs)
+        assert list(windowed) == list(sliding)
+
+    def test_every_window_appears_once_per_pass(self):
+        """Shuffling regroups windows without losing or repeating any."""
+        sampler = self._make()
+        ordered = SlidingWindowBatchSampler(
+            SizedSeq(30, [0, 11, 30]), window_size=3, horizon=1, batch_size=4
+        )
+        assert sorted(windows_of(sampler)) == sorted(windows_of(ordered))
+
+    def test_windows_stay_whole_and_inside_their_sequence(self):
+        """Each window is still consecutive and never crosses a boundary."""
+        for w in windows_of(self._make()):
+            assert w == list(range(w[0], w[0] + 4))
+            assert w[-1] < 11 or w[0] >= 11
+
+    def test_batches_mix_windows_from_across_the_data(self):
+        """A batch no longer holds a run of neighbouring windows."""
+        sampler = self._make()
+        span = sampler.span
+        runs = [
+            [b[i] for i in range(0, len(b), span)] == list(range(b[0], b[0] + 4))
+            for b in sampler
+        ]
+        assert not all(runs)
+
+    def test_groupings_change_between_passes(self):
+        """Each epoch groups the windows anew."""
+        sampler = self._make()
+        assert list(sampler) != list(sampler)
+
+    def test_drop_last_keeps_only_full_batches(self):
+        """Every emitted batch holds batch_size windows."""
+        sampler = self._make(drop_last=True)
+        batches = list(sampler)
+        assert len(batches) == len(sampler) == sampler.n_windows // 4
+        assert all(len(b) == 4 * sampler.span for b in batches)
+
+
 SHUFFLING = [
     pytest.param(
         lambda **kw: HierarchicalBatchSampler(
@@ -730,6 +791,12 @@ SHUFFLING = [
             SizedSeq(40), window_size=2, stride=2, shuffle=True, **kw
         ),
         id="sliding",
+    ),
+    pytest.param(
+        lambda **kw: WindowBatchSampler(
+            SizedSeq(40), window_size=2, stride=2, shuffle=True, **kw
+        ),
+        id="window",
     ),
 ]
 
