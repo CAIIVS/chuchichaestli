@@ -714,9 +714,9 @@ class TestWindowBatchSampler:
 
     @staticmethod
     def _make(**kwargs):
-        """A shuffling sampler over two sequences of uneven length."""
+        """A shuffling sampler over two sequences, 8 + 15 = 23 windows."""
         return WindowBatchSampler(
-            SizedSeq(30, [0, 11, 30]),
+            SizedSeq(29, [0, 11, 29]),
             window_size=3,
             horizon=1,
             batch_size=4,
@@ -728,15 +728,15 @@ class TestWindowBatchSampler:
     def test_without_shuffle_it_matches_the_sliding_sampler(self):
         """Only shuffling tells the two samplers apart."""
         kwargs = {"window_size": 3, "horizon": 1, "batch_size": 4}
-        windowed = WindowBatchSampler(SizedSeq(30, [0, 11, 30]), **kwargs)
-        sliding = SlidingWindowBatchSampler(SizedSeq(30, [0, 11, 30]), **kwargs)
+        windowed = WindowBatchSampler(SizedSeq(29, [0, 11, 29]), **kwargs)
+        sliding = SlidingWindowBatchSampler(SizedSeq(29, [0, 11, 29]), **kwargs)
         assert list(windowed) == list(sliding)
 
     def test_every_window_appears_once_per_pass(self):
         """Shuffling regroups windows without losing or repeating any."""
         sampler = self._make()
         ordered = SlidingWindowBatchSampler(
-            SizedSeq(30, [0, 11, 30]), window_size=3, horizon=1, batch_size=4
+            SizedSeq(29, [0, 11, 29]), window_size=3, horizon=1, batch_size=4
         )
         assert sorted(windows_of(sampler)) == sorted(windows_of(ordered))
 
@@ -764,6 +764,7 @@ class TestWindowBatchSampler:
     def test_drop_last_keeps_only_full_batches(self):
         """Every emitted batch holds batch_size windows."""
         sampler = self._make(drop_last=True)
+        assert sampler.n_windows == 20
         batches = list(sampler)
         assert len(batches) == len(sampler) == sampler.n_windows // 4
         assert all(len(b) == 4 * sampler.span for b in batches)
