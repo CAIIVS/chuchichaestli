@@ -747,14 +747,15 @@ class TestWindowBatchSampler:
             assert w[-1] < 11 or w[0] >= 11
 
     def test_batches_mix_windows_from_across_the_data(self):
-        """A batch no longer holds a run of neighbouring windows."""
-        sampler = self._make()
-        span = sampler.span
-        runs = [
-            [b[i] for i in range(0, len(b), span)] == list(range(b[0], b[0] + 4))
-            for b in sampler
-        ]
-        assert not all(runs)
+        """Batches regroup windows instead of reordering the consecutive groups."""
+        consecutive = SlidingWindowBatchSampler(
+            SizedSeq(29, [0, 11, 29]), window_size=3, horizon=1, batch_size=4
+        )
+
+        def groups(sampler):
+            return sorted(sorted(b[:: sampler.span]) for b in sampler)
+
+        assert groups(self._make()) != groups(consecutive)
 
     def test_groupings_change_between_passes(self):
         """Each epoch groups the windows anew."""
